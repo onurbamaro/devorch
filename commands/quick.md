@@ -1,3 +1,9 @@
+---
+description: Quick fix or small change with auto-commit
+argument-hint: <description of what to fix/change>
+model: opus
+---
+
 Quick fix or small change with auto-commit.
 
 **Input**: $ARGUMENTS (description of what to fix/change)
@@ -23,6 +29,7 @@ Quick fix or small change with auto-commit.
 
 ## Rules
 
+- Do not narrate actions. Execute directly without preamble.
 - This is for SMALL, focused changes only.
 - No Task agents. Direct implementation by the orchestrator.
 - Always validate with check-project.ts before committing.

@@ -1,3 +1,8 @@
+---
+description: Plan a testing strategy for the project
+model: opus
+---
+
 Plan a testing strategy for the project.
 
 ## Steps

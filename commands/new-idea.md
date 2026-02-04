@@ -1,3 +1,8 @@
+---
+description: Guided discovery for new projects
+model: opus
+---
+
 Guided discovery for new projects. Generates devorch context files from Q&A.
 
 ## Steps

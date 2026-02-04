@@ -1,3 +1,8 @@
+---
+description: Generate and run tests based on the test plan
+model: opus
+---
+
 Generate and run tests based on the test plan.
 
 ## Steps
@@ -38,6 +43,7 @@ Generate and run tests based on the test plan.
 
 ## Rules
 
+- Do not narrate actions. Execute directly without preamble.
 - Tests should test BEHAVIOR, not implementation.
 - Never modify implementation code to make tests pass. If implementation has bugs, note them.
 - Follow existing test patterns in the project.
