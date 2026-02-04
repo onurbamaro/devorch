@@ -47,7 +47,13 @@ Write `.devorch/plans/current.md` following the **Plan Format** below.
 
 Run `bun ~/.claude/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
 
-### 7. Report
+### 7. Auto-commit
+
+Stage and commit the plan file:
+- Stage only `.devorch/plans/current.md` (and `.devorch/plans/` directory creation)
+- Format: `chore(devorch): plan — <descriptive plan name>`
+
+### 8. Report
 
 Show classification, phases with goals, team, wave structure, then instruct: `/devorch:build 1`.
 
@@ -158,6 +164,7 @@ Quality guardrails:
 
 ## Rules
 
+- Do not narrate actions. Execute directly without preamble.
 - **PLANNING ONLY.** Do not build, write code, or deploy agents.
 - Do NOT use Task agents. Single-agent thinking operation.
 - Always validate the plan before reporting.

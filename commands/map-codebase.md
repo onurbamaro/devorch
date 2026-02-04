@@ -9,23 +9,18 @@ Map the current project's codebase and generate `.devorch/PROJECT.md` and `.devo
 
 ### 1. Collect mechanical data
 
-Run both scripts to get the baseline:
+Run both scripts **in parallel** (single message, two Bash tool calls):
 
-```
-bun ~/.claude/devorch-scripts/map-project.ts
-```
-→ tech stack, folder structure, dependencies, scripts, git history
-
-```
-bun ~/.claude/devorch-scripts/map-conventions.ts
-```
-→ naming, exports, imports, style, test framework
+- `bun ~/.claude/devorch-scripts/map-project.ts` → tech stack, folder structure, dependencies, scripts, git history
+- `bun ~/.claude/devorch-scripts/map-conventions.ts` → naming, exports, imports, style, test framework
 
 If scripts fail (no Bun, etc.), do the equivalent analysis manually.
 
 ### 2. Investigate the codebase
 
 The scripts give you surface data. Now investigate what a senior developer would look for on their first day. Go through each section below, reading actual files.
+
+**Performance rule:** Maximize parallel tool calls. For each section, first identify target files (via Glob), then read all of them in a single message with multiple parallel Read calls. Batch independent sections together — don't read one file at a time.
 
 **Entrypoint and bootstrap flow**
 - Find the main entrypoint (index.ts, main.ts, app.ts, server.ts, etc.)
@@ -85,9 +80,13 @@ Only document things that affect how builders should write code:
 
 You don't need to cover every section exhaustively. Skip sections that don't apply (e.g., no database = skip data layer). But for sections that DO apply, read the actual files — don't guess from folder names.
 
-### 3. Write PROJECT.md
+**Sampling rule:** When a section has many files (e.g., 50+ components, 20+ routes), read 3-5 representative files to identify the pattern, then document the pattern. Stop when the pattern is clear — don't read every file.
 
-Create `.devorch/PROJECT.md` combining script output + your investigation:
+### 3. Write PROJECT.md and CONVENTIONS.md
+
+Write both files **in parallel** (single message, two Write tool calls). They are independent outputs.
+
+**PROJECT.md** — combine script output + your investigation:
 
 ```markdown
 # Project: <name>
@@ -141,9 +140,7 @@ Create `.devorch/PROJECT.md` combining script output + your investigation:
 (skip if none found)
 ```
 
-### 4. Write CONVENTIONS.md
-
-Create `.devorch/CONVENTIONS.md` from script output + code reading:
+**CONVENTIONS.md** — from script output + code reading:
 
 ```markdown
 # Code Conventions
@@ -173,6 +170,12 @@ Create `.devorch/CONVENTIONS.md` from script output + code reading:
 <things a builder needs to know to avoid mistakes>
 ```
 
+### 4. Auto-commit
+
+Stage and commit the generated files:
+- Stage only `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md`
+- Format: `chore(devorch): map project and conventions`
+
 ### 5. Report
 
 Show what was generated, key findings, and suggest next steps:
@@ -181,6 +184,7 @@ Show what was generated, key findings, and suggest next steps:
 
 ## Rules
 
+- Do not narrate actions. Execute directly without preamble.
 - Do NOT use Task agents. Single-agent operation.
 - Read actual files during investigation — don't write PROJECT.md from script output alone.
 - Keep both files concise but complete. Prioritize accuracy over brevity.

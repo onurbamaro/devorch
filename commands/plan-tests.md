@@ -44,10 +44,15 @@ Plan a testing strategy for the project.
 - [Any test infrastructure to set up first]
 ```
 
-5. **Report**: Show summary of test plan and suggest `/devorch:make-tests` to generate tests.
+5. **Auto-commit**: Stage and commit the test plan:
+   - Stage only `.devorch/plans/tests.md`
+   - Format: `chore(devorch): plan tests`
+
+6. **Report**: Show summary of test plan and suggest `/devorch:make-tests` to generate tests.
 
 ## Rules
 
+- Do not narrate actions. Execute directly without preamble.
 - Organize by module/feature, NOT by build phase.
 - Prioritize: business logic > API endpoints > UI interactions > utilities.
 - Don't over-test. Focus on behavior, not implementation details.

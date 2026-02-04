@@ -75,10 +75,15 @@ Guided discovery for new projects. Generates devorch context files from Q&A.
      [Based on chosen stack — naming, file structure, patterns]
      ```
 
-5. **Next step** — Generate a ready-to-use prompt for `/devorch:make-plan` that describes the first milestone. Show it to the user.
+5. **Auto-commit** — Stage and commit the generated files:
+   - Stage only the `.devorch/` files created (PROJECT.md, ARCHITECTURE.md, CONVENTIONS.md)
+   - Format: `chore(devorch): initialize project context`
+
+6. **Next step** — Generate a ready-to-use prompt for `/devorch:make-plan` that describes the first milestone. Show it to the user.
 
 ## Rules
 
+- Do not narrate actions. Execute directly without preamble.
 - This is PURE Q&A + file generation. No code, no building.
 - Do NOT use Task agents. Single-agent conversation.
 - Keep questions concise. Don't overwhelm the user.
