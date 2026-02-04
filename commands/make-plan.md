@@ -2,7 +2,7 @@
 description: Creates a phased implementation plan with team orchestration
 argument-hint: <description of what to build/change>
 model: opus
-disallowed-tools: Task, EnterPlanMode
+disallowed-tools: EnterPlanMode
 ---
 
 Create a phased implementation plan for the project.
@@ -13,7 +13,7 @@ Create a phased implementation plan for the project.
 
 ### 1. Load context
 
-Read `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md`. If missing, suggest `/devorch:map-codebase` first.
+Read `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md`. If either is missing, stop and tell the user: "No project context found. Run `/devorch:map-codebase` first to map the project and establish coding conventions — this ensures all builders write consistent code."
 
 If `.devorch/plans/current.md` exists, ask the user if they want to archive it.
 
@@ -27,13 +27,15 @@ Determine before exploring:
 
 ### 3. Explore proportionally
 
-**Simple + Low risk** — Context files + skim 2-3 key files.
+Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base.
 
-**Medium** — Read all files that will change. Grep for affected patterns. Map dependency graph of affected code.
+**Simple + Low risk** — One Explore agent to skim the affected area.
 
-**Complex OR High risk** — Read every file in affected areas. Check dependency compatibility. Grep all usage patterns. Quantify scope (how many files, imports, patterns). Identify hidden risks (dynamic requires, native addons, platform-specific code).
+**Medium** — Launch parallel Explore agents: one per affected area (e.g., "what files import from X and how?", "how is the API layer structured?"). Use Grep directly only for quantification (counting imports, usage patterns).
 
-**Evidence-based planning**: every task must reference real files you read, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
+**Complex OR High risk** — Launch parallel Explore agents covering every affected area. Use Grep for quantification. Ask Explore agents to check dependency compatibility, identify hidden risks (dynamic requires, native addons, platform-specific code).
+
+**Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
 ### 4. Design solution (medium/complex only)
 
@@ -165,7 +167,7 @@ Quality guardrails:
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- **PLANNING ONLY.** Do not build, write code, or deploy agents.
-- Do NOT use Task agents. Single-agent thinking operation.
+- **PLANNING ONLY.** Do not build, write code, or deploy builder agents.
+- **The orchestrator NEVER reads source code files directly.** Use `Task` with `subagent_type=Explore` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches).
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.

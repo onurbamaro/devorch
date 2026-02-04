@@ -74,84 +74,77 @@ if (isComplex) {
   }
 }
 
-// --- Phases ---
-const phaseRegex = /^#{1,2}\s+Phase\s+(\d+)/gim;
-const phaseNumbers: number[] = [];
-let match: RegExpExecArray | null;
+// --- Single pass: find phases with boundaries and validate ---
+const lines = content.split("\n");
+const phaseRegex = /^#{1,2}\s+Phase\s+(\d+)/i;
 
-while ((match = phaseRegex.exec(content)) !== null) {
-  phaseNumbers.push(parseInt(match[1], 10));
+interface PhaseBounds {
+  num: number;
+  start: number;
+  end: number;
 }
 
-if (phaseNumbers.length === 0) {
+const phases: PhaseBounds[] = [];
+
+for (let i = 0; i < lines.length; i++) {
+  const match = lines[i].match(phaseRegex);
+  if (match) {
+    if (phases.length > 0) {
+      phases[phases.length - 1].end = i;
+    }
+    phases.push({ num: parseInt(match[1], 10), start: i, end: lines.length });
+  }
+}
+
+if (phases.length === 0) {
   errors.push("No phases found (expected ## Phase 1, ## Phase 2, ...)");
 } else {
-  for (let i = 0; i < phaseNumbers.length; i++) {
-    if (phaseNumbers[i] !== i + 1) {
-      errors.push(`Phase numbering not sequential: expected Phase ${i + 1}, got Phase ${phaseNumbers[i]}`);
-      break;
-    }
-  }
-}
-
-// --- Per-phase validation ---
-const lines = content.split("\n");
-
-for (const phaseNum of phaseNumbers) {
-  const phaseHeadingIdx = lines.findIndex((l) =>
-    new RegExp(`^#{1,2}\\s+Phase\\s+${phaseNum}\\b`, "i").test(l)
-  );
-  if (phaseHeadingIdx === -1) continue;
-
-  let phaseEnd = lines.length;
-  for (let i = phaseHeadingIdx + 1; i < lines.length; i++) {
-    if (/^#{1,2}\s+Phase\s+\d+/i.test(lines[i])) {
-      phaseEnd = i;
+  // Validate sequential numbering
+  for (let i = 0; i < phases.length; i++) {
+    if (phases[i].num !== i + 1) {
+      errors.push(`Phase numbering not sequential: expected Phase ${i + 1}, got Phase ${phases[i].num}`);
       break;
     }
   }
 
-  const phaseContent = lines.slice(phaseHeadingIdx, phaseEnd).join("\n");
+  // Per-phase validation using pre-computed boundaries
+  for (const phase of phases) {
+    const phaseContent = lines.slice(phase.start, phase.end).join("\n");
 
-  // Required sub-sections
-  const phaseRequired = [
-    { pattern: /#{2,3}\s+(Goal|Objective)/i, name: "Goal" },
-    { pattern: /#{2,3}\s+Tasks/i, name: "Tasks" },
-    { pattern: /#{2,3}\s+Execution/i, name: "Execution" },
-    { pattern: /#{2,3}\s+(Acceptance Criteria|Criteria)/i, name: "Acceptance Criteria" },
-    { pattern: /#{2,3}\s+Validation Commands?/i, name: "Validation Commands" },
-  ];
+    const phaseRequired = [
+      { pattern: /#{2,3}\s+(Goal|Objective)/i, name: "Goal" },
+      { pattern: /#{2,3}\s+Tasks/i, name: "Tasks" },
+      { pattern: /#{2,3}\s+Execution/i, name: "Execution" },
+      { pattern: /#{2,3}\s+(Acceptance Criteria|Criteria)/i, name: "Acceptance Criteria" },
+      { pattern: /#{2,3}\s+Validation Commands?/i, name: "Validation Commands" },
+    ];
 
-  for (const { pattern, name } of phaseRequired) {
-    if (!pattern.test(phaseContent)) {
-      errors.push(`Phase ${phaseNum}: missing ${name} section`);
+    for (const { pattern, name } of phaseRequired) {
+      if (!pattern.test(phaseContent)) {
+        errors.push(`Phase ${phase.num}: missing ${name} section`);
+      }
     }
-  }
 
-  // Check that Execution section has Wave definitions
-  if (/#{2,3}\s+Execution/i.test(phaseContent)) {
-    if (!/\*\*Wave \d+\*\*/i.test(phaseContent)) {
-      warnings.push(`Phase ${phaseNum}: Execution section missing Wave definitions`);
+    if (/#{2,3}\s+Execution/i.test(phaseContent)) {
+      if (!/\*\*Wave \d+\*\*/i.test(phaseContent)) {
+        warnings.push(`Phase ${phase.num}: Execution section missing Wave definitions`);
+      }
     }
-  }
 
-  // Check that tasks have structured metadata
-  const taskBlocks = phaseContent.match(/####\s+\d+\./g);
-  if (taskBlocks && taskBlocks.length > 0) {
-    const hasIds = /\*\*ID\*\*:/i.test(phaseContent);
-    const hasAssigned = /\*\*Assigned To\*\*:/i.test(phaseContent);
-    if (!hasIds) {
-      warnings.push(`Phase ${phaseNum}: tasks missing ID metadata`);
+    const taskBlocks = phaseContent.match(/####\s+\d+\./g);
+    if (taskBlocks && taskBlocks.length > 0) {
+      if (!/\*\*ID\*\*:/i.test(phaseContent)) {
+        warnings.push(`Phase ${phase.num}: tasks missing ID metadata`);
+      }
+      if (!/\*\*Assigned To\*\*:/i.test(phaseContent)) {
+        warnings.push(`Phase ${phase.num}: tasks missing Assigned To metadata`);
+      }
     }
-    if (!hasAssigned) {
-      warnings.push(`Phase ${phaseNum}: tasks missing Assigned To metadata`);
-    }
-  }
 
-  // Check handoff exists (except for last phase)
-  if (phaseNum < phaseNumbers.length) {
-    if (!/#{2,3}\s+Handoff/i.test(phaseContent)) {
-      warnings.push(`Phase ${phaseNum}: missing Handoff section`);
+    if (phase.num < phases.length) {
+      if (!/#{2,3}\s+Handoff/i.test(phaseContent)) {
+        warnings.push(`Phase ${phase.num}: missing Handoff section`);
+      }
     }
   }
 }

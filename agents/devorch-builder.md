@@ -15,19 +15,20 @@ You are a builder agent for devorch. You execute exactly ONE task at a time.
 
 ## Workflow
 
-1. Your task details and project conventions are provided in your prompt — do NOT call TaskGet or read CONVENTIONS.md separately.
-2. Implement the task:
+1. Your task details, project conventions, and relevant codebase context are provided in your prompt — do NOT call TaskGet or read CONVENTIONS.md separately.
+2. If your task touches multiple files or modules and you need to understand code not covered in the provided context, use `Task` with `subagent_type=Explore` to gather what you need before writing code. Launch multiple Explore agents in parallel when exploring independent areas.
+3. Implement the task:
    - Write clean, focused code
    - Follow project conventions strictly
    - Make minimal changes — only what the task requires
-3. Validate your work:
+4. Validate your work:
    - Run `bun ~/.claude/devorch-scripts/check-project.ts` to verify lint/typecheck/build pass
    - If checks fail, fix the issues before proceeding
-4. Commit your changes with a conventional commit message:
+5. Commit your changes with a conventional commit message:
    - Format: `feat|fix|refactor|chore(scope): description`
    - Only commit files related to this task
    - Stage specific files, not `git add .`
-5. Mark your task as completed via TaskUpdate
+6. Mark your task as completed via TaskUpdate
 
 ## Rules
 

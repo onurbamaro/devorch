@@ -14,9 +14,12 @@ Execute one phase of the current devorch plan.
 
 2. **Read and execute**: Read the extracted output. It contains the phase goal, tasks, execution waves, acceptance criteria, and validation commands. Execute it:
    - Read `.devorch/CONVENTIONS.md` once (if it exists) before deploying any builders.
+   - **Load previous context**: If this is phase 2+, read `.devorch/state.md` for previous phase summaries and the plan's **Handoff** section for the prior phase. Pass relevant handoff context to Explore agents so they don't re-explore already-understood areas.
+   - **Explore context**: Before deploying builders, identify which areas of the codebase are relevant to this phase's tasks. Launch parallel `Task` agents with `subagent_type=Explore` to gather context (e.g., one per distinct area: "how does the auth module work?", "what patterns does the API layer use?"). **CRITICAL: Do NOT read source files directly in the orchestrator. All codebase exploration must happen through Explore agents. The orchestrator only reads devorch files (plans, state, conventions). Builders read their own source files as needed.**
+   - **Filter context per builder**: Each builder's prompt should include only the Explore summaries relevant to its specific task — not all summaries to all builders. Match Explore results to tasks by area/files touched.
    - Use `TaskCreate` for each task in the phase. Set up dependencies with `TaskUpdate` + `addBlockedBy` following the wave structure.
    - Deploy builders via `Task` tool following the **Execution** waves. All tasks in a wave launch as parallel agents in a single message. Wait for a wave to complete before starting the next.
-   - Each builder prompt must include: the full task details inline (so builders skip TaskGet), the conventions content inline (so builders skip reading the file), `run bun ~/.claude/devorch-scripts/check-project.ts after completing`, `commit with type(scope): description`, and `mark task completed via TaskUpdate`.
+   - Each builder prompt must include: the full task details inline (so builders skip TaskGet), only the **relevant sections** of conventions (not the entire file — pick the sections that apply to the task's scope), the filtered Explore context for that task, `run bun ~/.claude/devorch-scripts/check-project.ts after completing`, `commit with type(scope): description`, and `mark task completed via TaskUpdate`.
    - The last wave is always validation: run the phase's **Validation Commands**, run `check-project.ts`, and verify **Acceptance Criteria**.
 
 3. **Phase commit**: If there are uncommitted changes after validation passes, commit: `phase(N): <goal summary>`
@@ -37,5 +40,6 @@ Execute one phase of the current devorch plan.
 
 - Do not narrate actions. Execute directly without preamble.
 - Execute **ONE phase** per invocation.
+- **The orchestrator NEVER reads source code files directly.** Use Explore agents to gather codebase context, and pass their summaries to builders. The orchestrator only reads devorch files (`.devorch/*`), extracted phase output, and Explore agent results.
 - If a builder fails, report and stop.
 - Always update state.md, even on partial failure.

@@ -11,7 +11,7 @@ Plan a testing strategy for the project.
 
 2. **Assess project**: Run `bun ~/.claude/devorch-scripts/check-project.ts` to understand current project health and existing test infrastructure.
 
-3. **Analyze code**: Review the implemented code to identify:
+3. **Analyze code**: Launch parallel `Task` agents with `subagent_type=Explore` to investigate the codebase — one per area (e.g., "auth and business logic", "API routes and integrations", "UI components with complex behavior", "utility functions"). **Do NOT read source files directly.** From the Explore summaries, identify:
    - Critical paths that need testing (auth, data mutations, business logic)
    - Utility functions that benefit from unit tests
    - Integration points (API routes, database queries, external services)
@@ -58,6 +58,7 @@ Plan a testing strategy for the project.
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
+- **The orchestrator NEVER reads source code files directly.** Use `Task` with `subagent_type=Explore` for all code analysis. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results.
 - Organize by module/feature, NOT by build phase.
 - Prioritize: business logic > API endpoints > UI interactions > utilities.
 - Don't over-test. Focus on behavior, not implementation details.

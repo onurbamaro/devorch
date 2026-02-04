@@ -90,7 +90,7 @@ Guided discovery for new projects. Generates devorch context files from Q&A.
 
 - Do not narrate actions. Execute directly without preamble.
 - This is PURE Q&A + file generation. No code, no building.
-- Do NOT use Task agents. Single-agent conversation.
+- Single-agent conversation. The one exception: if the user asks you to look at existing code or repos for context, use `Task` with `subagent_type=Explore` (parallel when exploring independent areas). Return to single-agent Q&A after.
 - Keep questions concise. Don't overwhelm the user.
 - If the user is unsure about technical choices, make a recommendation with brief reasoning.
 - MVP scope should be achievable in 3-5 build phases.

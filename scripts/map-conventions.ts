@@ -27,7 +27,21 @@ const IGNORE = new Set([
   ".venv", "venv", "target", "vendor", ".svelte-kit", ".turbo",
 ]);
 
-function collectFiles(dir: string, maxPerDir: number): string[] {
+// --- Parse package.json once ---
+const pkgPath = join(cwd, "package.json");
+let pkgContent: string | null = null;
+if (existsSync(pkgPath)) {
+  try {
+    pkgContent = readFileSync(pkgPath, "utf-8");
+  } catch {
+    // ignore
+  }
+}
+
+// --- Collect files + colocated test count in a single traversal ---
+let colocatedTests = 0;
+
+function collectFiles(dir: string, maxPerDir: number, trackTests: boolean): string[] {
   const result: string[] = [];
   if (!existsSync(dir)) return result;
 
@@ -39,12 +53,17 @@ function collectFiles(dir: string, maxPerDir: number): string[] {
       const full = join(dir, entry);
       try {
         const stat = statSync(full);
-        if (stat.isFile() && CODE_EXTS.has(extname(entry))) {
-          result.push(full);
-          count++;
-          if (count >= maxPerDir) break;
+        if (stat.isFile()) {
+          if (trackTests && (/\.test\./.test(entry) || /\.spec\./.test(entry))) {
+            colocatedTests++;
+          }
+          if (CODE_EXTS.has(extname(entry))) {
+            result.push(full);
+            count++;
+            if (count >= maxPerDir) break;
+          }
         } else if (stat.isDirectory() && result.length < maxPerDir * 3) {
-          result.push(...collectFiles(full, 2));
+          result.push(...collectFiles(full, 2, trackTests));
         }
       } catch {
         continue;
@@ -57,29 +76,29 @@ function collectFiles(dir: string, maxPerDir: number): string[] {
   return result;
 }
 
-// --- Collect sample files ---
+// --- Collect sample files (tracks colocated tests for src/) ---
 const allSamples: string[] = [];
 
 for (const d of SAMPLE_DIRS) {
   const dir = join(cwd, d);
   if (existsSync(dir)) {
-    allSamples.push(...collectFiles(dir, 5));
+    allSamples.push(...collectFiles(dir, 5, d === "src"));
   }
 }
 
 // Fallback: root src files
 if (allSamples.length === 0) {
-  allSamples.push(...collectFiles(cwd, 10));
+  allSamples.push(...collectFiles(cwd, 10, false));
 }
 
 // Limit total
-const samples = allSamples.slice(0, 20);
+const samples = allSamples.slice(0, 12);
 
 push("# Code Conventions");
 push("");
 push(`**Analyzed**: ${samples.length} files`);
 
-// --- Analyze patterns ---
+// --- Analyze patterns (cache file contents for reuse) ---
 interface Patterns {
   camelCase: number;
   snake_case: number;
@@ -122,10 +141,13 @@ const patterns: Patterns = {
   spaces4: 0,
 };
 
+const fileContentCache = new Map<string, string>();
+
 for (const file of samples) {
   try {
     const content = readFileSync(file, "utf-8");
-    const fileLines = content.split("\n").slice(0, 100); // first 100 lines
+    fileContentCache.set(file, content);
+    const fileLines = content.split("\n").slice(0, 50);
 
     for (const line of fileLines) {
       // Naming
@@ -208,7 +230,7 @@ const indent =
       : "4 spaces";
 push(`- Indentation: **${indent}**`);
 
-// --- Test detection ---
+// --- Test detection (using cached data) ---
 heading("Testing");
 
 const testPatterns = [
@@ -220,46 +242,14 @@ const testPatterns = [
 
 const testDirs = testPatterns.filter((p) => existsSync(join(cwd, p.dir)));
 
-// Check for .test. or .spec. files in src
-let colocatedTests = 0;
-function findColocatedTests(dir: string, depth: number): void {
-  if (depth > 3) return;
-  try {
-    for (const entry of readdirSync(dir)) {
-      if (IGNORE.has(entry)) continue;
-      const full = join(dir, entry);
-      try {
-        const stat = statSync(full);
-        if (stat.isFile() && (/\.test\./.test(entry) || /\.spec\./.test(entry))) {
-          colocatedTests++;
-        } else if (stat.isDirectory()) {
-          findColocatedTests(full, depth + 1);
-        }
-      } catch {
-        continue;
-      }
-    }
-  } catch {
-    // ignore
-  }
-}
-findColocatedTests(join(cwd, "src"), 0);
-
-// Detect test framework
-const pkgPath = join(cwd, "package.json");
 let testFramework = "unknown";
-if (existsSync(pkgPath)) {
-  try {
-    const content = readFileSync(pkgPath, "utf-8");
-    if (content.includes("vitest")) testFramework = "vitest";
-    else if (content.includes("jest")) testFramework = "jest";
-    else if (content.includes("mocha")) testFramework = "mocha";
-    else if (content.includes("ava")) testFramework = "ava";
-    else if (content.includes("playwright")) testFramework = "playwright";
-    else if (content.includes("cypress")) testFramework = "cypress";
-  } catch {
-    // ignore
-  }
+if (pkgContent) {
+  if (pkgContent.includes("vitest")) testFramework = "vitest";
+  else if (pkgContent.includes("jest")) testFramework = "jest";
+  else if (pkgContent.includes("mocha")) testFramework = "mocha";
+  else if (pkgContent.includes("ava")) testFramework = "ava";
+  else if (pkgContent.includes("playwright")) testFramework = "playwright";
+  else if (pkgContent.includes("cypress")) testFramework = "cypress";
 }
 
 if (testDirs.length > 0) {
@@ -273,14 +263,10 @@ if (testDirs.length === 0 && colocatedTests === 0) {
 }
 push(`- Test framework: **${testFramework}**`);
 
-// --- Component patterns (React/Vue/Svelte) ---
-const hasReact = samples.some((f) => {
-  try {
-    return readFileSync(f, "utf-8").includes("from 'react'") || readFileSync(f, "utf-8").includes('from "react"');
-  } catch {
-    return false;
-  }
-});
+// --- Component patterns (using cached file contents) ---
+const hasReact = [...fileContentCache.values()].some(
+  (content) => content.includes("from 'react'") || content.includes('from "react"')
+);
 
 if (hasReact || samples.some((f) => f.endsWith(".tsx") || f.endsWith(".jsx"))) {
   heading("Component Patterns");
@@ -291,15 +277,13 @@ if (hasReact || samples.some((f) => f.endsWith(".tsx") || f.endsWith(".jsx"))) {
 
   for (const file of samples) {
     if (!file.endsWith(".tsx") && !file.endsWith(".jsx")) continue;
-    try {
-      const content = readFileSync(file, "utf-8");
-      if (/export (default )?function \w+/.test(content) || /const \w+ = \(/.test(content))
-        functionalComponents++;
-      if (/class \w+ extends (React\.)?Component/.test(content)) classComponents++;
-      if (/use[A-Z]\w+\(/.test(content)) hooksUsage++;
-    } catch {
-      continue;
-    }
+    const content = fileContentCache.get(file);
+    if (!content) continue;
+
+    if (/export (default )?function \w+/.test(content) || /const \w+ = \(/.test(content))
+      functionalComponents++;
+    if (/class \w+ extends (React\.)?Component/.test(content)) classComponents++;
+    if (/use[A-Z]\w+\(/.test(content)) hooksUsage++;
   }
 
   push(`- Functional components: ${functionalComponents}`);

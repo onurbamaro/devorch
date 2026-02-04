@@ -40,26 +40,7 @@ try {
 const lines = content.split("\n");
 const output: string[] = [];
 
-// --- Extract plan header (everything before first "## Phase") ---
-let firstPhaseIdx = lines.findIndex((l) => /^##\s+Phase\s+\d+/i.test(l));
-if (firstPhaseIdx === -1) {
-  // Try "# Phase N" format too
-  firstPhaseIdx = lines.findIndex((l) => /^#\s+Phase\s+\d+/i.test(l));
-}
-
-if (firstPhaseIdx === -1) {
-  // No phase headings found — output entire plan
-  console.log(content);
-  process.exit(0);
-}
-
-// Header: everything before first phase
-output.push("# Plan Context");
-output.push("");
-output.push(...lines.slice(0, firstPhaseIdx).filter((l) => l.trim() !== ""));
-output.push("");
-
-// --- Find phase boundaries ---
+// --- Single pass: find all phase boundaries ---
 interface PhaseBounds {
   num: number;
   start: number;
@@ -79,19 +60,29 @@ for (let i = 0; i < lines.length; i++) {
   }
 }
 
+if (phases.length === 0) {
+  // No phase headings found — output entire plan
+  console.log(content);
+  process.exit(0);
+}
+
+// Header: everything before first phase
+output.push("# Plan Context");
+output.push("");
+output.push(...lines.slice(0, phases[0].start).filter((l) => l.trim() !== ""));
+output.push("");
+
 // --- Extract handoff from N-1 ---
 if (phaseNum > 1) {
   const prevPhase = phases.find((p) => p.num === phaseNum - 1);
   if (prevPhase) {
     const prevLines = lines.slice(prevPhase.start, prevPhase.end);
-    // Find handoff section
     const handoffIdx = prevLines.findIndex((l) => /^#{2,3}\s+(Handoff|Output|Deliverables)/i.test(l));
     if (handoffIdx !== -1) {
       output.push("---");
       output.push("");
       output.push(`# Handoff from Phase ${phaseNum - 1}`);
       output.push("");
-      // Find next heading or end
       let endIdx = prevLines.length;
       for (let i = handoffIdx + 1; i < prevLines.length; i++) {
         if (/^#{2,3}\s+/.test(prevLines[i])) {

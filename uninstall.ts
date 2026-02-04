@@ -1,4 +1,4 @@
-import { existsSync, rmSync, readdirSync, unlinkSync } from "fs";
+import { existsSync, rmSync, readdirSync, unlinkSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -39,6 +39,28 @@ for (const { path, label, mode } of removals) {
       unlinkSync(join(path, f));
     }
     console.log(`  REMOVED ${files.length} devorch-* files from ${label}`);
+  }
+}
+
+// Remove devorch hook
+const hookPath = join(CLAUDE_HOME, "hooks", "devorch-statusline.cjs");
+if (existsSync(hookPath)) {
+  unlinkSync(hookPath);
+  console.log("  REMOVED hooks/devorch-statusline.cjs");
+}
+
+// Clean statusline from settings.json if it's ours
+const settingsPath = join(CLAUDE_HOME, "settings.json");
+if (existsSync(settingsPath)) {
+  try {
+    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    if (settings.statusLine?.command?.includes("devorch-statusline")) {
+      delete settings.statusLine;
+      writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
+      console.log("  REMOVED statusline from settings.json");
+    }
+  } catch (e) {
+    // ignore parse errors
   }
 }
 

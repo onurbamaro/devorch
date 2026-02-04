@@ -2,7 +2,7 @@
  * map-project.ts — Collects project info and outputs ~80 lines of Markdown.
  * Usage: bun ~/.claude/devorch-scripts/map-project.ts [project-dir]
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import { join, basename } from "path";
 
 const cwd = process.argv[2] || process.cwd();
@@ -14,6 +14,17 @@ const heading = (s: string) => {
   push(`## ${s}`);
   push("");
 };
+
+// --- Parse package.json once ---
+const pkgPath = join(cwd, "package.json");
+let pkg: Record<string, any> | null = null;
+if (existsSync(pkgPath)) {
+  try {
+    pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+  } catch {
+    // ignore
+  }
+}
 
 // --- Detect tech stack ---
 interface StackFile {
@@ -56,7 +67,7 @@ for (const { file, tech } of stackFiles) {
 if (detected.length === 0) detected.push("Unknown");
 push(detected.map((t) => `- ${t}`).join("\n"));
 
-// --- Folder structure (2 levels) ---
+// --- Folder structure (2 levels, using withFileTypes) ---
 heading("Structure");
 
 const IGNORE = new Set([
@@ -79,32 +90,21 @@ const IGNORE = new Set([
 
 function listDir(dir: string, depth: number, prefix: string): void {
   if (depth > 2) return;
-  let entries: string[];
+  let entries: import("fs").Dirent[];
   try {
-    entries = readdirSync(dir).filter((e) => !IGNORE.has(e) && !e.startsWith("."));
+    entries = readdirSync(dir, { withFileTypes: true }).filter(
+      (e) => !IGNORE.has(e.name) && !e.name.startsWith(".")
+    );
   } catch {
     return;
   }
 
-  const dirs = entries.filter((e) => {
-    try {
-      return statSync(join(dir, e)).isDirectory();
-    } catch {
-      return false;
-    }
-  });
-
-  const files = entries.filter((e) => {
-    try {
-      return statSync(join(dir, e)).isFile();
-    } catch {
-      return false;
-    }
-  });
+  const dirs = entries.filter((e) => e.isDirectory());
+  const files = entries.filter((e) => e.isFile());
 
   // Show files at this level (max 5)
   for (const f of files.slice(0, 5)) {
-    push(`${prefix}${f}`);
+    push(`${prefix}${f.name}`);
   }
   if (files.length > 5) {
     push(`${prefix}... +${files.length - 5} files`);
@@ -112,8 +112,8 @@ function listDir(dir: string, depth: number, prefix: string): void {
 
   // Recurse into dirs
   for (const d of dirs) {
-    push(`${prefix}${d}/`);
-    listDir(join(dir, d), depth + 1, prefix + "  ");
+    push(`${prefix}${d.name}/`);
+    listDir(join(dir, d.name), depth + 1, prefix + "  ");
   }
 }
 
@@ -122,53 +122,42 @@ push(`${basename(cwd)}/`);
 listDir(cwd, 1, "  ");
 push("```");
 
-// --- Dependencies (top 15) ---
-const pkgPath = join(cwd, "package.json");
-if (existsSync(pkgPath)) {
+// --- Dependencies (top 15, using cached pkg) ---
+if (pkg) {
   heading("Dependencies (top 15)");
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    const deps = Object.keys(pkg.dependencies || {});
-    const devDeps = Object.keys(pkg.devDependencies || {});
+  const deps = Object.keys(pkg.dependencies || {});
+  const devDeps = Object.keys(pkg.devDependencies || {});
 
-    if (deps.length > 0) {
-      push("**Production:**");
-      for (const d of deps.slice(0, 15)) {
-        push(`- ${d}: ${pkg.dependencies[d]}`);
-      }
-      if (deps.length > 15) push(`- ... +${deps.length - 15} more`);
+  if (deps.length > 0) {
+    push("**Production:**");
+    for (const d of deps.slice(0, 15)) {
+      push(`- ${d}: ${pkg.dependencies[d]}`);
     }
+    if (deps.length > 15) push(`- ... +${deps.length - 15} more`);
+  }
 
-    if (devDeps.length > 0) {
-      push("");
-      push("**Dev:**");
-      for (const d of devDeps.slice(0, 10)) {
-        push(`- ${d}: ${pkg.devDependencies[d]}`);
-      }
-      if (devDeps.length > 10) push(`- ... +${devDeps.length - 10} more`);
+  if (devDeps.length > 0) {
+    push("");
+    push("**Dev:**");
+    for (const d of devDeps.slice(0, 10)) {
+      push(`- ${d}: ${pkg.devDependencies[d]}`);
     }
-  } catch {
-    push("(could not parse package.json)");
+    if (devDeps.length > 10) push(`- ... +${devDeps.length - 10} more`);
   }
 }
 
-// --- Scripts ---
-if (existsSync(pkgPath)) {
+// --- Scripts (using cached pkg) ---
+if (pkg) {
   heading("Scripts");
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    const scripts = pkg.scripts || {};
-    const keys = Object.keys(scripts);
-    if (keys.length > 0) {
-      for (const k of keys.slice(0, 15)) {
-        push(`- \`${k}\`: ${scripts[k]}`);
-      }
-      if (keys.length > 15) push(`- ... +${keys.length - 15} more`);
-    } else {
-      push("(no scripts defined)");
+  const scripts = pkg.scripts || {};
+  const keys = Object.keys(scripts);
+  if (keys.length > 0) {
+    for (const k of keys.slice(0, 15)) {
+      push(`- \`${k}\`: ${scripts[k]}`);
     }
-  } catch {
-    push("(could not parse package.json)");
+    if (keys.length > 15) push(`- ... +${keys.length - 15} more`);
+  } else {
+    push("(no scripts defined)");
   }
 }
 

@@ -15,33 +15,43 @@ interface CheckResult {
 
 const results: CheckResult = {};
 
-// --- Detect available checks ---
-interface CheckDef {
-  name: string;
-  detect: () => string | null; // returns command or null
-}
-
-function detectPkgScript(name: string): string | null {
-  const pkgPath = join(cwd, "package.json");
-  if (!existsSync(pkgPath)) return null;
+// --- Parse package.json once ---
+const pkgPath = join(cwd, "package.json");
+let pkg: { scripts?: Record<string, string> } | null = null;
+if (existsSync(pkgPath)) {
   try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    const scripts = pkg.scripts || {};
-    if (scripts[name]) return name;
+    pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
   } catch {
     // ignore
   }
-  return null;
+}
+
+function detectPkgScript(name: string): string | null {
+  if (!pkg) return null;
+  const scripts = pkg.scripts || {};
+  return scripts[name] ? name : null;
 }
 
 function detectPackageManager(): string {
-  if (existsSync(join(cwd, "bun.lockb")) || existsSync(join(cwd, "bun.lock"))) return "bun run";
-  if (existsSync(join(cwd, "pnpm-lock.yaml"))) return "pnpm run";
-  if (existsSync(join(cwd, "yarn.lock"))) return "yarn";
+  const lockFiles: [string, string][] = [
+    ["bun.lockb", "bun run"],
+    ["bun.lock", "bun run"],
+    ["pnpm-lock.yaml", "pnpm run"],
+    ["yarn.lock", "yarn"],
+  ];
+  for (const [file, pm] of lockFiles) {
+    if (existsSync(join(cwd, file))) return pm;
+  }
   return "npm run";
 }
 
 const pm = detectPackageManager();
+
+// --- Define checks ---
+interface CheckDef {
+  name: string;
+  detect: () => string | null;
+}
 
 const checks: CheckDef[] = [
   {
@@ -56,7 +66,6 @@ const checks: CheckDef[] = [
     detect: () => {
       const script = detectPkgScript("typecheck") || detectPkgScript("type-check");
       if (script) return `${pm} ${script}`;
-      // Fallback: check if tsconfig exists
       if (existsSync(join(cwd, "tsconfig.json"))) {
         const npxCmd = pm.startsWith("bun") ? "bunx" : "npx";
         return `${npxCmd} tsc --noEmit`;
@@ -76,21 +85,14 @@ const checks: CheckDef[] = [
     detect: () => {
       const script = detectPkgScript("test");
       if (!script) return null;
-      // Avoid interactive test watchers
-      const pkgPath = join(cwd, "package.json");
-      try {
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-        const cmd = pkg.scripts?.test || "";
-        if (cmd === 'echo "Error: no test specified" && exit 1') return null;
-        return `${pm} ${script}`;
-      } catch {
-        return null;
-      }
+      const cmd = pkg?.scripts?.test || "";
+      if (cmd === 'echo "Error: no test specified" && exit 1') return null;
+      return `${pm} ${script}`;
     },
   },
 ];
 
-// --- Run checks ---
+// --- Run a single check ---
 async function runCheck(name: string, command: string): Promise<string> {
   const [cmd, ...args] = command.split(" ");
   try {
@@ -121,13 +123,42 @@ async function runCheck(name: string, command: string): Promise<string> {
   }
 }
 
-for (const check of checks) {
-  const command = check.detect();
-  if (!command) {
-    results[check.name] = "skip";
-    continue;
-  }
-  results[check.name] = await runCheck(check.name, command);
+// --- Run lint + typecheck in parallel, then build, then test ---
+const lintCmd = checks[0].detect();
+const typecheckCmd = checks[1].detect();
+const buildCmd = checks[2].detect();
+const testCmd = checks[3].detect();
+
+// Parallel: lint + typecheck
+const parallelChecks: Promise<[string, string]>[] = [];
+if (lintCmd) {
+  parallelChecks.push(runCheck("lint", lintCmd).then((r) => ["lint", r]));
+} else {
+  results.lint = "skip";
+}
+if (typecheckCmd) {
+  parallelChecks.push(runCheck("typecheck", typecheckCmd).then((r) => ["typecheck", r]));
+} else {
+  results.typecheck = "skip";
+}
+
+const parallelResults = await Promise.all(parallelChecks);
+for (const [name, result] of parallelResults) {
+  results[name] = result;
+}
+
+// Sequential: build
+if (buildCmd) {
+  results.build = await runCheck("build", buildCmd);
+} else {
+  results.build = "skip";
+}
+
+// Sequential: test
+if (testCmd) {
+  results.test = await runCheck("test", testCmd);
+} else {
+  results.test = "skip";
 }
 
 console.log(JSON.stringify(results, null, 2));

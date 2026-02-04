@@ -3,7 +3,7 @@ description: Map an existing project and generate devorch context files
 model: opus
 ---
 
-Map the current project's codebase and generate `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md`. These files are consumed by all other devorch commands — they must be accurate and complete.
+Map the current project's codebase and generate `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md`. These files ensure all builders write code in the same style and understand the project structure.
 
 ## Workflow
 
@@ -16,77 +16,23 @@ Run both scripts **in parallel** (single message, two Bash tool calls):
 
 If scripts fail (no Bun, etc.), do the equivalent analysis manually.
 
-### 2. Investigate the codebase
+### 2. Explore patterns
 
-The scripts give you surface data. Now investigate what a senior developer would look for on their first day. Go through each section below, reading actual files.
+The scripts detect surface-level style (naming, semicolons, quotes). Builders also need to understand deeper patterns to write consistent code. Launch parallel `Task` agents with `subagent_type=Explore` to investigate:
 
-**Performance rule:** Maximize parallel tool calls. For each section, first identify target files (via Glob), then read all of them in a single message with multiple parallel Read calls. Batch independent sections together — don't read one file at a time.
+- **Error handling** — throw vs Result type, custom error classes, error propagation, global handlers
+- **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management
+- **Active workarounds** — patterns builders must preserve and why (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER", "older modules throw, newer modules use Result type — follow Result type")
 
-**Entrypoint and bootstrap flow**
-- Find the main entrypoint (index.ts, main.ts, app.ts, server.ts, etc.)
-- Trace the initialization order: what runs first? What depends on what?
-- How does the app start in dev vs production?
+Launch these as 1-2 Explore agents (group related concerns). Skip what doesn't apply.
 
-**Configuration and environment**
-- Find .env.example, .env.local, config files
-- How are env vars loaded and validated? (dotenv, Zod, envalid, manual)
-- What are the critical env vars? (DB connection, API keys, secrets)
-
-**Architecture and key patterns**
-- What architectural pattern is used? (MVC, clean architecture, event-driven, modular, etc.)
-- How is code organized? Not just folders — what's the relationship between modules?
-- Identify dominant patterns: dependency injection, repository pattern, factory, observer, pub/sub, middleware chain
-- State management (frontend): Redux, Zustand, Context, signals, etc.
-
-**Data layer**
-- Database type and ORM/driver (Prisma, Drizzle, TypeORM, Mongoose, raw SQL, etc.)
-- Where are schemas/models defined?
-- Migrations system? Seeds?
-- If no database, how is data persisted? (API, localStorage, files)
-
-**API surface**
-- Route definitions: where are they, how are they organized?
-- REST, GraphQL, tRPC, WebSocket?
-- Middleware stack (auth, validation, error handling, logging)
-
-**Authentication and authorization**
-- Auth method: JWT, session, OAuth, API keys, none?
-- Where is auth logic? Middleware, guard, decorator?
-- Role/permission system?
-
-**External services**
-- Third-party APIs consumed (payment, email, storage, etc.)
-- Message queues, caches (Redis, RabbitMQ, etc.)
-- How are API clients structured? (shared instance, factory, per-module)
-
-**Error handling**
-- Custom error classes? Error hierarchy?
-- How are errors propagated? (throw, Result type, error codes)
-- Global error handlers (middleware, process handlers)
-- Error reporting (Sentry, logging service, etc.)
-
-**Deployment**
-- Dockerfile, docker-compose.yml
-- CI/CD pipeline (.github/workflows, .gitlab-ci.yml, etc.)
-- Hosting target (Vercel, AWS, CapRover, self-hosted, etc.)
-- Build and start commands for production
-
-**Active workarounds and constraints**
-Only document things that affect how builders should write code:
-- Workarounds a builder must preserve (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER")
-- Coexisting patterns where the builder needs to know which to follow (e.g., "older modules throw, newer modules use Result type — follow Result type")
-- Technical constraints that limit implementation choices (e.g., "Bull doesn't support X, so we do Y")
-- Do NOT catalog TODOs, FIXMEs, or general debt — these are stale opinions, not actionable constraints
-
-You don't need to cover every section exhaustively. Skip sections that don't apply (e.g., no database = skip data layer). But for sections that DO apply, read the actual files — don't guess from folder names.
-
-**Sampling rule:** When a section has many files (e.g., 50+ components, 20+ routes), read 3-5 representative files to identify the pattern, then document the pattern. Stop when the pattern is clear — don't read every file.
+**Sampling rule:** When a section has many files (50+ components, 20+ routes), read 3-5 representative files to identify the pattern. Stop when the pattern is clear.
 
 ### 3. Write PROJECT.md and CONVENTIONS.md
 
-Write both files **in parallel** (single message, two Write tool calls). They are independent outputs.
+Write both files **in parallel** (single message, two Write tool calls).
 
-**PROJECT.md** — combine script output + your investigation:
+**PROJECT.md** — from script output:
 
 ```markdown
 # Project: <name>
@@ -98,49 +44,24 @@ Write both files **in parallel** (single message, two Write tool calls). They ar
 - Framework: ...
 - Database: ...
 - Auth: ...
-- (other relevant stack items)
 
-## Architecture
-<folder tree with annotations explaining the responsibility of each area>
-
-## Entrypoint and Bootstrap
-<initialization order, what connects to what at startup>
+## Structure
+<folder tree with annotations explaining each area's responsibility>
 
 ## How to Run
 - Dev: `<command>`
 - Build: `<command>`
-- Start: `<command>`
-- Docker: `<command>` (if applicable)
-
-## Config / Env Vars
-<critical env vars grouped by purpose, how they're validated>
-
-## External Services
-<APIs, queues, caches, third-party integrations>
-
-## Data Model
-<key entities and relationships, ORM/schema location>
-(skip if no database)
-
-## Auth
-<auth method, where the logic lives>
-(skip if no auth)
+- Test: `<command>`
 
 ## Key Patterns
-<architectural patterns, error handling approach, state management>
-
-## Deployment
-<how it's deployed, CI/CD, hosting>
-
-## Important Decisions
-<technical choices, trade-offs, migration status>
+<architectural patterns, state management, data flow — from Explore findings>
 
 ## Active Workarounds
 <workarounds builders must preserve, and why they exist>
 (skip if none found)
 ```
 
-**CONVENTIONS.md** — from script output + code reading:
+**CONVENTIONS.md** — from script output + Explore findings:
 
 ```markdown
 # Code Conventions
@@ -155,13 +76,10 @@ Write both files **in parallel** (single message, two Write tool calls). They ar
 <semicolons, quotes, indentation, formatting tool>
 
 ## Error Handling
-<how errors are created, propagated, caught>
-
-## Logging
-<logger setup, conventions for log messages>
+<how errors are created, propagated, caught — from Explore findings>
 
 ## Patterns
-<component structure, hooks patterns, service patterns — whatever is specific to this project>
+<component structure, hooks patterns, service patterns — from Explore findings>
 
 ## Testing
 <framework, location, naming, coverage approach>
@@ -178,14 +96,13 @@ Stage and commit the generated files:
 
 ### 5. Report
 
-Show what was generated, key findings, and suggest next steps:
+Show what was generated, key conventions found, and suggest next steps:
 - `/devorch:make-plan "description"` for planned work
 - `/devorch:quick "description"` for small fixes
 
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- Do NOT use Task agents. Single-agent operation.
-- Read actual files during investigation — don't write PROJECT.md from script output alone.
-- Keep both files concise but complete. Prioritize accuracy over brevity.
-- If scripts fail, do full manual analysis and warn the user.
+- **The orchestrator NEVER reads source code files directly.** Use Explore agents for pattern investigation. The orchestrator only reads script output and Explore agent results.
+- Keep both files concise. CONVENTIONS.md is a reference for builders — every line should answer "how should I write this?"
+- If scripts fail, do full manual analysis via Explore agents and warn the user.

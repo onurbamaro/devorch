@@ -16,34 +16,37 @@ Generate and run tests based on the test plan.
    - Config files present (vitest.config.ts, jest.config.js, etc.)
    - If missing, set up the basics first
 
-4. **Create tasks**: Break the test plan into tasks via TaskCreate. Group by module — each task covers one module's tests.
+4. **Explore context**: Before creating tasks, launch parallel `Task` agents with `subagent_type=Explore` to understand the implementation code that will be tested (e.g., one per module in the test plan). Include gathered context summaries in each builder's prompt so they understand the code they're testing. **Do NOT read source files directly in the orchestrator.**
 
-5. **Deploy builders**: Launch Task agents (devorch-builder pattern) to write tests:
+5. **Create tasks**: Break the test plan into tasks via TaskCreate. Group by module — each task covers one module's tests.
+
+6. **Deploy builders**: Launch Task agents (devorch-builder pattern) to write tests:
    - Each builder writes tests for one module
    - Follow project conventions for test location and naming
    - Use mocks/fixtures as specified in the test plan
 
-6. **Run tests**: After all builders complete, run the test suite:
+7. **Run tests**: After all builders complete, run the test suite:
    ```
    bun ~/.claude/devorch-scripts/check-project.ts
    ```
    Also run tests directly if a test script is available.
 
-7. **Fix failures**: If tests fail:
+8. **Fix failures**: If tests fail:
    - Analyze failures
    - Fix test code (not implementation code — tests should test existing behavior)
    - Re-run until green
 
-8. **Commit**: Auto-commit all test files:
+9. **Commit**: Auto-commit all test files:
    ```
    test(scope): add unit/integration tests for [modules]
    ```
 
-9. **Report**: Show test results, coverage summary (if available), and any tests that were skipped or need manual attention.
+10. **Report**: Show test results, coverage summary (if available), and any tests that were skipped or need manual attention.
 
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
+- **The orchestrator NEVER reads source code files directly.** Use Explore agents to gather context and pass summaries to builders.
 - Tests should test BEHAVIOR, not implementation.
 - Never modify implementation code to make tests pass. If implementation has bugs, note them.
 - Follow existing test patterns in the project.
