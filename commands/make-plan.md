@@ -119,6 +119,11 @@ Quality guardrails:
 - Complexity: <complexity>
 - Risk: <risk>
 
+## Decisions
+<user choices from the clarification step — each as a one-line "Question → Answer" pair>
+<include ALL user answers that affect implementation, even if they seem obvious>
+(skip section if no clarification was needed)
+
 <if medium or complex:>
 ## Problem Statement
 <specific problem or opportunity>
