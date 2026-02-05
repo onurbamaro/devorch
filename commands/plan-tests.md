@@ -7,7 +7,7 @@ Plan a testing strategy for the project.
 
 ## Steps
 
-1. **Load context**: Read `.devorch/PROJECT.md`, `.devorch/CONVENTIONS.md`, and `.devorch/plans/current.md` if they exist.
+1. **Load context**: Read `.devorch/CONVENTIONS.md` and `.devorch/plans/current.md` if they exist.
 
 2. **Assess project**: Run `bun ~/.claude/devorch-scripts/check-project.ts` to understand current project health and existing test infrastructure.
 

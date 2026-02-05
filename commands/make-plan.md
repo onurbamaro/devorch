@@ -13,7 +13,9 @@ Create a phased implementation plan for the project.
 
 ### 1. Load context
 
-Read `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md`. If either is missing, stop and tell the user: "No project context found. Run `/devorch:map-codebase` first to map the project and establish coding conventions — this ensures all builders write consistent code."
+Read `.devorch/CONVENTIONS.md`. If missing, stop and tell the user: "No conventions found. Run `/devorch:map-codebase` first to establish coding conventions — this ensures all builders write consistent code."
+
+Run `bun ~/.claude/devorch-scripts/map-project.ts` to get fresh project data (tech stack, folder structure, dependencies, scripts, git history). Use this output as inline context for planning — do not write it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
 If `.devorch/plans/current.md` exists, ask the user if they want to archive it.
 

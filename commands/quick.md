@@ -10,7 +10,7 @@ Quick fix or small change with auto-commit.
 
 ## Steps
 
-1. **Load context**: Read `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md` if they exist. These guide coding style and project conventions.
+1. **Load context**: Read `.devorch/CONVENTIONS.md` if it exists. This guides coding style and project conventions.
 
 2. **Assess complexity**: Evaluate the requested change:
    - **Small** (1-3 files, clear scope): proceed with direct implementation

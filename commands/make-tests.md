@@ -9,7 +9,7 @@ Generate and run tests based on the test plan.
 
 1. **Load test plan**: Read `.devorch/plans/tests.md`. If it doesn't exist, tell the user to run `/devorch:plan-tests` first.
 
-2. **Load context**: Read `.devorch/PROJECT.md` and `.devorch/CONVENTIONS.md` for project conventions and test framework info.
+2. **Load context**: Read `.devorch/CONVENTIONS.md` for project conventions and test framework info.
 
 3. **Setup** (if needed): Check if test infrastructure is in place:
    - Test framework installed
