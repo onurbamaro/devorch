@@ -27,7 +27,28 @@ Determine before exploring:
 - **Complexity**: `simple` (1-2 files) | `medium` (3-10 files, some design) | `complex` (10+ files, architecture/compatibility)
 - **Risk**: `low` (additive) | `medium` (modifies behavior, shared code) | `high` (runtime/build/deps, compatibility, data)
 
-### 3. Explore proportionally
+### 3. Clarify with the user
+
+Use `AskUserQuestion` to resolve ambiguity **before** exploring. This prevents wasted exploration and wrong plans. Each question must have 2-4 clickable options so the user can answer fast (they can always type a custom answer).
+
+**Skip this step entirely** if the request is specific, self-contained, and has only one reasonable interpretation.
+
+**What to ask about** (pick only what's unclear — max 6 questions across 1-2 AskUserQuestion calls):
+
+- **Scope** — Does the user want just X, or also Y? Should it handle edge case Z?
+- **Approach** — When multiple architectures or patterns are viable, which does the user prefer?
+- **Constraints** — Backward compatibility? Performance targets? Specific libraries to use or avoid?
+- **Behavior** — What should happen on error? What's the UX for edge cases?
+- **Priority** — Speed vs completeness? MVP vs full implementation?
+- **Integration** — Should this connect to existing feature X? Replace or extend current behavior?
+
+**Guidelines:**
+- Use short, concrete options — not vague ones like "Option A" / "Option B". Each option should describe a real choice (e.g., "JWT with refresh tokens", "Session-based with Redis").
+- Front-load the recommended option and append "(Recommended)" to its label.
+- Don't ask what you can answer from the codebase — save those for the Explore step.
+- Don't ask obvious questions that the conventions or project data already answer.
+
+### 4. Explore proportionally (informed by user answers)
 
 Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base.
 
@@ -39,25 +60,25 @@ Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **D
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
-### 4. Design solution (medium/complex only)
+### 5. Design solution (medium/complex only)
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
-### 5. Create plan
+### 6. Create plan
 
 Write `.devorch/plans/current.md` following the **Plan Format** below.
 
-### 6. Validate
+### 7. Validate
 
 Run `bun ~/.claude/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
 
-### 7. Auto-commit
+### 8. Auto-commit
 
 Stage and commit the plan file:
 - Stage only `.devorch/plans/current.md` (and `.devorch/plans/` directory creation)
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
-### 8. Report
+### 9. Report
 
 Show classification, phases with goals, team, wave structure, then instruct: `/devorch:build 1`.
 
