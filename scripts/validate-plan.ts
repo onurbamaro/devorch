@@ -39,7 +39,6 @@ const requiredSections = [
   { pattern: /^#{1,2}\s+Objective/im, name: "Objective" },
   { pattern: /^#{1,2}\s+Classification/im, name: "Classification" },
   { pattern: /^#{1,2}\s+Relevant Files/im, name: "Relevant Files" },
-  { pattern: /^#{1,2}\s+Team Members/im, name: "Team Members" },
 ];
 
 for (const { pattern, name } of requiredSections) {

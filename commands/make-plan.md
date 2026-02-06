@@ -15,7 +15,7 @@ Create a phased implementation plan for the project.
 
 Read `.devorch/CONVENTIONS.md`. If missing, stop and tell the user: "No conventions found. Run `/devorch:map-codebase` first to establish coding conventions — this ensures all builders write consistent code."
 
-Run `bun ~/.claude/devorch-scripts/map-project.ts` to get fresh project data (tech stack, folder structure, dependencies, scripts, git history). Use this output as inline context for planning — do not write it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
+Check if `.devorch/PROJECT.md` exists and is recent (less than 1 day old based on git log). If so, read it directly. Otherwise, run `bun ~/.claude/devorch-scripts/map-project.ts` to get fresh project data and write the output to `.devorch/PROJECT.md`. Use this data as inline context for planning. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
 If `.devorch/plans/current.md` exists, ask the user if they want to archive it.
 
@@ -60,6 +60,21 @@ Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **D
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
+**Cache exploration results**: After all Explore agents return, write `.devorch/explore-cache.md` with the summaries:
+
+```markdown
+# Explore Cache
+Generated: <ISO timestamp>
+
+## <area-name-1>
+<Explore agent summary for this area>
+
+## <area-name-2>
+<Explore agent summary for this area>
+```
+
+This cache is reused by `/devorch:build` to avoid re-exploring the same areas. Each section title should match the area explored (e.g., "Auth module", "API routes", "Database layer").
+
 ### 5. Design solution (medium/complex only)
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
@@ -74,13 +89,13 @@ Run `bun ~/.claude/devorch-scripts/validate-plan.ts --plan .devorch/plans/curren
 
 ### 8. Auto-commit
 
-Stage and commit the plan file:
-- Stage only `.devorch/plans/current.md` (and `.devorch/plans/` directory creation)
+Stage and commit all devorch files modified in this session:
+- Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/PROJECT.md` (if created/updated)
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
 ### 9. Report
 
-Show classification, phases with goals, team, wave structure, then instruct: `/devorch:build 1`.
+Show classification, phases with goals, wave structure, then instruct: `/devorch:build 1`.
 
 ## Parallelization Rules
 
@@ -137,18 +152,6 @@ Quality guardrails:
 
 ### New Files
 <files to be created, if any>
-
-## Team Members
-
-- **<builder-name>**
-  - Role: <specific focus>
-  - Agent: devorch-builder
-
-<more builders as needed>
-
-- **validator**
-  - Role: Final validation of each phase
-  - Agent: devorch-validator
 
 ## Phase 1 — <Name>
 
