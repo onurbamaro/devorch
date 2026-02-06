@@ -29,7 +29,7 @@ For each remaining phase N (sequentially):
 1. **Launch phase agent**: Deploy a `Task` agent with `subagent_type=general-purpose`. The prompt is the full content of build.md followed by: `\n\nExecute phase ${N} of the plan at .devorch/plans/current.md`
 2. **Verify completion**: After the Task agent returns, read `.devorch/state.md`. Check that `Last completed phase:` shows N.
    - If verified → report "Phase N/Y complete." and continue to next phase.
-   - If NOT verified → stop and report: "Phase N did not complete successfully. Check agent output."
+   - If NOT verified → the phase agent handles retries internally (up to 1 retry per failed builder). If the phase still fails after retries, stop and report: "Phase N did not complete successfully. Check agent output."
 
 ### 3. Implementation check
 

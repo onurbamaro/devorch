@@ -23,7 +23,7 @@ Execute one phase of the current devorch plan.
    Each builder prompt includes:
    - Plan's **Objective** (from `<objective>`), **Solution Approach** (from `<solution-approach>`, if exists), **Decisions** (from `<decisions>`, if exists)
    - Full task details inline (builders skip TaskGet)
-   - Only the **relevant sections** of conventions
+   - Only the **relevant sections** of conventions — match convention sections to task file types (e.g., `.tsx` files → include React patterns, naming, and style conventions; backend-only tasks → skip UI conventions). When in doubt about relevance, include the section.
    - Filtered Explore context for that specific task (not all summaries to all builders)
    - `commit with type(scope): description`
    - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
@@ -32,11 +32,17 @@ Execute one phase of the current devorch plan.
 
    Poll with `TaskList` until all tasks in a wave complete. **Never call `TaskOutput`.**
 
+   **On builder failure** (background process ended, task not marked completed, no matching commit in `git log`):
+   - **First failure (0 retries)**: Read the builder's output file (path from Task launch) to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
+   - **After 1 retry**: Stop and report the failure. Do not retry further.
+
 6. **Validate**: Deploy validator in foreground (`Task` with `subagent_type=devorch-validator`). Its prompt includes inline: phase **criteria** (from `<criteria>`), **validation commands** (from `<validation>`), task summaries, relevant conventions. If FAIL → stop and report.
 
 7. **Phase commit**: If there are uncommitted changes after validation passes, commit: `phase(N): <goal summary>`
 
 8. **Invalidate and update cache**: After the phase commit, run `git diff --name-only HEAD~1..HEAD` to get files changed in this phase. For each section in `.devorch/explore-cache.md`, check if any of its described files overlap with the changed files. If so, **delete that cache section** (it's now stale — builders changed those files). Then, if new Explore agents were launched during this phase, append their summaries.
+
+   **Cache size management**: After updating, check if explore-cache.md exceeds 3000 lines. If so, trim oldest sections (those not referenced by current or next phase's relevant files) until under the limit. Sections are ordered by position — remove from top first.
 
 9. **Update state**: Write `.devorch/state.md`:
    ```markdown
