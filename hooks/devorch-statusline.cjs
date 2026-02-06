@@ -87,7 +87,7 @@ function getPhaseProgress(dir) {
       const planPath = path.join(dir, planMatch[1].trim());
       if (fs.existsSync(planPath)) {
         const plan = fs.readFileSync(planPath, 'utf8');
-        const phases = plan.match(/^##\s+Phase\s+\d+/gim);
+        const phases = plan.match(/<phase\d+\s+name="/gim);
         if (phases) total = phases.length;
       }
     }
