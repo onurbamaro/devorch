@@ -15,7 +15,7 @@ Create a phased implementation plan for the project.
 
 Read `.devorch/CONVENTIONS.md`. If missing, stop and tell the user: "No conventions found. Run `/devorch:map-codebase` first to establish coding conventions — this ensures all builders write consistent code."
 
-Check if `.devorch/PROJECT.md` exists and is recent (less than 1 day old based on git log). If so, read it directly. Otherwise, run `bun ~/.claude/devorch-scripts/map-project.ts` to get fresh project data and write the output to `.devorch/PROJECT.md`. Use this data as inline context for planning. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
+Check if `.devorch/PROJECT.md` exists and is recent (less than 1 day old based on git log). If so, read it directly. Otherwise, run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to get fresh project data and write the output to `.devorch/PROJECT.md`. Use this data as inline context for planning. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
 If `.devorch/plans/current.md` exists, ask the user if they want to archive it.
 
@@ -85,17 +85,22 @@ Write `.devorch/plans/current.md` following the **Plan Format** below.
 
 ### 7. Validate
 
-Run `bun ~/.claude/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
+Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
 
-### 8. Auto-commit
+### 8. Reset state
+
+Delete `.devorch/state.md` if it exists — a new plan means fresh state. Previous plan's progress is irrelevant.
+
+### 9. Auto-commit
 
 Stage and commit all devorch files modified in this session:
 - Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/PROJECT.md` (if created/updated)
+- If state.md was deleted, stage that deletion too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
-### 9. Report
+### 10. Report
 
-Show classification, phases with goals, wave structure, then instruct: `/devorch:build 1`.
+Show classification, phases with goals, wave structure, then instruct: `/devorch:build 1` or `/devorch:build-all`. Mention that `/devorch:check-implementation` runs automatically at the end of build-all, or can be run manually after individual builds.
 
 ## Parallelization Rules
 
@@ -120,46 +125,53 @@ Quality guardrails:
 
 ## Plan Format
 
-```markdown
+Plans use XML tags for structure. The format below is the **complete specification**.
+
+```xml
 # Plan: <descriptive name>
 
-## Task Description
+<description>
 <what we're building/changing>
+</description>
 
-## Objective
+<objective>
 <measurable goal — what's true when this plan is complete>
+</objective>
 
-## Classification
-- Type: <type>
-- Complexity: <complexity>
-- Risk: <risk>
+<classification>
+Type: <type>
+Complexity: <complexity>
+Risk: <risk>
+</classification>
 
-## Decisions
+<decisions>
 <user choices from the clarification step — each as a one-line "Question → Answer" pair>
 <include ALL user answers that affect implementation, even if they seem obvious>
 (skip section if no clarification was needed)
+</decisions>
 
-<if medium or complex:>
-## Problem Statement
+<!-- if medium or complex: -->
+<problem-statement>
 <specific problem or opportunity>
+</problem-statement>
 
-## Solution Approach
+<solution-approach>
 <approach, alternatives considered, rationale>
-</if>
+</solution-approach>
+<!-- end if -->
 
-## Relevant Files
-<files that will be touched, with bullet explaining why>
+<relevant-files>
+- `path/to/file` — why it's relevant
 
-### New Files
-<files to be created, if any>
+<new-files>
+- `path/to/new/file` — what it is
+</new-files>
+</relevant-files>
 
-## Phase 1 — <Name>
+<phase1 name="Name">
+<goal>one sentence</goal>
 
-### Goal
-<one sentence>
-
-### Tasks
-
+<tasks>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
@@ -176,24 +188,43 @@ Quality guardrails:
 - **Assigned To**: validator
 - Verify acceptance criteria
 - Run validation commands
+</tasks>
 
-### Execution
-- **Wave 1** (parallel): <task-id-a>, <task-id-b>
-- **Wave 2** (after wave 1): <task-id-c>
-- **Wave 3** (validation): validate-phase-1
+<execution>
+**Wave 1** (parallel): <task-id-a>, <task-id-b>
+**Wave 2** (after wave 1): <task-id-c>
+**Wave 3** (validation): validate-phase-1
+</execution>
 
-### Acceptance Criteria
+<criteria>
 - [ ] <measurable criterion>
+</criteria>
 
-### Validation Commands
+<validation>
 - `<command>` — <what it checks>
+</validation>
 
-### Handoff
+<test-contract>
+- <test expectation for this phase>
+(optional — include when phase produces testable behavior)
+</test-contract>
+
+<handoff>
 <what next phase needs to know>
+(required for all phases except the last)
+</handoff>
+</phase1>
 
-## Phase 2 — <Name>
-<same structure>
+<phase2 name="Name">
+<!-- same structure -->
+</phase2>
 ```
+
+### Rules
+
+- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>` (optional), `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files)
+- Phase tags: `<phaseN name="...">` where N is sequential integer
+- Inside phase: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<validation>`, `<test-contract>` (optional), `<handoff>` (except last phase)
 
 ## Rules
 
