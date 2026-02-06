@@ -4,19 +4,28 @@ argument-hint: <description of what to fix/change>
 model: opus
 ---
 
-Quick fix or small change with auto-commit.
+Quick fix, small change, bug fix, or standalone task with auto-commit.
 
 **Input**: $ARGUMENTS (description of what to fix/change)
 
 ## Steps
 
-1. **Load context**: Read `.devorch/CONVENTIONS.md` if it exists. This guides coding style and project conventions.
+1. **Load context**:
+   - Read `.devorch/CONVENTIONS.md` if it exists. This guides coding style and project conventions.
+   - Run `bun ~/.claude/devorch-scripts/map-project.ts` to get the project tree and tech stack.
 
-2. **Assess complexity**: Evaluate the requested change:
-   - **Small** (1-3 files, clear scope): proceed with direct implementation
-   - **Large** (4+ files, unclear scope, needs design): tell the user this is too big for /quick and generate a prompt for `/devorch:make-plan`
+2. **Assess complexity**: Before implementing, evaluate the requested change:
+   - **Straightforward**: Clear scope, well-defined outcome, you understand what to change → proceed
+   - **Complex**: Requires architectural decisions, unclear how components interact, multiple subsystems involved, needs design before coding → **stop and recommend make-plan**
 
-3. **Implement** (small changes only):
+   When recommending make-plan, explain briefly why the task benefits from planning and generate a ready-to-use prompt:
+   ```
+   This task would benefit from /devorch:make-plan because [reason].
+   Suggested prompt: /devorch:make-plan [task description]
+   ```
+
+3. **Implement** (straightforward changes only):
+   - Use Explore agents to understand relevant code before changing it
    - Make the changes following project conventions
    - Run `bun ~/.claude/devorch-scripts/check-project.ts` to validate
    - If checks fail, fix the issues
@@ -30,8 +39,7 @@ Quick fix or small change with auto-commit.
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- This is for SMALL, focused changes only.
-- No Task agents. Direct implementation by the orchestrator.
+- No Task agents except Explore (for understanding code before changing it).
 - Always validate with check-project.ts before committing.
 - If conventions file exists, follow it strictly.
-- If the change touches more than 3 files, stop and redirect to make-plan.
+- The complexity assessment is about cognitive complexity, not file count. A simple rename across 10 files is straightforward; a 2-file change requiring new architecture is complex.
