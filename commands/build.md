@@ -14,7 +14,7 @@ Execute one phase of the current devorch plan.
 
 2. **Extract phase**: Run `bun $CLAUDE_HOME/devorch-scripts/extract-phase.ts --plan .devorch/plans/current.md --phase N`
 
-3. **Load context from disk**: Read `.devorch/CONVENTIONS.md` and `.devorch/explore-cache.md` (if they exist). If this is phase 2+, read `.devorch/state.md` for previous phase summaries.
+3. **Load context from disk**: Read `.devorch/CONVENTIONS.md` and `.devorch/explore-cache.md` (if they exist). If this is phase 2+, read `.devorch/state.md` for the previous phase handoff (it contains only the last completed phase's summary — this is the only inter-phase context needed).
 
 4. **Explore (conditional)**: Check explore cache for areas relevant to this phase's tasks. Launch Explore agents (`Task` with `subagent_type=Explore`) only for uncovered or stale areas. Append new summaries to explore-cache.
 
@@ -44,15 +44,18 @@ Execute one phase of the current devorch plan.
 
    **Cache size management**: After updating, check if explore-cache.md exceeds 3000 lines. If so, trim oldest sections (those not referenced by current or next phase's relevant files) until under the limit. Sections are ordered by position — remove from top first.
 
-9. **Update state**: Write `.devorch/state.md`:
+9. **Update state**:
+   - If `.devorch/state.md` already exists and has a `## Phase` summary section, **append that section** to `.devorch/state-history.md` (create if needed). This preserves full history without bloating the active state file.
+   - Then **overwrite** `.devorch/state.md`:
    ```markdown
    # devorch State
    - Plan: <plan title from first heading of current.md>
    - Last completed phase: N
    - Status: ready for phase N+1
    ## Phase N Summary
-   <what was done>
+   <what was done — concise, max 5 lines>
    ```
+   state.md must contain **only the latest phase summary**. Previous summaries live in `state-history.md` and are never loaded during builds.
 
 10. **Report**: What was done, any issues, next step: `/devorch:build N+1` or `/devorch:check-implementation`
 

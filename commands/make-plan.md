@@ -89,13 +89,13 @@ Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/cur
 
 ### 8. Reset state
 
-Delete `.devorch/state.md` if it exists — a new plan means fresh state. Previous plan's progress is irrelevant.
+Delete `.devorch/state.md` and `.devorch/state-history.md` if they exist — a new plan means fresh state. Previous plan's progress is irrelevant.
 
 ### 9. Auto-commit
 
 Stage and commit all devorch files modified in this session:
 - Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/PROJECT.md` (if created/updated)
-- If state.md was deleted, stage that deletion too
+- If state.md or state-history.md were deleted, stage those deletions too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
 ### 10. Report

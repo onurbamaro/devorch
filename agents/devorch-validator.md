@@ -1,7 +1,7 @@
 ---
 name: devorch-validator
 description: "Valida 1 fase. Read-only. Inspeciona codigo e roda checks."
-model: sonnet
+model: opus
 color: yellow
 disallowedTools:
   - Write
