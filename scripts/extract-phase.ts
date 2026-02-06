@@ -40,28 +40,41 @@ try {
 const lines = content.split("\n");
 const output: string[] = [];
 
-// --- Single pass: find all phase boundaries ---
+// --- Single pass: find all phase boundaries using tags ---
+const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/i;
+const phaseCloseRegex = /<\/phase(\d+)>/i;
+
 interface PhaseBounds {
   num: number;
+  name: string;
   start: number;
-  end: number;
+  end: number; // line index of closing tag
 }
 
 const phases: PhaseBounds[] = [];
-const phaseRegex = /^#{1,2}\s+Phase\s+(\d+)/i;
 
 for (let i = 0; i < lines.length; i++) {
-  const match = lines[i].match(phaseRegex);
-  if (match) {
-    if (phases.length > 0) {
-      phases[phases.length - 1].end = i;
+  const openMatch = lines[i].match(phaseOpenRegex);
+  if (openMatch) {
+    phases.push({
+      num: parseInt(openMatch[1], 10),
+      name: openMatch[2],
+      start: i,
+      end: lines.length, // default, updated when close tag found
+    });
+  }
+  const closeMatch = lines[i].match(phaseCloseRegex);
+  if (closeMatch) {
+    const closeNum = parseInt(closeMatch[1], 10);
+    const phase = phases.find((p) => p.num === closeNum);
+    if (phase) {
+      phase.end = i + 1; // include the closing tag line
     }
-    phases.push({ num: parseInt(match[1], 10), start: i, end: lines.length });
   }
 }
 
 if (phases.length === 0) {
-  // No phase headings found — output entire plan
+  // No phase tags found — output entire plan
   console.log(content);
   process.exit(0);
 }
@@ -76,21 +89,14 @@ output.push("");
 if (phaseNum > 1) {
   const prevPhase = phases.find((p) => p.num === phaseNum - 1);
   if (prevPhase) {
-    const prevLines = lines.slice(prevPhase.start, prevPhase.end);
-    const handoffIdx = prevLines.findIndex((l) => /^#{2,3}\s+(Handoff|Output|Deliverables)/i.test(l));
-    if (handoffIdx !== -1) {
+    const prevContent = lines.slice(prevPhase.start, prevPhase.end).join("\n");
+    const handoffMatch = prevContent.match(/<handoff>([\s\S]*?)<\/handoff>/i);
+    if (handoffMatch) {
       output.push("---");
       output.push("");
       output.push(`# Handoff from Phase ${phaseNum - 1}`);
       output.push("");
-      let endIdx = prevLines.length;
-      for (let i = handoffIdx + 1; i < prevLines.length; i++) {
-        if (/^#{2,3}\s+/.test(prevLines[i])) {
-          endIdx = i;
-          break;
-        }
-      }
-      output.push(...prevLines.slice(handoffIdx, endIdx));
+      output.push(handoffMatch[1].trim());
       output.push("");
     }
   }
