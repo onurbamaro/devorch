@@ -12,7 +12,7 @@ Quick fix, small change, bug fix, or standalone task with auto-commit.
 
 1. **Load context**:
    - Read `.devorch/CONVENTIONS.md` if it exists. This guides coding style and project conventions.
-   - Run `bun ~/.claude/devorch-scripts/map-project.ts` to get the project tree and tech stack.
+   - Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to get the project tree and tech stack.
 
 2. **Assess complexity**: Before implementing, evaluate the requested change:
    - **Straightforward**: Clear scope, well-defined outcome, you understand what to change → proceed
@@ -25,9 +25,9 @@ Quick fix, small change, bug fix, or standalone task with auto-commit.
    ```
 
 3. **Implement** (straightforward changes only):
-   - Use Explore agents to understand relevant code before changing it
+   - Use Explore agents (model: opus) to understand relevant code before changing it
    - Make the changes following project conventions
-   - Run `bun ~/.claude/devorch-scripts/check-project.ts` to validate
+   - Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` to validate
    - If checks fail, fix the issues
 
 4. **Auto-commit**: Commit with a conventional message:
