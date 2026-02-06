@@ -33,24 +33,24 @@ try {
 const errors: string[] = [];
 const warnings: string[] = [];
 
-// --- Required top-level sections ---
-const requiredSections = [
-  { pattern: /^#{1,2}\s+(Task Description|Description)/im, name: "Task Description" },
-  { pattern: /^#{1,2}\s+Objective/im, name: "Objective" },
-  { pattern: /^#{1,2}\s+Classification/im, name: "Classification" },
-  { pattern: /^#{1,2}\s+Relevant Files/im, name: "Relevant Files" },
+// --- Required top-level tags ---
+const requiredTags = [
+  { pattern: /<description>[\s\S]*?<\/description>/i, name: "description" },
+  { pattern: /<objective>[\s\S]*?<\/objective>/i, name: "objective" },
+  { pattern: /<classification>[\s\S]*?<\/classification>/i, name: "classification" },
+  { pattern: /<relevant-files>[\s\S]*?<\/relevant-files>/i, name: "relevant-files" },
 ];
 
-for (const { pattern, name } of requiredSections) {
+for (const { pattern, name } of requiredTags) {
   if (!pattern.test(content)) {
     errors.push(`Missing required section: ${name}`);
   }
 }
 
 // --- Classification validation ---
-const classificationMatch = content.match(/## Classification[\s\S]*?(?=\n## )/);
+const classificationMatch = content.match(/<classification>([\s\S]*?)<\/classification>/i);
 if (classificationMatch) {
-  const classBlock = classificationMatch[0];
+  const classBlock = classificationMatch[1];
   if (!/Type:\s*(feature|fix|refactor|migration|chore|enhancement)/i.test(classBlock)) {
     errors.push("Classification: missing or invalid Type");
   }
@@ -65,38 +65,42 @@ if (classificationMatch) {
 // --- Check conditional sections for medium/complex ---
 const isComplex = /Complexity:\s*(medium|complex)/i.test(content);
 if (isComplex) {
-  if (!/^#{1,2}\s+Problem Statement/im.test(content)) {
-    warnings.push("Medium/complex plan missing Problem Statement section");
+  if (!/<problem-statement>[\s\S]*?<\/problem-statement>/i.test(content)) {
+    warnings.push("Medium/complex plan missing <problem-statement> section");
   }
-  if (!/^#{1,2}\s+Solution Approach/im.test(content)) {
-    warnings.push("Medium/complex plan missing Solution Approach section");
+  if (!/<solution-approach>[\s\S]*?<\/solution-approach>/i.test(content)) {
+    warnings.push("Medium/complex plan missing <solution-approach> section");
   }
 }
 
-// --- Single pass: find phases with boundaries and validate ---
-const lines = content.split("\n");
-const phaseRegex = /^#{1,2}\s+Phase\s+(\d+)/i;
-
+// --- Phase detection using open/close tags ---
 interface PhaseBounds {
   num: number;
-  start: number;
-  end: number;
+  name: string;
+  content: string;
 }
 
 const phases: PhaseBounds[] = [];
+const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/gi;
+let phaseMatch: RegExpExecArray | null;
 
-for (let i = 0; i < lines.length; i++) {
-  const match = lines[i].match(phaseRegex);
-  if (match) {
-    if (phases.length > 0) {
-      phases[phases.length - 1].end = i;
-    }
-    phases.push({ num: parseInt(match[1], 10), start: i, end: lines.length });
+while ((phaseMatch = phaseOpenRegex.exec(content)) !== null) {
+  const num = parseInt(phaseMatch[1], 10);
+  const name = phaseMatch[2];
+  const openEnd = phaseMatch.index + phaseMatch[0].length;
+  const closeTag = new RegExp(`<\\/phase${num}>`, "i");
+  const closeMatch = closeTag.exec(content.slice(openEnd));
+
+  if (closeMatch) {
+    const phaseContent = content.slice(openEnd, openEnd + closeMatch.index);
+    phases.push({ num, name, content: phaseContent });
+  } else {
+    errors.push(`Phase ${num}: missing closing </phase${num}> tag`);
   }
 }
 
 if (phases.length === 0) {
-  errors.push("No phases found (expected ## Phase 1, ## Phase 2, ...)");
+  errors.push('No phases found (expected <phase1 name="...">...</phase1>, <phase2 name="...">..., etc.)');
 } else {
   // Validate sequential numbering
   for (let i = 0; i < phases.length; i++) {
@@ -106,16 +110,16 @@ if (phases.length === 0) {
     }
   }
 
-  // Per-phase validation using pre-computed boundaries
+  // Per-phase validation
   for (const phase of phases) {
-    const phaseContent = lines.slice(phase.start, phase.end).join("\n");
+    const phaseContent = phase.content;
 
     const phaseRequired = [
-      { pattern: /#{2,3}\s+(Goal|Objective)/i, name: "Goal" },
-      { pattern: /#{2,3}\s+Tasks/i, name: "Tasks" },
-      { pattern: /#{2,3}\s+Execution/i, name: "Execution" },
-      { pattern: /#{2,3}\s+(Acceptance Criteria|Criteria)/i, name: "Acceptance Criteria" },
-      { pattern: /#{2,3}\s+Validation Commands?/i, name: "Validation Commands" },
+      { pattern: /<goal>[\s\S]*?<\/goal>/i, name: "goal" },
+      { pattern: /<tasks>[\s\S]*?<\/tasks>/i, name: "tasks" },
+      { pattern: /<execution>[\s\S]*?<\/execution>/i, name: "execution" },
+      { pattern: /<criteria>[\s\S]*?<\/criteria>/i, name: "criteria" },
+      { pattern: /<validation>[\s\S]*?<\/validation>/i, name: "validation" },
     ];
 
     for (const { pattern, name } of phaseRequired) {
@@ -124,25 +128,99 @@ if (phases.length === 0) {
       }
     }
 
-    if (/#{2,3}\s+Execution/i.test(phaseContent)) {
-      if (!/\*\*Wave \d+\*\*/i.test(phaseContent)) {
+    // Execution wave check
+    const executionMatch = phaseContent.match(/<execution>([\s\S]*?)<\/execution>/i);
+    if (executionMatch) {
+      if (!/\*\*Wave \d+\*\*/i.test(executionMatch[1])) {
         warnings.push(`Phase ${phase.num}: Execution section missing Wave definitions`);
       }
     }
 
-    const taskBlocks = phaseContent.match(/####\s+\d+\./g);
+    // Task metadata checks — extract tasks content
+    const tasksMatch = phaseContent.match(/<tasks>([\s\S]*?)<\/tasks>/i);
+    const tasksContent = tasksMatch ? tasksMatch[1] : "";
+
+    const taskBlocks = tasksContent.match(/####\s+\d+\./g);
     if (taskBlocks && taskBlocks.length > 0) {
-      if (!/\*\*ID\*\*:/i.test(phaseContent)) {
+      if (!/\*\*ID\*\*:/i.test(tasksContent)) {
         warnings.push(`Phase ${phase.num}: tasks missing ID metadata`);
       }
-      if (!/\*\*Assigned To\*\*:/i.test(phaseContent)) {
+      if (!/\*\*Assigned To\*\*:/i.test(tasksContent)) {
         warnings.push(`Phase ${phase.num}: tasks missing Assigned To metadata`);
       }
     }
 
+    // Optional <test-contract> — if present, must have content
+    const testContractMatch = phaseContent.match(/<test-contract>([\s\S]*?)<\/test-contract>/i);
+    if (testContractMatch && !testContractMatch[1].trim()) {
+      warnings.push(`Phase ${phase.num}: <test-contract> tag is empty`);
+    }
+
+    // Handoff — required except last phase
     if (phase.num < phases.length) {
-      if (!/#{2,3}\s+Handoff/i.test(phaseContent)) {
-        warnings.push(`Phase ${phase.num}: missing Handoff section`);
+      if (!/<handoff>[\s\S]*?<\/handoff>/i.test(phaseContent)) {
+        warnings.push(`Phase ${phase.num}: missing <handoff> section`);
+      }
+    }
+
+    // --- Wave conflict detection ---
+    // Extract tasks with their IDs and file references from <tasks> content
+    interface TaskInfo {
+      id: string;
+      files: string[];
+    }
+
+    const tasks: TaskInfo[] = [];
+    const taskSections = tasksContent.split(/####\s+\d+\.\s+/);
+
+    for (const section of taskSections.slice(1)) {
+      const idMatch = section.match(/\*\*ID\*\*:\s*(\S+)/i);
+      if (!idMatch) continue;
+
+      const taskId = idMatch[1];
+      // Extract file paths from backtick references
+      const fileRefs = [...section.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)]
+        .map((m) => m[1])
+        .filter((f) => /\.\w{1,5}$/.test(f)); // only paths with extensions
+
+      tasks.push({ id: taskId, files: fileRefs });
+    }
+
+    // Extract wave definitions from <execution> content and check for file conflicts
+    const executionContent = executionMatch ? executionMatch[1] : "";
+    const waveRegex = /\*\*Wave\s+(\d+)\*\*[^:]*:\s*(.+)/gi;
+    const waveMatches = [...executionContent.matchAll(waveRegex)];
+
+    for (const waveMatch of waveMatches) {
+      const waveNum = waveMatch[1];
+      const taskIds = waveMatch[2]
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      // Check that referenced task IDs exist
+      for (const tid of taskIds) {
+        if (tid.startsWith("validate")) continue; // validator tasks are implicit
+        if (!tasks.some((t) => t.id === tid)) {
+          warnings.push(
+            `Phase ${phase.num}: Wave ${waveNum} references unknown task ID "${tid}"`
+          );
+        }
+      }
+
+      // Check for file overlaps within the same wave
+      const waveTasks = tasks.filter((t) => taskIds.includes(t.id));
+      for (let a = 0; a < waveTasks.length; a++) {
+        for (let b = a + 1; b < waveTasks.length; b++) {
+          const overlap = waveTasks[a].files.filter((f) =>
+            waveTasks[b].files.includes(f)
+          );
+          if (overlap.length > 0) {
+            warnings.push(
+              `Phase ${phase.num}: Wave ${waveNum} conflict — tasks "${waveTasks[a].id}" and "${waveTasks[b].id}" both touch: ${overlap.join(", ")}`
+            );
+          }
+        }
       }
     }
   }
