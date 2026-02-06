@@ -6,8 +6,20 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
-const cwd = process.argv[2] || process.cwd();
-const TIMEOUT_MS = 60_000;
+let cwd = process.cwd();
+let timeoutOverride: number | null = null;
+
+const args = process.argv.slice(2);
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--timeout" && args[i + 1]) {
+    timeoutOverride = parseInt(args[++i], 10);
+  } else if (!args[i].startsWith("--")) {
+    cwd = args[i];
+  }
+}
+
+const DEFAULT_TIMEOUT_MS = 60_000;
+const TEST_TIMEOUT_MS = 120_000;
 
 interface CheckResult {
   [key: string]: "pass" | "skip" | string;
@@ -93,16 +105,16 @@ const checks: CheckDef[] = [
 ];
 
 // --- Run a single check ---
-async function runCheck(name: string, command: string): Promise<string> {
-  const [cmd, ...args] = command.split(" ");
+async function runCheck(name: string, command: string, timeoutMs: number): Promise<string> {
+  const [cmd, ...cmdArgs] = command.split(" ");
   try {
-    const proc = Bun.spawn([cmd, ...args], {
+    const proc = Bun.spawn([cmd, ...cmdArgs], {
       cwd,
       stdout: "pipe",
       stderr: "pipe",
     });
 
-    const timeout = setTimeout(() => proc.kill(), TIMEOUT_MS);
+    const timeout = setTimeout(() => proc.kill(), timeoutMs);
 
     const exitCode = await proc.exited;
     clearTimeout(timeout);
@@ -130,14 +142,15 @@ const buildCmd = checks[2].detect();
 const testCmd = checks[3].detect();
 
 // Parallel: lint + typecheck
+const defaultTimeout = timeoutOverride ?? DEFAULT_TIMEOUT_MS;
 const parallelChecks: Promise<[string, string]>[] = [];
 if (lintCmd) {
-  parallelChecks.push(runCheck("lint", lintCmd).then((r) => ["lint", r]));
+  parallelChecks.push(runCheck("lint", lintCmd, defaultTimeout).then((r) => ["lint", r]));
 } else {
   results.lint = "skip";
 }
 if (typecheckCmd) {
-  parallelChecks.push(runCheck("typecheck", typecheckCmd).then((r) => ["typecheck", r]));
+  parallelChecks.push(runCheck("typecheck", typecheckCmd, defaultTimeout).then((r) => ["typecheck", r]));
 } else {
   results.typecheck = "skip";
 }
@@ -149,14 +162,14 @@ for (const [name, result] of parallelResults) {
 
 // Sequential: build
 if (buildCmd) {
-  results.build = await runCheck("build", buildCmd);
+  results.build = await runCheck("build", buildCmd, timeoutOverride ?? DEFAULT_TIMEOUT_MS);
 } else {
   results.build = "skip";
 }
 
 // Sequential: test
 if (testCmd) {
-  results.test = await runCheck("test", testCmd);
+  results.test = await runCheck("test", testCmd, timeoutOverride ?? TEST_TIMEOUT_MS);
 } else {
   results.test = "skip";
 }
