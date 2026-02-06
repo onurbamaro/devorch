@@ -10,13 +10,15 @@ Execute one phase of the current devorch plan.
 
 ## Workflow
 
-1. **Extract phase**: Run `bun $CLAUDE_HOME/devorch-scripts/extract-phase.ts --plan .devorch/plans/current.md --phase N`
+1. **Verify plan integrity**: Run `bun $CLAUDE_HOME/devorch-scripts/hash-plan.ts --plan .devorch/plans/current.md`. If `match` is `false`, warn the user: "Plan has been modified since validation. Run `/devorch:make-plan` to re-validate, or proceed at your own risk." Wait for user confirmation before continuing.
 
-2. **Load context from disk**: Read `.devorch/CONVENTIONS.md` and `.devorch/explore-cache.md` (if they exist). If this is phase 2+, read `.devorch/state.md` for previous phase summaries.
+2. **Extract phase**: Run `bun $CLAUDE_HOME/devorch-scripts/extract-phase.ts --plan .devorch/plans/current.md --phase N`
 
-3. **Explore (conditional)**: Check explore cache for areas relevant to this phase's tasks. Launch Explore agents (`Task` with `subagent_type=Explore`) only for uncovered or stale areas. Append new summaries to explore-cache.
+3. **Load context from disk**: Read `.devorch/CONVENTIONS.md` and `.devorch/explore-cache.md` (if they exist). If this is phase 2+, read `.devorch/state.md` for previous phase summaries.
 
-4. **Deploy builders**: For each task, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders via `Task` with `subagent_type=devorch-builder` and `run_in_background=true` following the wave structure. All tasks in a wave launch as parallel agents in a single message.
+4. **Explore (conditional)**: Check explore cache for areas relevant to this phase's tasks. Launch Explore agents (`Task` with `subagent_type=Explore`) only for uncovered or stale areas. Append new summaries to explore-cache.
+
+5. **Deploy builders**: For each task, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders via `Task` with `subagent_type=devorch-builder` and `run_in_background=true` following the wave structure. All tasks in a wave launch as parallel agents in a single message.
 
    Each builder prompt includes:
    - Plan's **Objective** (from `<objective>`), **Solution Approach** (from `<solution-approach>`, if exists), **Decisions** (from `<decisions>`, if exists)
@@ -30,13 +32,13 @@ Execute one phase of the current devorch plan.
 
    Poll with `TaskList` until all tasks in a wave complete. **Never call `TaskOutput`.**
 
-5. **Validate**: Deploy validator in foreground (`Task` with `subagent_type=devorch-validator`). Its prompt includes inline: phase **criteria** (from `<criteria>`), **validation commands** (from `<validation>`), task summaries, relevant conventions. If FAIL → stop and report.
+6. **Validate**: Deploy validator in foreground (`Task` with `subagent_type=devorch-validator`). Its prompt includes inline: phase **criteria** (from `<criteria>`), **validation commands** (from `<validation>`), task summaries, relevant conventions. If FAIL → stop and report.
 
-6. **Phase commit**: If there are uncommitted changes after validation passes, commit: `phase(N): <goal summary>`
+7. **Phase commit**: If there are uncommitted changes after validation passes, commit: `phase(N): <goal summary>`
 
-7. **Invalidate and update cache**: After the phase commit, run `git diff --name-only HEAD~1..HEAD` to get files changed in this phase. For each section in `.devorch/explore-cache.md`, check if any of its described files overlap with the changed files. If so, **delete that cache section** (it's now stale — builders changed those files). Then, if new Explore agents were launched during this phase, append their summaries.
+8. **Invalidate and update cache**: After the phase commit, run `git diff --name-only HEAD~1..HEAD` to get files changed in this phase. For each section in `.devorch/explore-cache.md`, check if any of its described files overlap with the changed files. If so, **delete that cache section** (it's now stale — builders changed those files). Then, if new Explore agents were launched during this phase, append their summaries.
 
-8. **Update state**: Write `.devorch/state.md`:
+9. **Update state**: Write `.devorch/state.md`:
    ```markdown
    # devorch State
    - Plan: <plan title from first heading of current.md>
@@ -46,7 +48,7 @@ Execute one phase of the current devorch plan.
    <what was done>
    ```
 
-9. **Report**: What was done, any issues, next step: `/devorch:build N+1` or `/devorch:check-implementation`
+10. **Report**: What was done, any issues, next step: `/devorch:build N+1` or `/devorch:check-implementation`
 
 ## Rules
 

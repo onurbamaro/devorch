@@ -4,6 +4,7 @@
  * Output: JSON {"result":"continue"} or {"result":"block","reason":"..."}
  */
 import { readFileSync } from "fs";
+import { createHash } from "crypto";
 
 function parseArgs(): { plan: string } {
   const args = process.argv.slice(2);
@@ -228,7 +229,11 @@ if (phases.length === 0) {
 
 // --- Output ---
 if (errors.length === 0) {
-  const result: { result: string; warnings?: string[] } = { result: "continue" };
+  // Compute hash excluding any existing validated comment
+  const cleanContent = content.replace(/<!-- Validated: [a-f0-9]{64} -->\n?/, "");
+  const hash = createHash("sha256").update(cleanContent).digest("hex");
+
+  const result: { result: string; hash: string; warnings?: string[] } = { result: "continue", hash };
   if (warnings.length > 0) {
     result.warnings = warnings;
   }

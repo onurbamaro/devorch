@@ -85,7 +85,7 @@ Write `.devorch/plans/current.md` following the **Plan Format** below.
 
 ### 7. Validate
 
-Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
+Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked. On success, the output includes a `hash` field — append `<!-- Validated: <hash> -->` as the last line of the plan file.
 
 ### 8. Reset state
 
