@@ -18,7 +18,7 @@ Stop feeding Claude Code one prompt at a time. devorch breaks your work into pha
 
 **Automatic validation** -- Every phase ends with a validator agent that checks acceptance criteria, runs lint, typecheck, build, and tests. Bugs surface immediately, not three phases later.
 
-**State-aware resumption** -- Interrupted? Run `/devorch:resume` and pick up exactly where you left off. Phase handoffs carry just enough context for continuity without bloating the window.
+**State-aware resumption** -- Interrupted? Run `/devorch:build` again and pick up exactly where you left off. Phase handoffs carry just enough context for continuity without bloating the window.
 
 ---
 
@@ -64,12 +64,6 @@ That's it. devorch explores your codebase, creates a phased plan with parallel w
 /devorch:map-codebase      # analyze codebase -- CONVENTIONS.md
 /devorch:make-plan "..."   # plan the work
 /devorch:build              # execute all phases + verify
-```
-
-### Resume an interrupted build
-
-```
-/devorch:resume            # reads state.md, offers: build remaining / check
 ```
 
 ### Ship a quick fix
@@ -140,7 +134,6 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 | `/devorch:make-plan` | Creates phased plan with wave structure. Auto-archives completed plans. | Explore |
 | `/devorch:build` | Executes all remaining phases + runs check-implementation. | Explore, Builder, Validator |
 | `/devorch:check-implementation` | Verifies full implementation against all criteria. | Explore |
-| `/devorch:resume` | Reads state, offers next action (build remaining / check). | None |
 | `/devorch:quick` | Small fix with auto-commit. Escalates to make-plan if complex. | Explore |
 | `/devorch:plan-tests` | Plans testing strategy per module. | Explore |
 | `/devorch:make-tests` | Generates and runs tests from the test plan. | Explore, Builder |
@@ -235,9 +228,6 @@ commands:
     signature: /devorch:check-implementation
     purpose: Verify full implementation against all acceptance criteria
     flags: [--team]
-  - name: resume
-    signature: /devorch:resume
-    purpose: Resume interrupted build from last completed phase
   - name: quick
     signature: /devorch:quick "<description>"
     purpose: Small fix with auto-commit, escalates if complex
@@ -307,7 +297,7 @@ state_files:
 
 file_structure:
   source:
-    - commands/ (12 .md slash command definitions)
+    - commands/ (11 .md slash command definitions)
     - agents/ (2 .md agent type definitions)
     - scripts/ (8 .ts utility scripts)
     - hooks/ (post-edit lint + statusline)
