@@ -9,7 +9,7 @@ Map the current project's codebase and generate `.devorch/CONVENTIONS.md`. This 
 
 ### 1. Collect mechanical data
 
-Run `bun ~/.claude/devorch-scripts/map-conventions.ts` → naming, exports, imports, style, test framework.
+Run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts` → naming, exports, imports, style, test framework.
 
 If the script fails (no Bun, etc.), do the equivalent analysis manually.
 

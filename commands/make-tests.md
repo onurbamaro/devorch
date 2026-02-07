@@ -27,7 +27,7 @@ Generate and run tests based on the test plan.
 
 7. **Run tests**: After all builders complete, run the test suite:
    ```
-   bun ~/.claude/devorch-scripts/check-project.ts
+   bun $CLAUDE_HOME/devorch-scripts/check-project.ts
    ```
    Also run tests directly if a test script is available.
 

@@ -9,7 +9,7 @@ Plan a testing strategy for the project.
 
 1. **Load context**: Read `.devorch/CONVENTIONS.md` and `.devorch/plans/current.md` if they exist.
 
-2. **Assess project**: Run `bun ~/.claude/devorch-scripts/check-project.ts` to understand current project health and existing test infrastructure.
+2. **Assess project**: Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` to understand current project health and existing test infrastructure.
 
 3. **Analyze code**: Launch parallel `Task` agents with `subagent_type=Explore` to investigate the codebase — one per area (e.g., "auth and business logic", "API routes and integrations", "UI components with complex behavior", "utility functions"). **Do NOT read source files directly.** From the Explore summaries, identify:
    - Critical paths that need testing (auth, data mutations, business logic)
