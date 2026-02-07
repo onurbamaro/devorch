@@ -6,7 +6,7 @@ model: opus
 Comprehensive post-build verification. Checks that every acceptance criterion from every phase is implemented, conventions are followed, and cross-phase integration works.
 
 Can be run:
-- Automatically at the end of `/devorch:build-all`
+- Automatically at the end of `/devorch:build`
 - Manually at any time after one or more phases are built
 
 ## Workflow

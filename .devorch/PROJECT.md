@@ -22,7 +22,6 @@ devorch/
     devorch-builder.md
     devorch-validator.md
   commands/
-    build-all.md
     build.md
     check-implementation.md
     make-plan.md

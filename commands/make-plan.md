@@ -137,7 +137,7 @@ Stage and commit all devorch files modified in this session:
 
 ### 12. Report
 
-Show classification, phases with goals, wave structure, then instruct: `/devorch:build 1` or `/devorch:build-all`. Mention that `/devorch:check-implementation` runs automatically at the end of build-all, or can be run manually after individual builds.
+Show classification, phases with goals, wave structure, then instruct: `/devorch:build`. Mention that `/devorch:check-implementation` runs automatically at the end of build.
 
 ## Parallelization Rules
 
@@ -157,7 +157,7 @@ Quality guardrails:
 ## Sizing Rules
 
 - Max **5 tasks** per phase. Each completable by one builder.
-- Each phase MUST fit in 1 `/devorch:build` execution without context compaction.
+- Each phase MUST fit in 1 phase execution without context compaction.
 - Prefer more smaller phases over fewer large ones.
 
 ## Plan Format

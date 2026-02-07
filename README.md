@@ -40,7 +40,7 @@ bun run install.ts
 /devorch:make-plan "add user authentication with JWT"
 
 # 3. Build everything
-/devorch:build-all
+/devorch:build
 ```
 
 That's it. devorch explores your codebase, creates a phased plan with parallel waves, deploys builder agents, validates each phase, and commits the results.
@@ -55,7 +55,7 @@ That's it. devorch explores your codebase, creates a phased plan with parallel w
 /devorch:new-idea          # guided Q&A -- generates PROJECT.md, ARCHITECTURE.md
 /devorch:map-codebase      # generates CONVENTIONS.md (run after first build)
 /devorch:make-plan "..."   # plan the first milestone
-/devorch:build-all         # execute all phases + verify
+/devorch:build              # execute all phases + verify
 ```
 
 ### Add features to an existing project
@@ -63,23 +63,13 @@ That's it. devorch explores your codebase, creates a phased plan with parallel w
 ```
 /devorch:map-codebase      # analyze codebase -- CONVENTIONS.md
 /devorch:make-plan "..."   # plan the work
-/devorch:build-all         # execute all phases + verify
-```
-
-### Execute one phase at a time
-
-Full control over each step when you want to review between phases.
-
-```
-/devorch:build 1
-/devorch:build 2
-/devorch:check-implementation
+/devorch:build              # execute all phases + verify
 ```
 
 ### Resume an interrupted build
 
 ```
-/devorch:resume            # reads state.md, offers: next phase / build-all / check
+/devorch:resume            # reads state.md, offers: build remaining / check
 ```
 
 ### Ship a quick fix
@@ -148,10 +138,9 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 | `/devorch:new-idea` | Guided Q&A for new projects. Generates PROJECT.md + ARCHITECTURE.md. | Explore |
 | `/devorch:map-codebase` | Maps existing project. Generates CONVENTIONS.md. | Explore |
 | `/devorch:make-plan` | Creates phased plan with wave structure. Auto-archives completed plans. | Explore |
-| `/devorch:build N` | Executes one phase. Deploys builders in parallel waves. | Explore, Builder, Validator |
-| `/devorch:build-all` | Executes all remaining phases + runs check-implementation. | Explore, Builder, Validator |
+| `/devorch:build` | Executes all remaining phases + runs check-implementation. | Explore, Builder, Validator |
 | `/devorch:check-implementation` | Verifies full implementation against all criteria. | Explore |
-| `/devorch:resume` | Reads state, offers next action (build next / build-all / check). | None |
+| `/devorch:resume` | Reads state, offers next action (build remaining / check). | None |
 | `/devorch:quick` | Small fix with auto-commit. Escalates to make-plan if complex. | Explore |
 | `/devorch:plan-tests` | Plans testing strategy per module. | Explore |
 | `/devorch:make-tests` | Generates and runs tests from the test plan. | Explore, Builder |
@@ -240,10 +229,7 @@ commands:
     purpose: Create phased plan with wave structure from description
     flags: [--team]
   - name: build
-    signature: /devorch:build N
-    purpose: Execute phase N with parallel builder waves
-  - name: build-all
-    signature: /devorch:build-all
+    signature: /devorch:build
     purpose: Execute all remaining phases then verify
   - name: check-implementation
     signature: /devorch:check-implementation
@@ -321,7 +307,7 @@ state_files:
 
 file_structure:
   source:
-    - commands/ (13 .md slash command definitions)
+    - commands/ (12 .md slash command definitions)
     - agents/ (2 .md agent type definitions)
     - scripts/ (8 .ts utility scripts)
     - hooks/ (post-edit lint + statusline)

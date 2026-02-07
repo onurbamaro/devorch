@@ -9,7 +9,7 @@ Resume a devorch build from where it left off.
 
 ### 1. Load state
 
-Read `.devorch/state.md`. If it doesn't exist, stop and tell the user: "No build state found. Start with `/devorch:make-plan` to create a plan, then `/devorch:build 1` to begin."
+Read `.devorch/state.md`. If it doesn't exist, stop and tell the user: "No build state found. Start with `/devorch:make-plan` to create a plan, then `/devorch:build` to begin."
 
 Extract:
 - `Plan:` field → plan title
@@ -31,15 +31,13 @@ Count phase tags (`<phaseN`) in the plan → total phases.
 Use `AskUserQuestion` with:
 - Question: "Phase K was the last completed phase (of N total). How would you like to resume?"
 - Options:
-  1. "Build next phase" — Run `/devorch:build K+1` for just the next phase
-  2. "Build all remaining" — Run `/devorch:build-all` to complete all remaining phases
-  3. "Check current state" — Run `/devorch:check-implementation` to verify what's been built so far
+  1. "Build remaining phases" — Run `/devorch:build` to complete all remaining phases
+  2. "Check current state" — Run `/devorch:check-implementation` to verify what's been built so far
 
 ### 4. Route
 
 Based on the user's choice, execute the appropriate skill:
-- "Build next phase" → invoke `/devorch:build K+1`
-- "Build all remaining" → invoke `/devorch:build-all`
+- "Build remaining phases" → invoke `/devorch:build`
 - "Check current state" → invoke `/devorch:check-implementation`
 
 ## Rules
