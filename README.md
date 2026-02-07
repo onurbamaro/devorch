@@ -129,6 +129,7 @@ Builders get a post-edit lint hook that runs the project linter after every Writ
 | `map-project.ts` | Collects tech stack, folder structure, dependencies, scripts, git history. |
 | `map-conventions.ts` | Analyzes naming, exports, style, testing patterns from code samples. |
 | `validate-plan.ts` | Validates plan structure (sections, phase numbering, task metadata, wave consistency). |
+| `check-agent-teams.ts` | Validates Agent Teams feature flag and parses team templates. |
 
 ### State tracking
 
@@ -150,6 +151,9 @@ The statusline hook (`devorch-statusline.cjs`) shows the active task, phase prog
 | `/devorch:quick` | Small fix with auto-commit. Escalates to make-plan if complex. | Explore |
 | `/devorch:plan-tests` | Plans testing strategy per module. | Explore |
 | `/devorch:make-tests` | Generates and runs tests from the test plan. | Explore, Builder |
+| `/devorch:debug` | Agent Teams hypothesis-testing investigation. | Agent Teams |
+| `/devorch:review` | Agent Teams adversarial code review. | Agent Teams |
+| `/devorch:explore-deep` | Agent Teams deep architectural exploration. | Agent Teams |
 
 ## Project structure
 
@@ -219,6 +223,33 @@ The orchestrator (`/build`, `/make-plan`, etc.) never reads source code files di
 | Builder task | `feat\|fix\|refactor\|chore(scope): description` |
 | Tests | `test(scope): ...` |
 | Quick fix | `feat\|fix\|refactor\|chore\|docs(scope): description` |
+
+## Agent Teams (experimental)
+
+Requires Claude Code's experimental Agent Teams feature:
+
+```bash
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+### New commands
+
+| Command | What it does |
+|---------|-------------|
+| `/devorch:debug` | Spawns a lead + 4 investigators for concurrent hypothesis testing. Writes `.devorch/debug-report.md`. |
+| `/devorch:review` | Adversarial code review with 4 reviewers (security, quality, performance, tests). Writes `.devorch/review-report.md`. |
+| `/devorch:explore-deep` | Deep architectural exploration with multi-perspective debate. Writes `.devorch/explore-report.md`. |
+
+### Optional flags on existing commands
+
+- `/devorch:make-plan --team` — spawns a 2-analyst planning team (scope-explorer + risk-assessor). Auto-escalates for complex tasks even without the flag.
+- `/devorch:check-implementation --team` — adds an adversarial review layer (security + quality + performance reviewers) on top of existing verification.
+
+### Team templates
+
+Team structure is configured per project in `.devorch/team-templates.md`. This file is generated on first use with sensible defaults. Customize roles, teammate count, and model per command type.
+
+Without the `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` environment variable, all Agent Teams commands error with setup instructions and existing commands work identically to before.
 
 ## Requirements
 
