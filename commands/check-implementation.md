@@ -77,7 +77,27 @@ Task: Verify that work from different phases integrates correctly:
 
 **All Explore agents and background checks launch in a single message.** For a 3-phase plan, this means 5 Explore agents + 1-2 background Bash tasks, all concurrent. Collect all results before proceeding to the report.
 
-### 4. Report
+### 4. Adversarial review (conditional)
+
+Check if `--team` flag is present in `$ARGUMENTS`.
+
+If `--team` flag is NOT present: skip this step entirely. Proceed to step 5.
+
+If `--team` flag IS present:
+
+1. Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
+2. If Agent Teams is NOT enabled (`enabled: false`): stop and display the `instructions` field to the user. Do not proceed.
+3. If Agent Teams IS enabled:
+   - Read `.devorch/team-templates.md` and extract the `check-team` template. If missing or unparseable, use defaults: 3 reviewers, model opus.
+   - Spawn a team using `TeammateTool` `spawnTeam` with 3 adversarial reviewers from the template:
+     - **security**: Adversarial security review — probe for vulnerabilities, injection risks, auth issues, data exposure
+     - **quality**: Adversarial quality review — probe for correctness issues, edge case handling, maintainability concerns
+     - **performance**: Adversarial performance review — probe for bottlenecks, resource leaks, scalability concerns
+   - Provide each reviewer with the combined output from all Explore agents and automated checks from step 3
+   - Each reviewer does a deeper adversarial analysis through their lens — actively trying to find flaws
+   - Lead collects adversarial findings for inclusion in the report (step 5)
+
+### 5. Report
 
 Compile results from all Explore agents and automated checks into a structured report:
 
@@ -111,10 +131,15 @@ Tests: ✅ (47/47)
 Phase 1: `cmd1` ✅, `cmd2` ✅
 Phase 2: `cmd3` ✅
 
+### Adversarial Review (if --team)
+Security: <findings or clean>
+Quality: <findings or clean>
+Performance: <findings or clean>
+
 ### Verdict: PASS / FAIL (with N warnings)
 ```
 
-### 5. Follow-up
+### 6. Follow-up
 
 If **PASS**: Update `.devorch/state.md` status to `completed`. Report success.
 
