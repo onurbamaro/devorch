@@ -2,6 +2,7 @@
   "name": "devorch",
   "version": "1.0.0",
   "description": "Developer Orchestrator for Claude Code",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "install": "bun run install.ts",
