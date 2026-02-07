@@ -28,13 +28,19 @@ Run `git diff --name-only` against the baseline. To find the baseline:
 
 This produces the list of files that were created or modified by the build.
 
-### 3. Verify (parallel Explore agents)
+### 3. Verify and check (all parallel)
 
-Launch all agents in parallel using `Task` with `subagent_type=Explore`:
+Launch **everything** in a single parallel batch — Explore agents and automated checks are independent and must not wait for each other.
+
+**Automated checks (background)**
+
+Launch via `Bash` with `run_in_background=true`:
+- `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` for lint, typecheck, build, and test.
+- Each **Validation Command** from every completed phase (from the extract-criteria output). If multiple commands, chain with `&&`.
 
 **Per-phase functional agents (one per completed phase)**
 
-For each completed phase, launch a separate Explore agent. This prevents a single agent from running out of context on large plans.
+For each completed phase, launch a separate Explore agent (`Task` with `subagent_type=Explore`). This prevents a single agent from running out of context on large plans.
 
 Each agent's prompt includes: that phase's acceptance criteria (from extract-criteria output), the objective, and the relevant files for that phase.
 
@@ -69,17 +75,11 @@ Task: Verify that work from different phases integrates correctly:
 - No dead code introduced (unused functions, unreachable branches)
 - Handoff contracts honored (what phase N promised, phase N+1 consumed)
 
-**All agents launch in a single parallel batch.** For a 3-phase plan, this means 5 agents total (3 functional + 1 convention + 1 integration).
+**All Explore agents and background checks launch in a single message.** For a 3-phase plan, this means 5 Explore agents + 1-2 background Bash tasks, all concurrent. Collect all results before proceeding to the report.
 
-### 4. Automated checks
+### 4. Report
 
-Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` for lint, typecheck, build, and test.
-
-Then run each **Validation Command** from every completed phase (from the extract-criteria output). Capture pass/fail for each.
-
-### 5. Report
-
-Compile results from all three Explore agents and automated checks into a structured report:
+Compile results from all Explore agents and automated checks into a structured report:
 
 ```
 ## Implementation Check: <plan name>
@@ -114,7 +114,7 @@ Phase 2: `cmd3` ✅
 ### Verdict: PASS / FAIL (with N warnings)
 ```
 
-### 6. Follow-up
+### 5. Follow-up
 
 If **PASS**: Update `.devorch/state.md` status to `completed`. Report success.
 
