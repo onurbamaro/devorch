@@ -184,7 +184,7 @@ Installed to `~/.claude/` (commands, agents, scripts, hooks). Per-project state 
 
 ## Requirements
 
-- [Bun](https://bun.sh) runtime
+- [Bun](https://bun.sh) runtime -- required to execute the TypeScript utility scripts (plan extraction, validation, linting). Install with `curl -fsSL https://bun.sh/install | bash`.
 - [Claude Code](https://claude.ai/claude-code) CLI
 
 ---
