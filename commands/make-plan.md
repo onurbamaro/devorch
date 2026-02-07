@@ -29,13 +29,23 @@ Determine before exploring:
 - **Complexity**: `simple` (1-2 files) | `medium` (3-10 files, some design) | `complex` (10+ files, architecture/compatibility)
 - **Risk**: `low` (additive) | `medium` (modifies behavior, shared code) | `high` (runtime/build/deps, compatibility, data)
 
-### 3. Clarify with the user
+### 3. Initial exploration
 
-Use `AskUserQuestion` to resolve ambiguity **before** exploring. This prevents wasted exploration and wrong plans. Each question must have 2-4 clickable options so the user can answer fast (they can always type a custom answer).
+Before asking the user anything, understand the codebase. Launch Explore agents to map the affected areas — structure, patterns, constraints, edge cases. This ensures questions are informed, not guesses.
 
-**Skip this step entirely** if the request is specific, self-contained, and has only one reasonable interpretation.
+Use `Task` agents with `subagent_type=Explore`. Scale to complexity:
 
-**What to ask about** (pick only what's unclear — max 6 questions across 1-2 AskUserQuestion calls):
+- **Simple** — One Explore agent to skim the affected area.
+- **Medium** — Parallel Explore agents: one per affected area.
+- **Complex** — Parallel Explore agents covering every affected area + dependency check.
+
+### 4. Clarify with the user (never skip)
+
+Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open question before planning. Each question must have 2-4 clickable options (the user can always type a custom answer). This step prevents expensive rework later — an unanswered question now becomes a wrong assumption in the plan.
+
+**This step is mandatory.** Even if the request seems clear, the initial exploration will reveal decisions that need user input — approach choices, scope boundaries, behavior in edge cases. Ask about those.
+
+**What to ask about** (cover ALL that apply — no artificial limit on number of questions):
 
 - **Scope** — Does the user want just X, or also Y? Should it handle edge case Z?
 - **Approach** — When multiple architectures or patterns are viable, which does the user prefer?
@@ -43,26 +53,27 @@ Use `AskUserQuestion` to resolve ambiguity **before** exploring. This prevents w
 - **Behavior** — What should happen on error? What's the UX for edge cases?
 - **Priority** — Speed vs completeness? MVP vs full implementation?
 - **Integration** — Should this connect to existing feature X? Replace or extend current behavior?
+- **Naming / conventions** — When the codebase doesn't have a clear precedent for something, ask.
+- **Edge cases** — Anything the exploration revealed that has no obvious right answer.
+
+**Ask in rounds.** Use up to 4 questions per `AskUserQuestion` call (tool limit). If more questions remain, make another call after the user answers. Continue until all ambiguity is resolved — there is no cap on rounds. The goal is **zero assumptions** in the plan.
 
 **Guidelines:**
 - Use short, concrete options — not vague ones like "Option A" / "Option B". Each option should describe a real choice (e.g., "JWT with refresh tokens", "Session-based with Redis").
 - Front-load the recommended option and append "(Recommended)" to its label.
-- Don't ask what you can answer from the codebase — save those for the Explore step.
-- Don't ask obvious questions that the conventions or project data already answer.
+- Ground questions in what the exploration found — reference real files, patterns, or constraints discovered.
+- Don't ask what the codebase or conventions already answer.
+- Don't ask the user to make decisions you're better equipped to make (pure implementation details).
 
-### 4. Explore proportionally (informed by user answers)
+### 5. Deep exploration (informed by user answers)
 
-Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base.
+If user answers revealed new areas to explore, or if the initial exploration was shallow, launch additional Explore agents now — targeted by the user's choices.
 
-**Simple + Low risk** — One Explore agent to skim the affected area.
-
-**Medium** — Launch parallel Explore agents: one per affected area (e.g., "what files import from X and how?", "how is the API layer structured?"). Use Grep directly only for quantification (counting imports, usage patterns).
-
-**Complex OR High risk** — Launch parallel Explore agents covering every affected area. Use Grep for quantification. Ask Explore agents to check dependency compatibility, identify hidden risks (dynamic requires, native addons, platform-specific code).
+Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
-**Cache exploration results**: After all Explore agents return, write `.devorch/explore-cache.md` with the summaries:
+**Cache exploration results**: After all Explore agents return (from both step 3 and step 5), write `.devorch/explore-cache.md` with the combined summaries:
 
 ```markdown
 # Explore Cache
@@ -77,30 +88,30 @@ Generated: <ISO timestamp>
 
 This cache is reused by `/devorch:build` to avoid re-exploring the same areas. Each section title should match the area explored (e.g., "Auth module", "API routes", "Database layer").
 
-### 5. Design solution (medium/complex only)
+### 6. Design solution (medium/complex only)
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
-### 6. Create plan
+### 7. Create plan
 
 Write `.devorch/plans/current.md` following the **Plan Format** below.
 
-### 7. Validate
+### 8. Validate
 
-Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked. On success, the output includes a `hash` field — append `<!-- Validated: <hash> -->` as the last line of the plan file.
+Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
 
-### 8. Reset state
+### 9. Reset state
 
 Delete `.devorch/state.md` and `.devorch/state-history.md` if they exist — a new plan means fresh state. Previous plan's progress is irrelevant.
 
-### 9. Auto-commit
+### 10. Auto-commit
 
 Stage and commit all devorch files modified in this session:
 - Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/PROJECT.md` (if created/updated)
 - If state.md or state-history.md were deleted, stage those deletions too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
-### 10. Report
+### 11. Report
 
 Show classification, phases with goals, wave structure, then instruct: `/devorch:build 1` or `/devorch:build-all`. Mention that `/devorch:check-implementation` runs automatically at the end of build-all, or can be run manually after individual builds.
 
@@ -149,7 +160,6 @@ Risk: <risk>
 <decisions>
 <user choices from the clarification step — each as a one-line "Question → Answer" pair>
 <include ALL user answers that affect implementation, even if they seem obvious>
-(skip section if no clarification was needed)
 </decisions>
 
 <!-- if medium or complex: -->
@@ -224,7 +234,7 @@ Risk: <risk>
 
 ### Rules
 
-- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>` (optional), `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files)
+- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
 - Inside phase: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<validation>`, `<test-contract>` (optional), `<handoff>` (except last phase)
 
