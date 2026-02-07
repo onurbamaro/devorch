@@ -17,7 +17,9 @@ Read `.devorch/CONVENTIONS.md`. If missing, stop and tell the user: "No conventi
 
 Check if `.devorch/PROJECT.md` exists and is recent (less than 1 day old based on git log). If so, read it directly. Otherwise, run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to get fresh project data and write the output to `.devorch/PROJECT.md`. Use this data as inline context for planning. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
-If `.devorch/plans/current.md` exists, ask the user if they want to archive it.
+If `.devorch/plans/current.md` exists:
+- Read `.devorch/state.md`. If state shows the plan is `completed` (or last completed phase equals total phase count in current.md), archive silently — move current.md to `.devorch/plans/archive/<timestamp>-<plan-name>.md` (create archive dir if needed). No need to ask.
+- Otherwise, ask the user if they want to archive it (in-progress plan, may lose work).
 
 ### 2. Classify
 
