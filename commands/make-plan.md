@@ -29,7 +29,31 @@ Determine before exploring:
 - **Complexity**: `simple` (1-2 files) | `medium` (3-10 files, some design) | `complex` (10+ files, architecture/compatibility)
 - **Risk**: `low` (additive) | `medium` (modifies behavior, shared code) | `high` (runtime/build/deps, compatibility, data)
 
-### 3. Initial exploration
+### 3. Agent Teams exploration (conditional)
+
+Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
+
+Check if `--team` flag is present in `$ARGUMENTS`.
+
+**Conditional logic:**
+
+- If `--team` flag is present AND Agent Teams is NOT enabled (`enabled: false`): stop and display the `instructions` field to the user. Do not proceed.
+- If Agent Teams IS enabled AND (`--team` flag is present OR complexity is `complex`): enter Agent Teams planning mode (below).
+- Otherwise: skip this step entirely — existing behavior unchanged.
+
+**Agent Teams planning mode:**
+
+Read `.devorch/team-templates.md` and extract the `make-plan-team` template. If missing or unparseable, use defaults: 2 analysts, model opus.
+
+Spawn a team using `TeammateTool` `spawnTeam` with 2 analysts from the template:
+- **scope-explorer**: Explores codebase to understand scope, dependencies, and impact of the requested change
+- **risk-assessor**: Identifies risks, edge cases, and potential blockers
+
+Analysts explore in parallel via Agent Teams and report findings via messages. Lead synthesizes analyst findings into additional context for the explore cache and uses them to generate deeper, more informed clarification questions in step 5.
+
+After the team completes, continue with step 4 — the Agent Teams exploration supplements, not replaces, the existing Explore agents.
+
+### 4. Initial exploration
 
 Before asking the user anything, understand the codebase. Launch Explore agents to map the affected areas — structure, patterns, constraints, edge cases. This ensures questions are informed, not guesses.
 
@@ -39,7 +63,7 @@ Use `Task` agents with `subagent_type=Explore`. Scale to complexity:
 - **Medium** — Parallel Explore agents: one per affected area.
 - **Complex** — Parallel Explore agents covering every affected area + dependency check.
 
-### 4. Clarify with the user (never skip)
+### 5. Clarify with the user (never skip)
 
 Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open question before planning. Each question must have 2-4 clickable options (the user can always type a custom answer). This step prevents expensive rework later — an unanswered question now becomes a wrong assumption in the plan.
 
@@ -65,7 +89,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 - Don't ask what the codebase or conventions already answer.
 - Don't ask the user to make decisions you're better equipped to make (pure implementation details).
 
-### 5. Deep exploration (informed by user answers)
+### 6. Deep exploration (informed by user answers)
 
 If user answers revealed new areas to explore, or if the initial exploration was shallow, launch additional Explore agents now — targeted by the user's choices.
 
@@ -73,7 +97,7 @@ Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **D
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
-**Cache exploration results**: After all Explore agents return (from both step 3 and step 5), write `.devorch/explore-cache.md` with the combined summaries:
+**Cache exploration results**: After all Explore agents return (from both step 4 and step 6), write `.devorch/explore-cache.md` with the combined summaries:
 
 ```markdown
 # Explore Cache
@@ -88,30 +112,30 @@ Generated: <ISO timestamp>
 
 This cache is reused by `/devorch:build` to avoid re-exploring the same areas. Each section title should match the area explored (e.g., "Auth module", "API routes", "Database layer").
 
-### 6. Design solution (medium/complex only)
+### 7. Design solution (medium/complex only)
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
-### 7. Create plan
+### 8. Create plan
 
 Write `.devorch/plans/current.md` following the **Plan Format** below.
 
-### 8. Validate
+### 9. Validate
 
 Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
 
-### 9. Reset state
+### 10. Reset state
 
 Delete `.devorch/state.md` and `.devorch/state-history.md` if they exist — a new plan means fresh state. Previous plan's progress is irrelevant.
 
-### 10. Auto-commit
+### 11. Auto-commit
 
 Stage and commit all devorch files modified in this session:
 - Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/PROJECT.md` (if created/updated)
 - If state.md or state-history.md were deleted, stage those deletions too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
-### 11. Report
+### 12. Report
 
 Show classification, phases with goals, wave structure, then instruct: `/devorch:build 1` or `/devorch:build-all`. Mention that `/devorch:check-implementation` runs automatically at the end of build-all, or can be run manually after individual builds.
 
