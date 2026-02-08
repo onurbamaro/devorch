@@ -162,7 +162,14 @@ Stage and commit all devorch files modified in this session:
 
 ### 12. Report
 
-Show classification, phases with goals, wave structure, then instruct: `/devorch:build`. Mention that `/devorch:check-implementation` runs automatically at the end of build.
+Show classification, phases with goals, wave structure, then instruct:
+
+```
+/clear
+/devorch:build
+```
+
+Explain: planning consumes significant context — `/clear` frees it before build starts. The plan is saved to disk, so nothing is lost.
 
 ## Parallelization Rules
 

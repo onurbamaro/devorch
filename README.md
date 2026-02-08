@@ -36,7 +36,8 @@ bun run install.ts
 # 1. Plan the work
 /devorch:make-plan "add user authentication with JWT"
 
-# 2. Build everything
+# 2. Clear context and build
+/clear
 /devorch:build
 ```
 
@@ -51,6 +52,7 @@ That's it. devorch explores your codebase, creates a phased plan with parallel w
 ```
 /devorch:new-idea          # guided Q&A -- generates PROJECT.md, ARCHITECTURE.md
 /devorch:make-plan "..."   # plan the first milestone (auto-generates CONVENTIONS.md)
+/clear                      # free context before building
 /devorch:build              # execute all phases + verify
 ```
 
@@ -58,6 +60,7 @@ That's it. devorch explores your codebase, creates a phased plan with parallel w
 
 ```
 /devorch:make-plan "..."   # plan the work (auto-generates CONVENTIONS.md on first run)
+/clear                      # free context before building
 /devorch:build              # execute all phases + verify
 ```
 
