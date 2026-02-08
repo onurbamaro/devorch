@@ -77,7 +77,7 @@ Guided discovery for new projects. Generates devorch context files from Q&A.
    - Stage only the `.devorch/` files created (PROJECT.md, ARCHITECTURE.md)
    - Format: `chore(devorch): initialize project context`
 
-6. **Generate conventions later** — Run `/devorch:map-codebase` after the first build phase to generate CONVENTIONS.md from actual code patterns.
+6. **Conventions** — CONVENTIONS.md will be generated automatically on first `/devorch:make-plan` run, after code exists to analyze.
 
 7. **Next step** — Generate a ready-to-use prompt for `/devorch:make-plan` that describes the first milestone. Show it to the user.
 

@@ -13,9 +13,34 @@ Create a phased implementation plan for the project.
 
 ### 1. Load context
 
-Read `.devorch/CONVENTIONS.md`. If missing, stop and tell the user: "No conventions found. Run `/devorch:map-codebase` first to establish coding conventions — this ensures all builders write consistent code."
+**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context for planning — do not save it to a file. Additionally, read `.devorch/PROJECT.md` if it exists (product context from `/devorch:new-idea`). If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
-Check if `.devorch/PROJECT.md` exists and is recent (less than 1 day old based on git log). If so, read it directly. Otherwise, run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to get fresh project data and write the output to `.devorch/PROJECT.md`. Use this data as inline context for planning. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
+**Conventions**: Read `.devorch/CONVENTIONS.md`.
+
+- **If missing**: Generate it now. Launch 1-2 `Task` agents with `subagent_type=Explore` to investigate:
+  - **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management, error handling patterns
+  - **Active workarounds** — patterns builders must preserve and why (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER")
+  - **Gotchas** — things a builder needs to know to avoid mistakes
+
+  Write `.devorch/CONVENTIONS.md` from Explore findings using this format:
+
+  ```markdown
+  # Code Conventions
+
+  ## Patterns
+  <component structure, service patterns, state management, error handling — from Explore findings>
+
+  ## Active Workarounds
+  <workarounds builders must preserve, and why they exist>
+  (skip section if none found)
+
+  ## Gotchas
+  <things a builder needs to know to avoid mistakes>
+  ```
+
+  **Sampling rule:** When a section has many files (50+ components, 20+ routes), read 3-5 representative files to identify the pattern. Stop when the pattern is clear.
+
+- **If exists**: Quick staleness check — compare library names mentioned in CONVENTIONS.md against current `package.json` dependencies. If CONVENTIONS.md references libraries no longer in package.json (or major new dependencies aren't reflected), regenerate it using the process above.
 
 If `.devorch/plans/current.md` exists:
 - Read `.devorch/state.md`. If state shows the plan is `completed` (or last completed phase equals total phase count in current.md), archive silently — move current.md to `.devorch/plans/archive/<timestamp>-<plan-name>.md` (create archive dir if needed). No need to ask.
@@ -131,7 +156,7 @@ Delete `.devorch/state.md` and `.devorch/state-history.md` if they exist — a n
 ### 11. Auto-commit
 
 Stage and commit all devorch files modified in this session:
-- Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/PROJECT.md` (if created/updated)
+- Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/CONVENTIONS.md` (if created/updated)
 - If state.md or state-history.md were deleted, stage those deletions too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 

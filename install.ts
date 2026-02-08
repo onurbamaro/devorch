@@ -105,4 +105,4 @@ writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
 console.log(`\nInstalled ${totalFiles} files.`);
 console.log("Restart Claude Code for the statusline to take effect.");
-console.log("Run /devorch:map-codebase in any project to get started.");
+console.log("Run /devorch:make-plan in any project to get started.");
