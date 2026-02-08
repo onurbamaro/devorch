@@ -13,9 +13,44 @@ Create a phased implementation plan for the project.
 
 ### 1. Load context
 
-**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context for planning — do not save it to a file. Additionally, read `.devorch/PROJECT.md` if it exists (product context from `/devorch:new-idea`). If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
+**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context for planning — do not save it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
-**Conventions**: Read `.devorch/CONVENTIONS.md`.
+**New project detection**: If map-project.ts output shows no source code files and no dependencies (empty or scaffold-only project), enter discovery mode:
+
+1. **Product discovery** — Use `AskUserQuestion` (2-3 questions at a time, adaptive):
+   - What the product does (elevator pitch)
+   - Target audience
+   - Essential MVP features (max 5)
+   - Scope boundaries (what it does NOT do)
+
+2. **Technical discovery** — Use `AskUserQuestion`:
+   - Language/runtime (suggest based on product type)
+   - Framework (suggest 2-3 options with trade-offs)
+   - Database, authentication, deployment (if applicable)
+
+3. **Validate scope** — Summarize MVP back to user. Confirm nothing is missing or should be removed. MVP should be achievable in 3-5 build phases.
+
+4. **Generate architecture** — Write `.devorch/ARCHITECTURE.md`:
+
+   ```markdown
+   # Architecture
+
+   ## Structure
+   [Proposed folder structure]
+
+   ## Data Model
+   [Key entities and relationships]
+
+   ## API Design
+   [Key endpoints or interfaces]
+
+   ## Patterns
+   [Architectural patterns chosen and why]
+   ```
+
+After discovery, skip CONVENTIONS.md generation (no code to analyze yet) and skip steps 3-4 (no codebase to explore). Continue to step 5 (Clarify) for implementation-specific questions about the first milestone.
+
+**Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
 - **If missing**: Generate it now. Launch 1-2 `Task` agents with `subagent_type=Explore` to investigate:
   - **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management, error handling patterns
@@ -156,7 +191,7 @@ Delete `.devorch/state.md` and `.devorch/state-history.md` if they exist — a n
 ### 11. Auto-commit
 
 Stage and commit all devorch files modified in this session:
-- Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/CONVENTIONS.md` (if created/updated)
+- Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/CONVENTIONS.md` (if created/updated), `.devorch/ARCHITECTURE.md` (if created)
 - If state.md or state-history.md were deleted, stage those deletions too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
