@@ -75,7 +75,7 @@ Direct implementation with auto-commit. Automatically escalates to a full plan i
 
 ```
 /devorch:plan-tests        # analyze code -- .devorch/plans/tests.md
-/devorch:make-tests        # generate and run tests from the plan
+/devorch:build-tests        # generate and run tests from the plan
 ```
 
 ---
@@ -131,7 +131,7 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 | `/devorch:check-implementation` | Verifies full implementation against all criteria. | Explore |
 | `/devorch:quick` | Small fix with auto-commit. Escalates to make-plan if complex. | Explore |
 | `/devorch:plan-tests` | Plans testing strategy per module. | Explore |
-| `/devorch:make-tests` | Generates and runs tests from the test plan. | Explore, Builder |
+| `/devorch:build-tests` | Generates and runs tests from the test plan. | Explore, Builder |
 | `/devorch:debug` | Agent Teams hypothesis-testing investigation. | Agent Teams |
 | `/devorch:review` | Agent Teams adversarial code review. | Agent Teams |
 | `/devorch:explore-deep` | Agent Teams deep architectural exploration. | Agent Teams |
@@ -223,8 +223,8 @@ commands:
   - name: plan-tests
     signature: /devorch:plan-tests
     purpose: Plan testing strategy per module
-  - name: make-tests
-    signature: /devorch:make-tests
+  - name: build-tests
+    signature: /devorch:build-tests
     purpose: Generate and run tests from test plan
   - name: debug
     signature: /devorch:debug
