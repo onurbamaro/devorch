@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { homedir } from "os";
 
@@ -43,6 +43,10 @@ for (const { src, dest, label } of targets) {
     continue;
   }
 
+  // Clean destination to remove stale files from previously deleted commands
+  if (existsSync(dest)) {
+    rmSync(dest, { recursive: true });
+  }
   mkdirSync(dest, { recursive: true });
 
   const files = readdirSync(src);

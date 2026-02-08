@@ -23,10 +23,14 @@ devorch/
     devorch-validator.md
   commands/
     build.md
+    build-tests.md
     check-implementation.md
+    debug.md
+    explore-deep.md
     make-plan.md
-    make-tests.md
-    ... +5 files
+    plan-tests.md
+    quick.md
+    review.md
   hooks/
     devorch-statusline.cjs
     post-edit-lint.ts
