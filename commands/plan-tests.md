@@ -17,7 +17,7 @@ Plan a testing strategy for the project.
 
 **Conventions**: Read `.devorch/CONVENTIONS.md`.
 
-- **If missing**: Generate it now. Launch 1-2 `Task` agents with `subagent_type=Explore` to investigate:
+- **If missing**: Generate it now. Launch 1-2 Explore agents (use the **Task tool call** with `subagent_type="Explore"`) to investigate:
   - **Architectural patterns** — how services/modules are structured, error handling patterns
   - **Active workarounds** — patterns builders must preserve and why
   - **Gotchas** — things a builder needs to know to avoid mistakes
@@ -57,7 +57,7 @@ Determine before exploring:
 
 Before asking the user anything, understand the codebase. Launch Explore agents to map the testable areas — structure, patterns, complexity, existing test coverage.
 
-Use `Task` agents with `subagent_type=Explore`. Scale to size:
+Use the **Task tool call** with `subagent_type="Explore"`. Scale to size:
 
 - **Small** — One Explore agent for the whole codebase.
 - **Medium** — Parallel Explore agents: one per area (e.g., "business logic", "API routes", "UI components", "utilities").
@@ -91,7 +91,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity before planning. Each que
 
 If user answers revealed new areas to explore, launch additional Explore agents targeted by user's choices.
 
-Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting matches).
+Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting matches).
 
 **Cache exploration results**: After all Explore agents return (from both step 4 and step 6), write `.devorch/explore-cache.md` with the combined summaries (or append to existing cache):
 
@@ -183,7 +183,7 @@ Explain: planning consumes significant context — `/clear` frees it before buil
 
 - Do not narrate actions. Execute directly without preamble.
 - **PLANNING ONLY.** Do not write test code.
-- **The orchestrator NEVER reads source code files directly.** Use `Task` with `subagent_type=Explore` for all code analysis. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches).
+- **The orchestrator NEVER reads source code files directly.** Use the **Task tool call** with `subagent_type="Explore"` for all code analysis. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches).
 - Organize by module/feature, NOT by build phase.
 - Prioritize: business logic > API endpoints > UI interactions > utilities.
 - Don't over-test. Focus on behavior, not implementation details.

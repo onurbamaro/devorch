@@ -23,7 +23,7 @@ Generate and run tests based on the test plan.
 
 Read the `<setup>` section of the test plan. If no setup is needed (section empty or missing), skip to stage 3.
 
-Deploy a `Task` agent with `subagent_type=devorch-builder`. The prompt includes:
+Use the **Task tool call** with `subagent_type="devorch-builder"`. The prompt includes:
 - Setup tasks from the test plan
 - Project conventions from `.devorch/CONVENTIONS.md`
 - `commit with chore(test): setup test infrastructure`
@@ -40,7 +40,7 @@ After completion, verify setup is in place. Update state:
 
 ### 3. Module builders
 
-Deploy a `Task` agent with `subagent_type=general-purpose`. The prompt includes:
+Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt includes:
 
 **Context to pass:**
 - Full `<module>` sections from the test plan
@@ -50,11 +50,11 @@ Deploy a `Task` agent with `subagent_type=general-purpose`. The prompt includes:
 
 **Instructions for the Task agent:**
 
-1. **Explore (conditional)**: Check explore cache for areas relevant to each module's `<files>`. Launch Explore agents (`Task` with `subagent_type=Explore`) only for uncovered or stale areas. Append new summaries to `.devorch/explore-cache.md`.
+1. **Explore (conditional)**: Check explore cache for areas relevant to each module's `<files>`. Launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) only for uncovered or stale areas. Append new summaries to `.devorch/explore-cache.md`.
 
 2. **Create tasks**: One `TaskCreate` per module. All modules are independent → one wave (no `addBlockedBy`). If more than 5 modules, batch into waves of 5.
 
-3. **Deploy builders**: Launch `Task` agents with `subagent_type=devorch-builder` and `run_in_background=true`. All tasks in a wave launch in a single message.
+3. **Deploy builders**: Use the **Task tool call** (never Bash/CLI) with `subagent_type="devorch-builder"` and `run_in_background=true`. All tasks in a wave launch in a single message.
 
    Each builder prompt includes:
    - Plan's **Objective** (from `<objective>`)
@@ -85,7 +85,7 @@ After the Task agent returns, verify: check `git log` for test commits matching 
 
 ### 4. Test validation
 
-Deploy a `Task` agent with `subagent_type=general-purpose`. The prompt includes:
+Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt includes:
 
 1. Run the full test suite: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts`
 2. Also run tests directly if a test script is available.

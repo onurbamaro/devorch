@@ -26,7 +26,7 @@ Read `.devorch/CONVENTIONS.md` if it exists — pass relevant sections to invest
 
 ### 3. Explore the affected area
 
-Launch an Explore agent (`Task` with `subagent_type=Explore`) to understand the area described in `$ARGUMENTS`. The Explore agent should:
+Launch an Explore agent (use the **Task tool call** with `subagent_type="Explore"`) to understand the area described in `$ARGUMENTS`. The Explore agent should:
 - Identify relevant files, modules, and data flows
 - Note recent changes to the area (`git log --oneline -10 -- <paths>`)
 - Surface any existing error handling or known fragile patterns

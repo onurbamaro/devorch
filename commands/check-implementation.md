@@ -40,7 +40,7 @@ Launch via `Bash` with `run_in_background=true`:
 
 **Per-phase functional agents (one per completed phase)**
 
-For each completed phase, launch a separate Explore agent (`Task` with `subagent_type=Explore`). This prevents a single agent from running out of context on large plans.
+For each completed phase, launch a separate Explore agent (use the **Task tool call** with `subagent_type="Explore"`). This prevents a single agent from running out of context on large plans.
 
 Each agent's prompt includes: that phase's acceptance criteria (from extract-criteria output), the objective, and the relevant files for that phase.
 

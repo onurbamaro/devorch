@@ -52,7 +52,7 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet) and ski
 
 **Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
-- **If missing**: Generate it now. Launch 1-2 `Task` agents with `subagent_type=Explore` to investigate:
+- **If missing**: Generate it now. Launch 1-2 Explore agents (use the **Task tool call** with `subagent_type="Explore"`) to investigate:
   - **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management, error handling patterns
   - **Active workarounds** — patterns builders must preserve and why (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER")
   - **Gotchas** — things a builder needs to know to avoid mistakes
@@ -117,7 +117,7 @@ After the team completes, continue with step 4 — the Agent Teams exploration s
 
 Before asking the user anything, understand the codebase. Launch Explore agents to map the affected areas — structure, patterns, constraints, edge cases. This ensures questions are informed, not guesses.
 
-Use `Task` agents with `subagent_type=Explore`. Scale to complexity:
+Use the **Task tool call** with `subagent_type="Explore"`. Scale to complexity:
 
 - **Simple** — One Explore agent to skim the affected area.
 - **Medium** — Parallel Explore agents: one per affected area.
@@ -153,7 +153,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 
 If user answers revealed new areas to explore, or if the initial exploration was shallow, launch additional Explore agents now — targeted by the user's choices.
 
-Use `Task` agents with `subagent_type=Explore` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
+Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
@@ -333,6 +333,6 @@ Risk: <risk>
 
 - Do not narrate actions. Execute directly without preamble.
 - **PLANNING ONLY.** Do not build, write code, or deploy builder agents.
-- **The orchestrator NEVER reads source code files directly.** Use `Task` with `subagent_type=Explore` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches).
+- **The orchestrator NEVER reads source code files directly.** Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches).
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.

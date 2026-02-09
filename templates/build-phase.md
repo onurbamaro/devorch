@@ -8,9 +8,9 @@ Execute one phase of the current devorch plan.
 
 2. **Load context from disk**: Read `.devorch/CONVENTIONS.md` and `.devorch/explore-cache.md` (if they exist). If this is phase 2+, read `.devorch/state.md` for the previous phase handoff (it contains only the last completed phase's summary — this is the only inter-phase context needed).
 
-3. **Explore (conditional)**: Check explore cache for areas relevant to this phase's tasks. Launch Explore agents (`Task` with `subagent_type=Explore`) only for uncovered or stale areas. Append new summaries to explore-cache.
+3. **Explore (conditional)**: Check explore cache for areas relevant to this phase's tasks. Launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) only for uncovered or stale areas. Append new summaries to explore-cache.
 
-4. **Deploy builders**: For each task, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders via `Task` with `subagent_type=devorch-builder` and `run_in_background=true` following the wave structure. All tasks in a wave launch as parallel agents in a single message.
+4. **Deploy builders**: For each task, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders using the **Task tool call** (never Bash/CLI) with `subagent_type="devorch-builder"` and `run_in_background=true` following the wave structure. All tasks in a wave launch as parallel agents in a single message.
 
    Each builder prompt includes:
    - Plan's **Objective** (from `<objective>`), **Solution Approach** (from `<solution-approach>`, if exists), **Decisions** (from `<decisions>`, if exists)
@@ -28,7 +28,7 @@ Execute one phase of the current devorch plan.
    - **First failure (0 retries)**: Read the builder's output file (path from Task launch) to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
    - **After 1 retry**: Stop and report the failure. Do not retry further.
 
-5. **Validate**: Deploy validator in foreground (`Task` with `subagent_type=devorch-validator`). Its prompt includes inline: phase **criteria** (from `<criteria>`), **validation commands** (from `<validation>`), task summaries, relevant conventions. If FAIL → stop and report.
+5. **Validate**: Deploy validator in foreground (use the **Task tool call** with `subagent_type="devorch-validator"`). Its prompt includes inline: phase **criteria** (from `<criteria>`), **validation commands** (from `<validation>`), task summaries, relevant conventions. If FAIL → stop and report.
 
 6. **Phase commit**: If there are uncommitted changes after validation passes, commit: `phase(N): <goal summary>`
 
