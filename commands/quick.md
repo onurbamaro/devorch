@@ -42,4 +42,5 @@ Quick fix, small change, bug fix, or standalone task with auto-commit.
 - No Task agents except Explore (for understanding code before changing it).
 - Always validate with check-project.ts before committing.
 - If conventions file exists, follow it strictly.
+- All user-facing text in Portuguese must use correct pt-BR accentuation and grammar (e.g., "não", "ação", "é", "código", "será"). Never write Portuguese without proper accents.
 - The complexity assessment is about cognitive complexity, not file count. A simple rename across 10 files is straightforward; a 2-file change requiring new architecture is complex.
