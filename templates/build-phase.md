@@ -10,7 +10,7 @@ Execute one phase of the current devorch plan.
 
 3. **Explore (conditional)**: Check explore cache for areas relevant to this phase's tasks. Launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) only for uncovered or stale areas. Append new summaries to explore-cache.
 
-4. **Deploy builders**: For each task, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders using the **Task tool call** (never Bash/CLI) with `subagent_type="devorch-builder"` and `run_in_background=true` following the wave structure. All tasks in a wave launch as parallel agents in a single message.
+4. **Deploy builders**: For each task, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders using the **Task tool call** (never Bash/CLI) with `subagent_type="devorch-builder"` as **foreground parallel** calls following the wave structure. All tasks in a wave launch as parallel Task calls **in a single message** (do NOT use `run_in_background`). The Task calls block until all builders in the wave return — no polling needed.
 
    Each builder prompt includes:
    - Plan's **Objective** (from `<objective>`), **Solution Approach** (from `<solution-approach>`, if exists), **Decisions** (from `<decisions>`, if exists)
@@ -22,10 +22,10 @@ Execute one phase of the current devorch plan.
 
    Do NOT include check-project.ts instructions — the builder agent definition already handles validation.
 
-   Poll with `TaskList` until all tasks in a wave complete. **Never call `TaskOutput`.**
+   After all builders in a wave return, verify via `TaskList` that every task is marked completed.
 
-   **On builder failure** (background process ended, task not marked completed, no matching commit in `git log`):
-   - **First failure (0 retries)**: Read the builder's output file (path from Task launch) to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
+   **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
+   - **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
    - **After 1 retry**: Stop and report the failure. Do not retry further.
 
 5. **Validate**: Deploy validator in foreground (use the **Task tool call** with `subagent_type="devorch-validator"`). Its prompt includes inline: phase **criteria** (from `<criteria>`), **validation commands** (from `<validation>`), task summaries, relevant conventions. If FAIL → stop and report.
@@ -56,6 +56,6 @@ Execute one phase of the current devorch plan.
 - Do not narrate actions. Execute directly without preamble.
 - Execute **ONE phase** per invocation.
 - The orchestrator never reads source code files. Use Explore agents for codebase context. Only read devorch files (`.devorch/*`).
-- Never call `TaskOutput` on background builders — defeats `run_in_background`.
+- Deploy builders as **foreground parallel** Task calls — never use `run_in_background` for builders.
 - If a builder fails, report and stop.
 - Always update state.md, even on partial failure.
