@@ -30,6 +30,7 @@ You are a builder agent for devorch. You execute exactly ONE task at a time.
    - Only commit files related to this task
    - Stage specific files, not `git add .`
 6. **CRITICAL — Mark task completed**: Call `TaskUpdate` with `status: "completed"` on your task. This is how the orchestrator detects your work is done. If you skip this, the entire build pipeline stalls. Do this as your very last action.
+7. **Final output**: Your last text message must be a concise summary (max 3 lines): commit hash, files changed, and any warnings. Nothing else — the phase agent receives this directly in its context.
 
 ## Rules
 
