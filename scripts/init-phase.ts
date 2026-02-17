@@ -2,7 +2,7 @@
  * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache.
  * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N>
  * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, and content (or contentFile if >25000 chars).
- * Replaces extract-phase.ts with structured JSON output and additional context loading.
+ * Compound init: returns phase context, conventions, state, and filtered explore-cache as structured JSON.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";

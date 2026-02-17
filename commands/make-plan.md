@@ -7,7 +7,9 @@ disallowed-tools: EnterPlanMode
 
 Create a phased implementation plan for the project.
 
-**Input**: $ARGUMENTS (description of what to build/change). If empty, stop and ask the user.
+**Input**: $ARGUMENTS (description of what to build/change, optionally with `--auto` flag). If empty, stop and ask the user.
+
+**Flag detection**: If `$ARGUMENTS` contains `--auto`, set the auto flag for later use (step 12). Strip `--auto` from the description before passing it to the planning workflow.
 
 ## Steps
 
@@ -78,8 +80,8 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet) and ski
 - **If exists**: Quick staleness check — compare library names mentioned in CONVENTIONS.md against current `package.json` dependencies. If CONVENTIONS.md references libraries no longer in package.json (or major new dependencies aren't reflected), regenerate it using the process above.
 
 If `.devorch/plans/current.md` exists:
-- Read `.devorch/state.md`. If state shows the plan is `completed` (or last completed phase equals total phase count in current.md), archive silently — move current.md to `.devorch/plans/archive/<timestamp>-<plan-name>.md` (create archive dir if needed). No need to ask.
-- Otherwise, ask the user if they want to archive it (in-progress plan, may lose work).
+- Read `.devorch/state.md`. If state shows the plan is `completed` (or last completed phase equals total phase count in current.md), archive silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. No need to ask.
+- Otherwise, ask the user if they want to archive it (in-progress plan, may lose work). If yes, run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`.
 
 ### 2. Classify
 
@@ -195,7 +197,16 @@ Stage and commit all devorch files modified in this session:
 - If state.md or state-history.md were deleted, stage those deletions too
 - Format: `chore(devorch): plan — <descriptive plan name>`
 
-### 12. Report
+### 12. Report or auto-build
+
+**If `--auto` flag was set:**
+
+1. Write `.devorch/config.json` with `{"auto_advance": true}`.
+2. Read `$CLAUDE_HOME/commands/devorch/build.md`. Strip YAML frontmatter (remove everything between the first `---` pair, inclusive).
+3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt.
+4. After the Task returns, update `.devorch/config.json` to `{"auto_advance": false}`.
+
+**If `--auto` flag was NOT set:**
 
 Show classification, phases with goals, wave structure, then instruct:
 

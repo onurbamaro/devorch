@@ -36,7 +36,10 @@ Launch **everything** in a single parallel batch — Explore agents and automate
 
 Launch via `Bash` with `run_in_background=true`:
 - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` for lint, typecheck, build, and test.
+- `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan .devorch/plans/current.md` for new-file artifact verification.
 - Each **Validation Command** from every completed phase (from the extract-criteria output). If multiple commands, chain with `&&`.
+
+Parse verify-build.ts JSON output. If any files have status `"missing"` or `"stub"`: include these as known issues in the verification context passed to Explore agents. If `failed > 0`: the overall verdict cannot be PASS unless all missing/stub files are explicitly accounted for (e.g., intentionally removed or renamed during implementation).
 
 **Per-phase functional agents (one per completed phase)**
 

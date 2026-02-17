@@ -35,6 +35,16 @@ For each remaining phase N (sequentially):
 
 After all phases complete successfully, run the full implementation verification by reading and executing `$CLAUDE_HOME/commands/devorch/check-implementation.md`. This is the single source of truth for post-build verification — do not duplicate its logic here.
 
+### 4. Build summary
+
+If the implementation check verdict is **PASS**:
+
+1. Run `bun $CLAUDE_HOME/devorch-scripts/generate-summary.ts --plan .devorch/plans/current.md`
+2. Stage `.devorch/build-summary.md` and commit: `chore(devorch): build summary — <plan name>` (read the plan title from the generate-summary.ts JSON output or from `.devorch/plans/current.md`).
+3. Report: "Build summary saved to `.devorch/build-summary.md`"
+
+If the verdict is **FAIL**, skip this step.
+
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
