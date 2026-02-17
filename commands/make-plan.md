@@ -113,6 +113,8 @@ Spawn a team using `TeammateTool` `spawnTeam` with 2 analysts from the template:
 
 Analysts explore in parallel via Agent Teams and report findings via messages. Lead synthesizes analyst findings into additional context for the explore cache and uses them to generate deeper, more informed clarification questions in step 5.
 
+Analysts must use `subagent_type="Explore"` for all codebase reading — they follow the same orchestrator rule (never read source files directly).
+
 After the team completes, continue with step 4 — the Agent Teams exploration supplements, not replaces, the existing Explore agents.
 
 ### 4. Initial exploration
@@ -159,7 +161,7 @@ Use the **Task tool call** with `subagent_type="Explore"` for all codebase explo
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
-**Cache exploration results**: After all Explore agents return (from both step 4 and step 6), write `.devorch/explore-cache.md` with the combined summaries:
+**Cache exploration results**: After all Explore agents return (from both step 4 and step 6), write `.devorch/explore-cache.md` with the combined summaries. This cache serves two purposes: (1) reused by `/devorch:build` to avoid re-exploring the same areas, and (2) keeps the orchestrator's context free — findings live on disk, not in the planning window.
 
 ```markdown
 # Explore Cache
@@ -172,7 +174,7 @@ Generated: <ISO timestamp>
 <Explore agent summary for this area>
 ```
 
-This cache is reused by `/devorch:build` to avoid re-exploring the same areas. Each section title should match the area explored (e.g., "Auth module", "API routes", "Database layer").
+Each section title should match the area explored (e.g., "Auth module", "API routes", "Database layer").
 
 ### 7. Design solution (medium/complex only)
 
@@ -344,6 +346,7 @@ Risk: <risk>
 
 - Do not narrate actions. Execute directly without preamble.
 - **PLANNING ONLY.** Do not build, write code, or deploy builder agents.
-- **The orchestrator NEVER reads source code files directly.** Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches).
+- **The orchestrator NEVER reads source code files directly.** Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
+- **Explore agents focus on source code.** Devorch state files (`.devorch/*`) are read by the orchestrator, not by Explore agents. This keeps agent prompts focused and avoids conflicting reads.
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.
