@@ -3,7 +3,7 @@ description: Verifies the full plan was implemented correctly
 model: opus
 ---
 
-Post-build verification. Only checks what per-phase validators DON'T cover: file artifacts, cross-phase integration, final project health, and adversarial review.
+Post-build verification. Only checks what per-phase validators DON'T cover: file artifacts, cross-phase integration, final project health, and adversarial review. Resolves trivial issues automatically, asks for clarification on ambiguous ones, and suggests `/devorch:make-plan` for complex ones.
 
 Can be run:
 - Automatically at the end of `/devorch:build` (inline, not as Task)
@@ -13,18 +13,20 @@ Can be run:
 
 ### 1. Load plan data
 
-Run `bun $CLAUDE_HOME/devorch-scripts/extract-criteria.ts --plan .devorch/plans/current.md` to get all acceptance criteria, validation commands, and relevant files as structured JSON.
+Run `bun $CLAUDE_HOME/devorch-scripts/extract-criteria.ts --plan <planPath>` to get all acceptance criteria, validation commands, and relevant files as structured JSON. The `<planPath>` variable is set by build.md Step 0 (e.g., `.devorch/plans/current.md` or `.worktrees/<name>/.devorch/plans/current.md`).
 
-Read `.devorch/CONVENTIONS.md` (if exists).
+Read `<projectRoot>/.devorch/CONVENTIONS.md` (if exists).
 
-Read `.devorch/state.md` to determine which phases have been completed.
+Read `<projectRoot>/.devorch/state.md` to determine which phases have been completed.
 
 ### 2. Determine changed files
 
-Run `git diff --name-only` against the baseline. To find the baseline:
-- If state.md shows all phases complete, diff against the commit before the first phase: scan `git log --oneline` for the first `phase(1):` commit and use its parent.
+Run `git -C <projectRoot> diff --name-only` against the baseline. To find the baseline:
+- If state.md shows all phases complete, diff against the commit before the first phase: scan `git -C <projectRoot> log --oneline` for the first `phase(1):` commit and use its parent.
 - If partially complete, diff up to the last completed phase.
 - Fallback: diff against the plan commit (`chore(devorch): plan`).
+
+All git commands use `git -C <projectRoot>` to ensure correct working directory when running inside a worktree.
 
 ### 3. Verify (all parallel, single message)
 
@@ -34,12 +36,12 @@ Launch **everything** below in a single parallel batch.
 
 Launch via `Bash` with `run_in_background=true`:
 - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — final lint, typecheck, build, test run.
-- `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan .devorch/plans/current.md` — new-file artifact verification.
+- `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — new-file artifact verification.
 - Each **Validation Command** from every completed phase (from extract-criteria output). If multiple, chain with `&&`.
 
 **Criteria tally (Bash, background)**
 
-- `bun $CLAUDE_HOME/devorch-scripts/tally-criteria.ts --plan .devorch/plans/current.md` — deterministic X/Y score from plan + state. No agent needed — completed phases have all criteria passed (guaranteed by per-phase validator gate).
+- `bun $CLAUDE_HOME/devorch-scripts/tally-criteria.ts --plan <planPath>` — deterministic X/Y score from plan + state. No agent needed — completed phases have all criteria passed (guaranteed by per-phase validator gate).
 
 **Cross-phase integration (one Explore agent, foreground)**
 
@@ -116,15 +118,68 @@ Performance: <findings or clean>
 
 Parse the tally-criteria.ts output for the criteria section. Parse verify-build.ts JSON for the file artifacts section. Parse check-project.ts JSON for automated checks. Use Explore agent output for cross-phase integration.
 
-### 6. Follow-up
+### 6. Smart Dispatch
 
-If **PASS**: Report success. (State update is handled by the caller — build.md or the user.)
+If **PASS** with no warnings: Report success. (State update is handled by the caller — build.md or the user.)
 
-If **FAIL** or warnings: List each issue as a concrete fix, and suggest:
-```
-/devorch:quick <specific fix description>
-```
-for each actionable issue. Group related issues into a single quick fix when they affect the same file.
+If **FAIL** or warnings: classify each issue found (from cross-phase integration, automated checks, file artifacts, adversarial review) using the rules below.
+
+**Issue Classification** (evaluate each issue against these rules, in order):
+
+1. **Trivial** — fix is self-evident, single-file, no ambiguity:
+   - Leftover `TODO`, `FIXME`, `HACK`, `XXX` comments from builders
+   - Unused imports or orphan exports
+   - Missing semicolons, trailing whitespace, formatting issues
+   - Obvious typos in strings or variable names
+   - Empty catch blocks or stub implementations that should have been filled
+   - A file that should exist but is missing from a simple copy/rename oversight
+
+2. **Ambiguous** — multiple valid interpretations, needs user input:
+   - Behavior change that might be intentional or accidental
+   - Naming that could follow multiple conventions
+   - Code that works but differs from the pattern in CONVENTIONS.md — unclear if deliberate
+   - A test that fails but the expected behavior is debatable
+   - A handoff contract that was partially honored — unclear which part matters
+
+3. **Complex** — requires architectural thought, multiple files, or new design:
+   - Missing feature that was in the plan but not implemented
+   - Structural issue affecting 4+ files
+   - Performance problem requiring algorithmic changes
+   - Security vulnerability requiring design-level fix
+   - Integration issue between multiple modules
+
+**Dispatch Logic** (execute in this order):
+
+**Step 6a — Fix trivial issues inline:**
+- For each trivial issue: edit the file directly using the Edit tool. Keep fixes minimal — only change what's needed.
+- After all trivial fixes: stage and commit changed files with message `fix(check): <concise description of fixes>`
+- Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` to verify no regressions
+- Report: "Fixed N trivial issues inline: [one-line list]"
+
+**Step 6b — Ask about ambiguous issues:**
+- For each ambiguous issue (or group of related ones): use `AskUserQuestion` with 2-4 concrete options describing the possible interpretations
+- Include file:line evidence and the specific ambiguity in the question
+- Based on the user's answer:
+  - If the answer makes the fix trivial → fix inline (same as 6a: edit, commit, check-project)
+  - If the answer reveals complexity → add to the complex list (Step 6c)
+- Report each resolution
+
+**Step 6c — Suggest make-plan for complex issues:**
+- Group related complex issues into a single coherent description
+- Generate a ready-to-paste command with full context:
+  ```
+  /devorch:make-plan <detailed description including: what's wrong, which files are affected, what the expected outcome should be>
+  ```
+- Do NOT attempt to fix complex issues inline — they need proper planning
+- Report: "These issues require planning. Suggested command above."
+
+**Step 6d — Re-verify (after any inline fixes):**
+- If any fixes were made in steps 6a or 6b:
+  - Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — verify lint + typecheck pass
+  - Re-run `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — verify artifacts
+  - If both pass and no complex issues remain: update verdict to **PASS**
+  - If both pass but complex issues exist: update verdict to **PASS with N complex issues noted**
+  - If re-verification fails: report the new failures (do not loop — one round of fixes only)
 
 ## Rules
 
