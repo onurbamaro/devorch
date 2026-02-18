@@ -72,7 +72,7 @@ This is the single source of truth for post-build verification — do not duplic
 If the implementation check verdict is **PASS**:
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/generate-summary.ts --plan <planPath>`
-2. Stage `<projectRoot>/.devorch/build-summary.md` and commit: `chore(devorch): build summary — <plan name>`. If `isWorktree`, use `git -C <projectRoot>` for the commit.
+2. Stage `<projectRoot>/.devorch/build-summary.md` and commit: `chore(devorch): build summary — <plan name>`. Use `git -C <projectRoot>` for the commit.
 3. Report: "Build summary saved to `<projectRoot>/.devorch/build-summary.md`"
 
 If the verdict is **FAIL**, skip this step.

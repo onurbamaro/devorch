@@ -191,7 +191,7 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 
 Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <planPath>`. Fix issues if blocked.
 
-Default `planPath` is `.devorch/plans/current.md` unless worktreeMode set a different path in step 8.
+`planPath` is set in step 8 to the worktree plan location.
 
 ### 10. Reset state
 
