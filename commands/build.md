@@ -33,7 +33,9 @@ For each remaining phase N (sequentially):
 
 ### 3. Implementation check
 
-After all phases complete successfully, run the full implementation verification by reading and executing `$CLAUDE_HOME/commands/devorch/check-implementation.md`. This is the single source of truth for post-build verification — do not duplicate its logic here.
+After all phases complete successfully, run the full implementation verification **inline in this context** — read `$CLAUDE_HOME/commands/devorch/check-implementation.md` and follow its steps directly. Do NOT spawn a Task agent for check-implementation. Execute it here so that any agents it launches (Explore, Agent Teams) are first-level Task calls, not nested.
+
+This is the single source of truth for post-build verification — do not duplicate its logic here.
 
 ### 4. Build summary
 

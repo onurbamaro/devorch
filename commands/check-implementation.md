@@ -3,21 +3,21 @@ description: Verifies the full plan was implemented correctly
 model: opus
 ---
 
-Comprehensive post-build verification. Checks that every acceptance criterion from every phase is implemented, conventions are followed, and cross-phase integration works.
+Post-build verification. Only checks what per-phase validators DON'T cover: file artifacts, cross-phase integration, final project health, and adversarial review.
 
 Can be run:
-- Automatically at the end of `/devorch:build`
+- Automatically at the end of `/devorch:build` (inline, not as Task)
 - Manually at any time after one or more phases are built
 
 ## Workflow
 
 ### 1. Load plan data
 
-Run `bun $CLAUDE_HOME/devorch-scripts/extract-criteria.ts --plan .devorch/plans/current.md` to get all acceptance criteria, validation commands, and relevant files across all phases as structured JSON.
+Run `bun $CLAUDE_HOME/devorch-scripts/extract-criteria.ts --plan .devorch/plans/current.md` to get all acceptance criteria, validation commands, and relevant files as structured JSON.
 
 Read `.devorch/CONVENTIONS.md` (if exists).
 
-Read `.devorch/state.md` to determine which phases have been completed. Only verify completed phases.
+Read `.devorch/state.md` to determine which phases have been completed.
 
 ### 2. Determine changed files
 
@@ -26,49 +26,26 @@ Run `git diff --name-only` against the baseline. To find the baseline:
 - If partially complete, diff up to the last completed phase.
 - Fallback: diff against the plan commit (`chore(devorch): plan`).
 
-This produces the list of files that were created or modified by the build.
+### 3. Verify (all parallel, single message)
 
-### 3. Verify and check (all parallel)
+Launch **everything** below in a single parallel batch.
 
-Launch **everything** in a single parallel batch — Explore agents and automated checks are independent and must not wait for each other.
-
-**Automated checks (background)**
+**Automated checks (Bash, background)**
 
 Launch via `Bash` with `run_in_background=true`:
-- `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` for lint, typecheck, build, and test.
-- `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan .devorch/plans/current.md` for new-file artifact verification.
-- Each **Validation Command** from every completed phase (from the extract-criteria output). If multiple commands, chain with `&&`.
+- `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — final lint, typecheck, build, test run.
+- `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan .devorch/plans/current.md` — new-file artifact verification.
+- Each **Validation Command** from every completed phase (from extract-criteria output). If multiple, chain with `&&`.
 
-Parse verify-build.ts JSON output. If any files have status `"missing"` or `"stub"`: include these as known issues in the verification context passed to Explore agents. If `failed > 0`: the overall verdict cannot be PASS unless all missing/stub files are explicitly accounted for (e.g., intentionally removed or renamed during implementation).
+**Criteria tally (Bash, background)**
 
-**Per-phase functional agents (one per completed phase)**
+- `bun $CLAUDE_HOME/devorch-scripts/tally-criteria.ts --plan .devorch/plans/current.md` — deterministic X/Y score from plan + state. No agent needed — completed phases have all criteria passed (guaranteed by per-phase validator gate).
 
-For each completed phase, launch a separate Explore agent (use the **Task tool call** with `subagent_type="Explore"`). This prevents a single agent from running out of context on large plans.
+**Cross-phase integration (one Explore agent, foreground)**
 
-Each agent's prompt includes: that phase's acceptance criteria (from extract-criteria output), the objective, and the relevant files for that phase.
+Launch ONE Explore agent via **Task tool call** with `subagent_type="Explore"` (do NOT use `run_in_background`). This is a foreground blocking call.
 
-Task: For each acceptance criterion in the assigned phase, locate the implementation in the codebase and verify it satisfies the criterion. Report each as:
-- ✅ **PASS** — criterion fully met, with file:line evidence
-- ⚠️ **PARTIAL** — partially met, describe what's missing
-- ❌ **FAIL** — not implemented or broken
-
-**Convention compliance agent (one)**
-
-Prompt includes: the list of changed files from step 2, the full CONVENTIONS.md content.
-
-Task: For each changed file, verify it follows the project conventions:
-- Naming (files, variables, functions, types)
-- Export patterns (named vs default)
-- Import style (path aliases, ordering)
-- Error handling patterns
-- Code style (indentation, semicolons, quotes — if not enforced by linter)
-- React/component patterns (if applicable)
-
-Report each file as compliant or list specific violations.
-
-**Cross-phase integration agent (one)**
-
-Prompt includes: the list of new files, the phase goals (`<goal>`) and handoff sections (`<handoff>`), the list of changed files.
+Prompt includes: the list of changed files from step 2, the new-files list, the phase goals and handoff sections from each completed phase, and CONVENTIONS.md content.
 
 Task: Verify that work from different phases integrates correctly:
 - Imports between new modules resolve correctly
@@ -78,45 +55,37 @@ Task: Verify that work from different phases integrates correctly:
 - No dead code introduced (unused functions, unreachable branches)
 - Handoff contracts honored (what phase N promised, phase N+1 consumed)
 
-**All Explore agents and background checks launch in a single message.** For a 3-phase plan, this means 5 Explore agents + 1-2 background Bash tasks, all concurrent. Collect all results before proceeding to the report.
+Report each finding with file:line evidence.
+
+**All checks launch in a single message.** The Bash calls run in background; the Explore agent blocks. After the Explore agent returns, collect background Bash results.
 
 ### 4. Adversarial review (conditional)
 
-Check if `--team` flag is present in `$ARGUMENTS`.
-
-If `--team` flag is NOT present: skip this step entirely. Proceed to step 5.
-
-If `--team` flag IS present:
-
 1. Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
-2. If Agent Teams is NOT enabled (`enabled: false`): stop and display the `instructions` field to the user. Do not proceed.
+2. If Agent Teams is NOT enabled (`enabled: false`): skip this step entirely. Proceed to step 5.
 3. If Agent Teams IS enabled:
    - Read `.devorch/team-templates.md` and extract the `check-team` template. If missing or unparseable, use defaults: 3 reviewers, model opus.
-   - Spawn a team using `TeammateTool` `spawnTeam` with 3 adversarial reviewers from the template:
+   - Create a team using `TeamCreate` with 3 adversarial reviewers from the template:
      - **security**: Adversarial security review — probe for vulnerabilities, injection risks, auth issues, data exposure
      - **quality**: Adversarial quality review — probe for correctness issues, edge case handling, maintainability concerns
      - **performance**: Adversarial performance review — probe for bottlenecks, resource leaks, scalability concerns
-   - Provide each reviewer with the combined output from all Explore agents and automated checks from step 3
+   - Provide each reviewer with the combined output from the Explore agent and automated checks from step 3
    - Each reviewer does a deeper adversarial analysis through their lens — actively trying to find flaws
-   - Lead collects adversarial findings for inclusion in the report (step 5)
+   - Collect adversarial findings for inclusion in the report (step 5)
+   - Shut down the team after all reviewers report back
 
 ### 5. Report
 
-Compile results from all Explore agents and automated checks into a structured report:
+Compile results from all checks into a structured report:
 
 ```
 ## Implementation Check: <plan name>
 
-### Functional Completeness
-Phase 1 — <name>: X/Y criteria ✅
-Phase 2 — <name>: X/Y criteria ✅
-Phase 3 — <name>: X/Y criteria (⚠️ 1 partial)
+### Criteria Tally
+Phase 1 — <name>: X/Y ✅
+Phase 2 — <name>: X/Y ✅
+Phase 3 — <name>: X/Y ✅
 Overall: XX/YY criteria passed
-
-### Convention Compliance
-N files checked — M compliant, K issues:
-- `src/foo.ts` — uses default export (project uses named exports)
-- `src/bar.ts` — missing error handling in async function
 
 ### Cross-phase Integration
 ✅ All imports resolve
@@ -130,11 +99,14 @@ Typecheck: ✅
 Build: ✅
 Tests: ✅ (47/47)
 
+### File Artifacts
+X/Y new files verified (verify-build.ts output)
+
 ### Phase Validation Commands
 Phase 1: `cmd1` ✅, `cmd2` ✅
 Phase 2: `cmd3` ✅
 
-### Adversarial Review (if --team)
+### Adversarial Review (if agent teams enabled)
 Security: <findings or clean>
 Quality: <findings or clean>
 Performance: <findings or clean>
@@ -142,9 +114,11 @@ Performance: <findings or clean>
 ### Verdict: PASS / FAIL (with N warnings)
 ```
 
+Parse the tally-criteria.ts output for the criteria section. Parse verify-build.ts JSON for the file artifacts section. Parse check-project.ts JSON for automated checks. Use Explore agent output for cross-phase integration.
+
 ### 6. Follow-up
 
-If **PASS**: Update `.devorch/state.md` status to `completed`. Report success.
+If **PASS**: Report success. (State update is handled by the caller — build.md or the user.)
 
 If **FAIL** or warnings: List each issue as a concrete fix, and suggest:
 ```
@@ -156,6 +130,7 @@ for each actionable issue. Group related issues into a single quick fix when the
 
 - Do not narrate actions. Execute directly without preamble.
 - Only verify completed phases — don't fail on phases that haven't been built yet.
-- The orchestrator does NOT read source code files directly. Explore agents do all code inspection.
+- The Explore agent does all code inspection. The orchestrator does NOT read source code files directly.
 - Report evidence (file:line) for every finding, not vague descriptions.
-- Be strict on functional criteria (the plan says what must work) but pragmatic on conventions (warn, don't fail, for minor style issues that linters don't catch).
+- Be strict on cross-phase integration (imports, dead code, handoffs) but pragmatic on minor style issues.
+- The criteria tally is deterministic — do not re-verify individual criteria. Per-phase validators already gate each phase. Trust the tally.
