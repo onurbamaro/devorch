@@ -240,18 +240,18 @@ Stage and commit all devorch files modified in this session:
 
 1. Write `.devorch/config.json` with `{"auto_advance": true}`.
 2. Read `$CLAUDE_HOME/commands/devorch/build.md`. Strip YAML frontmatter (remove everything between the first `---` pair, inclusive).
-3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt. If worktreeMode, append `\n\nPlan path: <planPath>` to the prompt.
+3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt. If worktreeMode, append `\n\n--plan <name>` to the prompt (where `<name>` is the kebab-case worktree name from step 8).
 4. After the Task returns, update `.devorch/config.json` to `{"auto_advance": false}`.
 
 **If `--auto` flag was NOT set:**
 
 Show classification, phases with goals, wave structure, then instruct:
 
-If worktreeMode:
+If worktreeMode (where `<name>` is the kebab-case worktree name from step 8):
 ```
 Plan saved to worktree: <worktreePath> (branch: <branch>)
 /clear
-/devorch:build --plan <planPath>
+/devorch:build --plan <name>
 ```
 
 Otherwise:

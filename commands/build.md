@@ -1,6 +1,6 @@
 ---
 description: Executes all remaining phases of the current devorch plan
-argument-hint: [--plan <path>]
+argument-hint: [--plan <name>]
 model: opus
 ---
 
@@ -8,21 +8,29 @@ Execute all remaining phases of the plan automatically, then verify the full imp
 
 **Continues from last checkpoint.** Picks up from where the last session left off via `state.md`.
 
-**Input**: `$ARGUMENTS` may contain `--plan <path>` to specify a plan file. Default: `.devorch/plans/current.md`. When using a worktree plan (e.g., `--plan .worktrees/my-feature/.devorch/plans/current.md`), all paths are derived from the plan location — state.md, explore-cache, scripts all resolve relative to the plan's `.devorch/` directory.
+**Input**: `$ARGUMENTS` may contain `--plan <name>` to specify which plan to build. The value can be:
+- A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
+- A **full path** (contains `/` or ends in `.md`) → used as-is
+- Omitted → defaults to `.devorch/plans/current.md`
 
 ## Workflow
 
 ### 0. Resolve plan path
 
-Parse `$ARGUMENTS` for `--plan <path>`. If not provided, default to `.devorch/plans/current.md`.
+Parse `$ARGUMENTS` for `--plan <value>`.
 
-Derive the plan's project root: strip `/plans/current.md` (or whatever the filename is) from the plan path, then go up one level from `.devorch/`. For example:
-- `.devorch/plans/current.md` → project root is `.` (current directory)
-- `.worktrees/my-feature/.devorch/plans/current.md` → project root is `.worktrees/my-feature`
+**Resolution logic:**
+1. If not provided → `planPath = .devorch/plans/current.md`, `projectRoot = .`
+2. If value contains `/` or ends in `.md` → treat as full path. Derive `projectRoot` by stripping `/.devorch/plans/<filename>` from the path.
+3. Otherwise → treat as worktree name. Set `planPath = .worktrees/<value>/.devorch/plans/current.md`, `projectRoot = .worktrees/<value>`.
 
-All `state.md`, `state-history.md`, `explore-cache.md`, and `build-summary.md` references in subsequent steps use this project root's `.devorch/` directory. All scripts receive the resolved `--plan <planPath>`.
+Verify the plan file exists. If not, report error and stop.
 
-If the project root is a worktree (not `.`), all `git` and `bun` commands in phase agents must run with `cwd` set to the worktree path.
+Set `isWorktree = true` if `projectRoot` is not `.`.
+
+All `state.md`, `state-history.md`, `explore-cache.md`, and `build-summary.md` references in subsequent steps use `<projectRoot>/.devorch/`. All scripts receive `--plan <planPath>`.
+
+If `isWorktree`, all `git` and `bun` commands in phase agents must run with `cwd` set to `<projectRoot>`.
 
 ### 1. Determine scope
 
@@ -59,10 +67,35 @@ This is the single source of truth for post-build verification — do not duplic
 If the implementation check verdict is **PASS**:
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/generate-summary.ts --plan <planPath>`
-2. Stage `<projectRoot>/.devorch/build-summary.md` and commit: `chore(devorch): build summary — <plan name>` (read the plan title from the generate-summary.ts JSON output or from `<planPath>`). If worktree, use `git -C <projectRoot>` for the commit.
+2. Stage `<projectRoot>/.devorch/build-summary.md` and commit: `chore(devorch): build summary — <plan name>`. If `isWorktree`, use `git -C <projectRoot>` for the commit.
 3. Report: "Build summary saved to `<projectRoot>/.devorch/build-summary.md`"
 
 If the verdict is **FAIL**, skip this step.
+
+### 5. Merge worktree (conditional)
+
+Skip this step if `isWorktree` is false.
+
+After a successful build in a worktree:
+
+1. Detect the worktree branch name: `git -C <projectRoot> branch --show-current` → e.g., `devorch/feature-b`.
+2. Detect the main branch: use the branch the worktree was created from (typically `master` or `main`). Run `git log --oneline <mainBranch>..<worktreeBranch>` to show what will be merged.
+3. Ask the user via `AskUserQuestion`:
+   - **"Merge now"** — Merge the worktree branch into the main branch and clean up.
+   - **"Keep worktree"** — Leave the worktree and branch for manual merge later.
+
+If **merge**:
+```bash
+git checkout <mainBranch>
+git merge <worktreeBranch>
+git worktree remove <projectRoot>
+git branch -d <worktreeBranch>
+```
+Report: "Merged `<worktreeBranch>` into `<mainBranch>`. Worktree removed."
+
+If merge has conflicts: report the conflicts and instruct the user to resolve manually. Do NOT force or auto-resolve.
+
+If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>`). Merge manually when ready: `git merge <worktreeBranch>`"
 
 ## Rules
 
