@@ -83,7 +83,8 @@ if (existsSync(devorchSrc)) {
 
   const changedFiles = diffProc.stdout.toString().trim().split("\n").filter(Boolean);
   const untrackedFiles = untrackedProc.stdout.toString().trim().split("\n").filter(Boolean);
-  const filesToCopy = [...changedFiles, ...untrackedFiles];
+  const filesToCopy = [...changedFiles, ...untrackedFiles]
+    .filter((f) => !f.endsWith("explore-cache.md"));
 
   for (const relPath of filesToCopy) {
     const src = join(cwd, relPath);
