@@ -11,7 +11,7 @@ Execute all remaining phases of the plan automatically, then verify the full imp
 **Input**: `$ARGUMENTS` may contain `--plan <name>` to specify which plan to build. The value can be:
 - A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
 - A **full path** (contains `/` or ends in `.md`) → used as-is
-- Omitted → defaults to `.devorch/plans/current.md`
+- Omitted → auto-detects from active worktrees
 
 ## Workflow
 
@@ -20,17 +20,22 @@ Execute all remaining phases of the plan automatically, then verify the full imp
 Parse `$ARGUMENTS` for `--plan <value>`.
 
 **Resolution logic:**
-1. If not provided → `planPath = .devorch/plans/current.md`, `projectRoot = .`
-2. If value contains `/` or ends in `.md` → treat as full path. Derive `projectRoot` by stripping `/.devorch/plans/<filename>` from the path.
-3. Otherwise → treat as worktree name. Set `planPath = .worktrees/<value>/.devorch/plans/current.md`, `projectRoot = .worktrees/<value>`.
+1. If `--plan <value>` provided:
+   - If value contains `/` or ends in `.md` → treat as full path. Derive `projectRoot` by stripping `/.devorch/plans/<filename>` from the path.
+   - Otherwise → treat as worktree name. Set `planPath = .worktrees/<value>/.devorch/plans/current.md`, `projectRoot = .worktrees/<value>`.
+2. If `--plan` NOT provided:
+   - Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output.
+   - If `count == 0`: report error "No active worktrees. Run `/devorch:make-plan` first." and stop.
+   - If `count == 1`: auto-detect. Set `planPath = .worktrees/<name>/.devorch/plans/current.md`, `projectRoot = .worktrees/<name>`. Report: "Auto-detected worktree: `<name>` (<planTitle>)"
+   - If `count > 1`: use `AskUserQuestion` to present the worktrees as options (each option shows name + plan title + status). Set `planPath` and `projectRoot` based on the user's choice.
 
 Verify the plan file exists. If not, report error and stop.
 
-Set `isWorktree = true` if `projectRoot` is not `.`.
+Set `mainRoot` to the current working directory (the main repo root where `.worktrees/` lives). Plans always live in worktrees, so `isWorktree` is always true.
 
-All `state.md`, `state-history.md`, `explore-cache.md`, and `build-summary.md` references in subsequent steps use `<projectRoot>/.devorch/`. All scripts receive `--plan <planPath>`.
+All `state.md`, `state-history.md`, and `build-summary.md` references in subsequent steps use `<projectRoot>/.devorch/`. All scripts receive `--plan <planPath>`.
 
-If `isWorktree`, all `git` and `bun` commands in phase agents must run with `cwd` set to `<projectRoot>`.
+All `git` and `bun` commands in phase agents must run with `cwd` set to `<projectRoot>`.
 
 ### 1. Determine scope
 
@@ -49,7 +54,7 @@ Read `$CLAUDE_HOME/devorch-templates/build-phase.md` once — this is the build 
 
 For each remaining phase N (sequentially):
 
-1. **Launch phase agent**: Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt is the full content of build-phase.md followed by: `\n\nExecute phase ${N} of the plan at <planPath>`
+1. **Launch phase agent**: Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt is the full content of build-phase.md followed by: `\n\nExecute phase ${N} of the plan at <planPath>\n\nMain repo root for cache: <mainRoot>`
 2. **Verify completion**: After the Task agent returns, read `<projectRoot>/.devorch/state.md`. Check that `Last completed phase:` shows N.
    - If verified → report "Phase N/Y complete." and continue to next phase.
    - If NOT verified → the phase agent handles retries internally (up to 1 retry per failed builder). If the phase still fails after retries, stop and report: "Phase N did not complete successfully. Check agent output."
@@ -58,7 +63,7 @@ For each remaining phase N (sequentially):
 
 After all phases complete successfully, run the full implementation verification **inline in this context** — read `$CLAUDE_HOME/commands/devorch/check-implementation.md` and follow its steps directly. Do NOT spawn a Task agent for check-implementation. Execute it here so that any agents it launches (Explore, Agent Teams) are first-level Task calls, not nested.
 
-Use `<planPath>` for all `--plan` arguments in scripts called by check-implementation.
+Use `<planPath>` for all `--plan` arguments in scripts called by check-implementation. The check has access to `<planPath>`, `<projectRoot>`, and `<mainRoot>`.
 
 This is the single source of truth for post-build verification — do not duplicate its logic here.
 
@@ -72,11 +77,9 @@ If the implementation check verdict is **PASS**:
 
 If the verdict is **FAIL**, skip this step.
 
-### 5. Merge worktree (conditional)
+### 5. Merge worktree
 
-Skip this step if `isWorktree` is false.
-
-After a successful build in a worktree:
+After a successful build:
 
 1. Detect the worktree branch name: `git -C <projectRoot> branch --show-current` → e.g., `devorch/feature-b`.
 2. Detect the main branch: use the branch the worktree was created from (typically `master` or `main`). Run `git log --oneline <mainBranch>..<worktreeBranch>` to show what will be merged.
