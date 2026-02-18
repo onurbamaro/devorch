@@ -14,14 +14,23 @@ Quick fix, small change, bug fix, or standalone task with auto-commit.
    - Read `.devorch/CONVENTIONS.md` if it exists. This guides coding style and project conventions.
    - Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to get the project tree and tech stack.
 
-2. **Assess complexity**: Before implementing, evaluate the requested change:
-   - **Straightforward**: Clear scope, well-defined outcome, you understand what to change → proceed
-   - **Complex**: Requires architectural decisions, unclear how components interact, multiple subsystems involved, needs design before coding → **stop and recommend make-plan**
+2. **Assess complexity** — checklist binário, sem julgamento subjetivo:
 
-   When recommending make-plan, explain briefly why the task benefits from planning and generate a ready-to-use prompt:
+   Todas as condições abaixo devem ser **YES** para prosseguir como quick fix:
+   - [ ] Modifica **3 arquivos ou menos**?
+   - [ ] **Zero** mudanças de interface, API pública, ou assinaturas de tipo exportadas?
+   - [ ] **Zero** novas dependências (npm, imports de módulos novos)?
+   - [ ] Existe código (teste ou produção) que já cobre o comportamento afetado?
+   - [ ] A mudança é **mecanicamente verificável** (lint + typecheck passam)?
+
+   Se **QUALQUER** item é **NO** → **PARE. Recomende make-plan.**
+
+   NÃO use julgamento subjetivo. NÃO racionalize "mas nesse caso é diferente...". A frase "mas nesse caso" é um red flag — significa que a mudança NÃO é trivial.
+
+   Quando recomendar make-plan, gere um prompt pronto:
    ```
-   This task would benefit from /devorch:make-plan because [reason].
-   Suggested prompt: /devorch:make-plan [task description]
+   Esta task precisa de planejamento. Use: /devorch:make-plan [task description]
+   Motivo: [qual item do checklist falhou]
    ```
 
 3. **Implement** (straightforward changes only):
@@ -43,4 +52,4 @@ Quick fix, small change, bug fix, or standalone task with auto-commit.
 - Always validate with check-project.ts before committing.
 - If conventions file exists, follow it strictly.
 - All user-facing text in Portuguese must use correct pt-BR accentuation and grammar (e.g., "não", "ação", "é", "código", "será"). Never write Portuguese without proper accents.
-- The complexity assessment is about cognitive complexity, not file count. A simple rename across 10 files is straightforward; a 2-file change requiring new architecture is complex.
+- Complexity is determined by the checklist above, not by intuition. Do not override the checklist with subjective judgment.
