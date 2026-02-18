@@ -1,8 +1,9 @@
 /**
  * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache.
- * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N>
+ * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>]
  * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, and content (or contentFile if >25000 chars).
  * Compound init: returns phase context, conventions, state, and filtered explore-cache as structured JSON.
+ * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/explore-cache.md instead of from the plan's directory.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
@@ -10,25 +11,28 @@ import { dirname, resolve } from "path";
 const CONTENT_THRESHOLD = 25000;
 const CONTEXT_FILE = ".devorch/.phase-context.md";
 
-function parseArgs(): { plan: string; phase: number } {
+function parseArgs(): { plan: string; phase: number; cacheRoot: string } {
   const args = process.argv.slice(2);
   let plan = "";
   let phase = 0;
+  let cacheRoot = "";
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--plan" && args[i + 1]) {
       plan = args[++i];
     } else if (args[i] === "--phase" && args[i + 1]) {
       phase = parseInt(args[++i], 10);
+    } else if (args[i] === "--cache-root" && args[i + 1]) {
+      cacheRoot = args[++i];
     }
   }
 
   if (!plan || !phase) {
-    console.error("Usage: init-phase.ts --plan <path> --phase <N>");
+    console.error("Usage: init-phase.ts --plan <path> --phase <N> [--cache-root <path>]");
     process.exit(1);
   }
 
-  return { plan, phase };
+  return { plan, phase, cacheRoot };
 }
 
 function extractTagContent(text: string, tagName: string): string {
@@ -55,7 +59,7 @@ interface PhaseBounds {
   end: number;
 }
 
-const { plan: planPath, phase: phaseNum } = parseArgs();
+const { plan: planPath, phase: phaseNum, cacheRoot } = parseArgs();
 
 let content: string;
 try {
@@ -134,7 +138,8 @@ const projectRoot = resolve(planDir, "../..");
 // --- Read optional files ---
 const conventions = safeReadFile(resolve(projectRoot, ".devorch/CONVENTIONS.md"));
 const state = safeReadFile(resolve(projectRoot, ".devorch/state.md"));
-const cacheRaw = safeReadFile(resolve(projectRoot, ".devorch/explore-cache.md"));
+const cacheSource = cacheRoot ? resolve(cacheRoot, ".devorch/explore-cache.md") : resolve(projectRoot, ".devorch/explore-cache.md");
+const cacheRaw = safeReadFile(cacheSource);
 
 // --- Filter explore-cache by phase file paths ---
 function filterCache(cache: string, phaseText: string): string {
