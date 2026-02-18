@@ -1,32 +1,38 @@
 # Explore Cache
-Generated: 2026-02-17T00:00:00Z
+Generated: 2026-02-18T12:00:00Z
 
-## Scripts Architecture
-All 8 existing scripts in devorch/scripts/ follow identical conventions: JSDoc header, parseArgs() function for CLI args (manual for-loop over process.argv.slice(2) with --flag value pattern), Node.js stdlib imports only (fs, path, crypto), JSON output via console.log(JSON.stringify()), exit 1 for bad args, exit 0 for success. Bun.spawn/Bun.spawnSync for subprocesses. No shared modules — each script is self-contained. Output formats: JSON for structured data, Markdown for human-readable context. Key pattern: config-driven detection (arrays of CheckDef-like objects), regex-based XML tag parsing, single-pass algorithms.
+## Check-Implementation Flow
+check-implementation.md runs as Step 3 of build.md (inline, not as Task). Six steps: (1) extract-criteria.ts loads all criteria/validation/files, (2) git diff for changed files baseline, (3) parallel verify: check-project.ts + verify-build.ts + validation commands + tally-criteria.ts + one Explore agent for cross-phase integration, (4) optional adversarial review via Agent Teams (3 reviewers: security/quality/performance), (5) structured report with verdict PASS/FAIL, (6) follow-up: if FAIL, lists `/devorch:quick <fix>` suggestions for user to paste manually. No automatic retry, no loopback, no AskUserQuestion. Hardcoded `.devorch/plans/current.md` in steps 1-2 — gap when called from worktree context (build.md passes planPath but check-implementation.md doesn't parameterize all paths).
 
-Scripts roster: map-project.ts (project mapping, Markdown output), map-conventions.ts (code pattern analysis, Markdown), extract-phase.ts (phase extraction from plan, Markdown), extract-criteria.ts (criteria+validation extraction, JSON), check-project.ts (lint/typecheck/build/test runner, JSON), validate-plan.ts (plan structure validation, JSON with result:"continue"|"block"), hash-plan.ts (SHA-256 integrity, JSON), check-agent-teams.ts (feature flag + templates, JSON).
+## Build.md Worktree Logic
+Step 0 resolves --plan: bare name → `.worktrees/<name>/.devorch/plans/current.md`, sets projectRoot and isWorktree. Steps 1-4 scope all file refs to `<projectRoot>/.devorch/`. Step 5 (merge worktree): conditional on isWorktree, detects branch, shows git log preview, AskUserQuestion "Merge now" vs "Keep worktree". Merge: checkout main → merge → worktree remove → branch -d. Conflicts reported to user.
 
-## Command Integration Points
-build.md: Thin supervisor, reads state.md for resume point, reads build-phase.md template, launches Task per phase (foreground, general-purpose), verifies state after each phase, runs check-implementation.md at end. Zero direct script calls.
+## Make-Plan Worktree Logic
+Step 1: If current.md exists and in-progress, AskUserQuestion: "Archive" vs "Run in parallel worktree". worktreeMode=true deferred to Step 8. Step 8 (worktreeMode): derive kebab name → setup-worktree.ts → write plan to worktree → copy CONVENTIONS + explore-cache → set planPath. Step 11: two commits (worktree branch + main). Step 12: show `/clear\n/devorch:build --plan <name>`. Non-worktree path writes directly to `.devorch/plans/current.md`.
 
-build-phase.md (template): Per-phase executor. Calls extract-phase.ts for phase content. Reads CONVENTIONS.md, explore-cache.md, state.md separately. Manually parses execution block for wave structure. Launches builders as parallel Task calls per wave. Manually writes state.md and appends to state-history.md. Manually invalidates explore-cache via git diff. Manually formats phase commit message.
+## Build-Phase Cache Lifecycle
+Step 1: init-phase.ts reads filtered explore-cache (relative to cwd). Step 2: checks cache coverage before launching new Explore agents. Step 8: appends new explore summaries to `.devorch/explore-cache.md`, then runs `manage-cache.ts --action invalidate,trim --max-lines 3000`. All paths relative to cwd (no mainRoot awareness).
 
-make-plan.md: Calls map-project.ts, check-agent-teams.ts, validate-plan.ts. Manually archives plans (reads state, moves files). Manually manages explore-cache. Ends with "/clear + /devorch:build" instruction.
+## Setup-Worktree Script
+Creates `.worktrees/<name>` with branch `devorch/<name>`. Ensures .worktrees/ in .gitignore. Copies ALL uncommitted .devorch/ files (git diff + git ls-files --others). Output: `{"worktreePath": ".worktrees/<name>", "branch": "devorch/<name>", "devorch": true|false}`. No filtering of which .devorch/ files to copy.
 
-check-implementation.md: Calls extract-criteria.ts, check-project.ts (background), check-agent-teams.ts (conditional). Launches parallel Explore agents per phase + convention + cross-phase. Updates state.md to "completed" on PASS.
+## Init-Phase Script
+Reads plan file, conventions, state, explore-cache all relative to plan directory. Filters cache by phase file paths. Outputs JSON with content or contentFile (>25000 chars). No --cache-root flag — always reads cache from same directory as plan.
+
+## Manage-Cache Script
+Resolves cache as `process.cwd()/.devorch/explore-cache.md`. Invalidation uses `git diff --name-only HEAD~1..HEAD`. Trim removes oldest sections first. No --root flag — always operates on cwd.
+
+## Quick Command
+Binary 5-item checklist gate: ≤3 files, no API changes, no new deps, existing coverage, mechanically verifiable. If any NO → stops, suggests make-plan. If all YES → Explore agent to understand code, implement, check-project.ts, auto-commit. Format: `feat|fix|refactor|chore|docs(scope): description`.
+
+## Validator Agent
+devorch-validator is read-only (Write/Edit/NotebookEdit disallowed). Runs validation commands, inspects files for acceptance criteria, reports PASS/FAIL. Context pre-injected by phase agent. Does NOT run check-project.ts.
 
 ## Agent Definitions
 devorch-builder (opus, cyan): PostToolUse hook for post-edit-lint. Receives all context in prompt (no TaskGet). Runs check-project.ts before commit. Commits task files only. TaskUpdate(completed) as absolute last action. Max 3-line output.
 
-devorch-validator (opus, yellow): Read-only (disallowed: Write, Edit, NotebookEdit). Receives criteria + validation commands + task summaries inline. Reports PASS/FAIL. Does NOT run check-project.ts.
-
 ## Install System
 install.ts copies: scripts/ to ~/.claude/devorch-scripts/, commands/ to ~/.claude/commands/devorch/, templates/ to ~/.claude/devorch-templates/, agents/ to ~/.claude/agents/, hooks/ to ~/.claude/hooks/. Cleans dest dirs before copying (rmSync recursive). $CLAUDE_HOME substitution in .md files only (replaces with ~/.claude path, forward slashes on Windows). Sets statusline in settings.json.
 
-## Project Structure
-- commands/ — 9 .md files (build, build-tests, check-implementation, debug, explore-deep, make-plan, plan-tests, quick, review)
-- agents/ — 2 .md files (devorch-builder, devorch-validator)
-- scripts/ — 8 .ts files (check-agent-teams, check-project, extract-criteria, extract-phase, hash-plan, map-conventions, map-project, validate-plan)
-- hooks/ — 2 files (devorch-statusline.cjs, post-edit-lint.ts)
-- templates/ — 1 .md file (build-phase.md)
-- Root: install.ts, uninstall.ts, package.json, README.md, tsconfig.json, bun.lock
+## List-Worktrees (does not exist yet)
+No existing script. `.worktrees/` directory is gitignored. Each worktree has `.devorch/plans/current.md` (plan), `.devorch/state.md` (status). Branch name recoverable via `git -C .worktrees/<name> branch --show-current`.
