@@ -81,7 +81,13 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet) and ski
 
 If `.devorch/plans/current.md` exists:
 - Read `.devorch/state.md`. If state shows the plan is `completed` (or last completed phase equals total phase count in current.md), archive silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. No need to ask.
-- Otherwise, ask the user if they want to archive it (in-progress plan, may lose work). If yes, run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`.
+- Otherwise (in-progress plan), ask the user via `AskUserQuestion`:
+  - **"Archive old plan"** — Archive and replace. May lose in-progress work.
+  - **"Run in parallel worktree"** — Keep old plan active on the current branch. New plan runs in a separate git worktree with its own branch.
+
+  If **archive**: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`.
+
+  If **worktree**: set `worktreeMode = true` for later steps. The worktree is created in step 8 (after the plan is designed) — not here. Continue planning normally.
 
 ### 2. Classify
 
@@ -182,17 +188,46 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 
 ### 8. Create plan
 
-Write `.devorch/plans/current.md` following the **Plan Format** below.
+**If `worktreeMode`:**
+
+1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" → `courier-payroll-export`).
+2. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`. Parse the JSON output to get `worktreePath`.
+3. Write the plan to `<worktreePath>/.devorch/plans/current.md`.
+4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
+5. Copy `.devorch/explore-cache.md` to `<worktreePath>/.devorch/explore-cache.md` (if it exists).
+6. Set `planPath = <worktreePath>/.devorch/plans/current.md` for subsequent steps.
+
+**Otherwise:** Write `.devorch/plans/current.md` following the **Plan Format** below.
 
 ### 9. Validate
 
-Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`. Fix issues if blocked.
+Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <planPath>`. Fix issues if blocked.
+
+Default `planPath` is `.devorch/plans/current.md` unless worktreeMode set a different path in step 8.
 
 ### 10. Reset state
 
-Delete `.devorch/state.md` and `.devorch/state-history.md` if they exist — a new plan means fresh state. Previous plan's progress is irrelevant.
+Delete state files for the plan's project root:
+- If worktreeMode: delete `<worktreePath>/.devorch/state.md` and `<worktreePath>/.devorch/state-history.md` if they exist.
+- Otherwise: delete `.devorch/state.md` and `.devorch/state-history.md` if they exist.
+
+A new plan means fresh state. Previous plan's progress is irrelevant.
 
 ### 11. Auto-commit
+
+**If worktreeMode:**
+
+Commit in the worktree's branch:
+```bash
+git -C <worktreePath> add .devorch/plans/current.md .devorch/explore-cache.md .devorch/CONVENTIONS.md
+git -C <worktreePath> commit -m "chore(devorch): plan — <descriptive plan name>"
+```
+
+Also commit the `.worktrees/` entry and any devorch files changed in the main repo (CONVENTIONS.md, explore-cache.md):
+- Stage `.devorch/explore-cache.md`, `.devorch/CONVENTIONS.md` (if created/updated)
+- Format: `chore(devorch): add worktree for <plan name>`
+
+**Otherwise:**
 
 Stage and commit all devorch files modified in this session:
 - Stage `.devorch/plans/current.md`, `.devorch/explore-cache.md` (if created), `.devorch/CONVENTIONS.md` (if created/updated), `.devorch/ARCHITECTURE.md` (if created)
@@ -205,13 +240,21 @@ Stage and commit all devorch files modified in this session:
 
 1. Write `.devorch/config.json` with `{"auto_advance": true}`.
 2. Read `$CLAUDE_HOME/commands/devorch/build.md`. Strip YAML frontmatter (remove everything between the first `---` pair, inclusive).
-3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt.
+3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt. If worktreeMode, append `\n\nPlan path: <planPath>` to the prompt.
 4. After the Task returns, update `.devorch/config.json` to `{"auto_advance": false}`.
 
 **If `--auto` flag was NOT set:**
 
 Show classification, phases with goals, wave structure, then instruct:
 
+If worktreeMode:
+```
+Plan saved to worktree: <worktreePath> (branch: <branch>)
+/clear
+/devorch:build --plan <planPath>
+```
+
+Otherwise:
 ```
 /clear
 /devorch:build
