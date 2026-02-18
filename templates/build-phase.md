@@ -2,9 +2,11 @@ Execute one phase of the current devorch plan.
 
 **Input**: $ARGUMENTS (phase number). If not provided, read `.devorch/state.md` and suggest the next phase. If no state exists, start with Phase 1. If state exists but its `Plan:` field doesn't match the current plan title (first `# Plan:` heading in `.devorch/plans/current.md`), **ignore the stale state** and start with Phase 1.
 
+**Parse `mainRoot`**: Extract `mainRoot` from the prompt context — look for "Main repo root for cache: <path>" appended by build.md. If not found, default `mainRoot` to the current working directory (backward compatibility).
+
 ## Workflow
 
-1. **Init phase**: Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan .devorch/plans/current.md --phase N`
+1. **Init phase**: Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan .devorch/plans/current.md --phase N --cache-root <mainRoot>`
 
    Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, and filtered explore-cache — no separate Read calls needed.
 
@@ -47,9 +49,9 @@ Execute one phase of the current devorch plan.
    - Run `bun $CLAUDE_HOME/devorch-scripts/format-commit.ts --plan .devorch/plans/current.md --phase N`
    - Use the `message` field from the JSON output as the git commit message.
 
-8. **Invalidate and update cache**: Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000`
+8. **Invalidate and update cache**: Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
 
-   If new Explore agents were launched during this phase, append their summaries to `.devorch/explore-cache.md` before or after running manage-cache.
+   If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache.md` before or after running manage-cache.
 
 9. **Update state**: Run `bun $CLAUDE_HOME/devorch-scripts/update-state.ts --plan .devorch/plans/current.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
 
