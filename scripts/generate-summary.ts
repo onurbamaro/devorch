@@ -3,49 +3,16 @@
  * Usage: bun ~/.claude/devorch-scripts/generate-summary.ts --plan <path>
  * Output: JSON {"summaryFile", "phasesCompleted", "projectCount"}
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
-
-function parseArgs(): { plan: string } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    }
-  }
-  if (!plan) {
-    console.error("Usage: generate-summary.ts --plan <path>");
-    process.exit(1);
-  }
-  return { plan };
-}
-
-function extractTagContent(text: string, tagName: string): string {
-  const match = text.match(new RegExp(`^\\s*<${tagName}>([\\s\\S]*?)^\\s*<\\/${tagName}>`, "im"));
-  return match ? match[1].trim() : "";
-}
-
-function safeReadFile(filePath: string): string {
-  try {
-    if (existsSync(filePath)) {
-      return readFileSync(filePath, "utf-8");
-    }
-  } catch {
-    // ignore — optional file
-  }
-  return "";
-}
+import { parseArgs } from "./lib/args";
+import { extractTagContent, readPlan, extractPlanTitle, extractFileEntries } from "./lib/plan-parser";
+import { safeReadFile } from "./lib/fs-utils";
 
 interface PhaseInfo {
   num: number;
   name: string;
   goal: string;
-}
-
-interface FileEntry {
-  path: string;
-  description: string;
 }
 
 interface ProjectEntry {
@@ -54,21 +21,73 @@ interface ProjectEntry {
   fileCount: number;
 }
 
-function extractPhases(content: string): PhaseInfo[] {
+const args = parseArgs<{ plan: string }>([
+  { name: "plan", type: "string", required: true },
+]);
+
+const planPath = args.plan;
+const content = readPlan(planPath);
+
+const planDir = dirname(resolve(planPath));
+const projectRoot = resolve(planDir, "../..");
+
+// Extract plan fields
+const planTitle = extractPlanTitle(content);
+const objective = extractTagContent(content, "objective") || "";
+const decisions = extractTagContent(content, "decisions") || "";
+
+// Extract file blocks
+const relevantBlock = extractTagContent(content, "relevant-files") || "";
+const newFilesBlock = extractTagContent(content, "new-files") || "";
+
+const newFiles = extractFileEntries(newFilesBlock);
+const allRelevantFiles = extractFileEntries(relevantBlock);
+const newFilePaths = new Set(newFiles.map((f) => f.path));
+const modifiedFiles = allRelevantFiles.filter((f) => !newFilePaths.has(f.path));
+
+// Extract projects from relevant-files sections
+function extractProjects(block: string): ProjectEntry[] {
+  const projects: ProjectEntry[] = [];
+  const headerRegex = /^###\s+(.+?)\s*\(`([^`]+)`\)/gm;
+  let match: RegExpExecArray | null;
+  const sections: { name: string; path: string; start: number }[] = [];
+
+  while ((match = headerRegex.exec(block)) !== null) {
+    sections.push({ name: match[1], path: match[2], start: match.index });
+  }
+
+  for (let i = 0; i < sections.length; i++) {
+    const sectionEnd = i + 1 < sections.length ? sections[i + 1].start : block.length;
+    const sectionText = block.slice(sections[i].start, sectionEnd);
+    const entries = extractFileEntries(sectionText);
+    projects.push({
+      name: sections[i].name,
+      path: sections[i].path,
+      fileCount: entries.length,
+    });
+  }
+
+  return projects;
+}
+
+const projects = extractProjects(relevantBlock);
+
+// Extract phases
+function extractPhases(text: string): PhaseInfo[] {
   const phases: PhaseInfo[] = [];
   const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/gi;
   let match: RegExpExecArray | null;
 
-  while ((match = phaseOpenRegex.exec(content)) !== null) {
+  while ((match = phaseOpenRegex.exec(text)) !== null) {
     const num = parseInt(match[1], 10);
     const name = match[2];
     const startIdx = match.index;
 
     const closeRegex = new RegExp(`</phase${num}>`, "i");
-    const closeMatch = content.slice(startIdx).match(closeRegex);
+    const closeMatch = text.slice(startIdx).match(closeRegex);
     const phaseBlock = closeMatch
-      ? content.slice(startIdx, startIdx + closeMatch.index! + closeMatch[0].length)
-      : content.slice(startIdx);
+      ? text.slice(startIdx, startIdx + closeMatch.index! + closeMatch[0].length)
+      : text.slice(startIdx);
 
     const goalMatch = phaseBlock.match(/<goal>([\s\S]*?)<\/goal>/i);
     const goal = goalMatch ? goalMatch[1].trim() : "";
@@ -79,47 +98,16 @@ function extractPhases(content: string): PhaseInfo[] {
   return phases;
 }
 
-function extractFileEntries(block: string): FileEntry[] {
-  const files: FileEntry[] = [];
-  const lines = block.split("\n");
-  for (const line of lines) {
-    const fileMatch = line.match(/^[-*]\s*`([^`]+)`\s*(?:—|--|-)\s*(.*)/);
-    if (fileMatch) {
-      files.push({ path: fileMatch[1], description: fileMatch[2].trim() });
-    }
-  }
-  return files;
-}
+const phases = extractPhases(content);
 
-function extractProjects(relevantBlock: string): ProjectEntry[] {
-  const projects: ProjectEntry[] = [];
-  const headerRegex = /^###\s+(.+?)\s*\(`([^`]+)`\)/gm;
-  let match: RegExpExecArray | null;
-  const sections: { name: string; path: string; start: number }[] = [];
+// Read state-history
+const historyContent = safeReadFile(resolve(projectRoot, ".devorch/state-history.md"));
 
-  while ((match = headerRegex.exec(relevantBlock)) !== null) {
-    sections.push({ name: match[1], path: match[2], start: match.index });
-  }
-
-  for (let i = 0; i < sections.length; i++) {
-    const sectionEnd = i + 1 < sections.length ? sections[i + 1].start : relevantBlock.length;
-    const sectionText = relevantBlock.slice(sections[i].start, sectionEnd);
-    const fileEntries = extractFileEntries(sectionText);
-    projects.push({
-      name: sections[i].name,
-      path: sections[i].path,
-      fileCount: fileEntries.length,
-    });
-  }
-
-  return projects;
-}
-
-function parsePhaseHistory(historyContent: string): Map<number, string> {
+function parsePhaseHistory(text: string): Map<number, string> {
   const map = new Map<number, string>();
-  if (!historyContent) return map;
+  if (!text) return map;
 
-  const sections = historyContent.split(/(?=## Phase\s+\d+)/);
+  const sections = text.split(/(?=## Phase\s+\d+)/);
   for (const section of sections) {
     const headerMatch = section.match(/^## Phase\s+(\d+)\s+Summary\s*\n([\s\S]*)/);
     if (headerMatch) {
@@ -130,6 +118,9 @@ function parsePhaseHistory(historyContent: string): Map<number, string> {
   return map;
 }
 
+const phaseHistory = parsePhaseHistory(historyContent);
+
+// Git log
 function getGitLog(): string {
   try {
     const proc = Bun.spawnSync(["git", "log", "--oneline", "-20"], {
@@ -151,46 +142,6 @@ function getGitLog(): string {
   }
 }
 
-// --- Main ---
-const { plan: planPath } = parseArgs();
-
-let content: string;
-try {
-  content = readFileSync(planPath, "utf-8");
-} catch {
-  console.error(`Could not read plan: ${planPath}`);
-  process.exit(1);
-}
-
-const planDir = dirname(resolve(planPath));
-const projectRoot = resolve(planDir, "../..");
-
-// Extract plan fields
-const titleMatch = content.match(/^#\s+Plan:\s+(.+)$/m);
-const planTitle = titleMatch ? titleMatch[1].trim() : "Untitled Plan";
-const objective = extractTagContent(content, "objective");
-const decisions = extractTagContent(content, "decisions");
-
-// Extract file blocks
-const relevantBlock = extractTagContent(content, "relevant-files");
-const newFilesBlock = extractTagContent(content, "new-files");
-
-const projects = extractProjects(relevantBlock);
-const newFiles = extractFileEntries(newFilesBlock);
-
-// Extract modified files (relevant-files minus new-files, at root level)
-const newFilePaths = new Set(newFiles.map((f) => f.path));
-const allRelevantFiles = extractFileEntries(relevantBlock);
-const modifiedFiles = allRelevantFiles.filter((f) => !newFilePaths.has(f.path));
-
-// Extract phases
-const phases = extractPhases(content);
-
-// Read state-history
-const historyContent = safeReadFile(resolve(projectRoot, ".devorch/state-history.md"));
-const phaseHistory = parsePhaseHistory(historyContent);
-
-// Git log
 const commits = getGitLog();
 
 // --- Build summary ---

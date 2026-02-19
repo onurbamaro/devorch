@@ -3,29 +3,19 @@
  * Usage: bun ~/.claude/devorch-scripts/validate-plan.ts --plan <path>
  * Output: JSON {"result":"continue"} or {"result":"block","reason":"..."}
  */
-import { readFileSync } from "fs";
 import { createHash } from "crypto";
+import { parseArgs } from "./lib/args";
+import { extractTagContent, readPlan } from "./lib/plan-parser";
 
-function parseArgs(): { plan: string } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    }
-  }
-  if (!plan) {
-    console.error("Usage: validate-plan.ts --plan <path>");
-    process.exit(1);
-  }
-  return { plan };
-}
+const args = parseArgs<{ plan: string }>([
+  { name: "plan", type: "string", required: true },
+]);
 
-const { plan: planPath } = parseArgs();
+const planPath = args.plan;
 
 let content: string;
 try {
-  content = readFileSync(planPath, "utf-8");
+  content = readPlan(planPath);
 } catch {
   console.log(JSON.stringify({ result: "block", reason: `Could not read plan: ${planPath}` }));
   process.exit(0);
@@ -49,9 +39,8 @@ for (const { pattern, name } of requiredTags) {
 }
 
 // --- Classification validation ---
-const classificationMatch = content.match(/<classification>([\s\S]*?)<\/classification>/i);
-if (classificationMatch) {
-  const classBlock = classificationMatch[1];
+const classBlock = extractTagContent(content, "classification") || "";
+if (classBlock) {
   if (!/Type:\s*(feature|fix|refactor|migration|chore|enhancement)/i.test(classBlock)) {
     errors.push("Classification: missing or invalid Type");
   }
@@ -75,13 +64,13 @@ if (isComplex) {
 }
 
 // --- Phase detection using open/close tags ---
-interface PhaseBounds {
+interface PhaseInfo {
   num: number;
   name: string;
   content: string;
 }
 
-const phases: PhaseBounds[] = [];
+const phases: PhaseInfo[] = [];
 const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/gi;
 let phaseMatch: RegExpExecArray | null;
 
@@ -130,16 +119,15 @@ if (phases.length === 0) {
     }
 
     // Execution wave check
-    const executionMatch = phaseContent.match(/<execution>([\s\S]*?)<\/execution>/i);
-    if (executionMatch) {
-      if (!/\*\*Wave \d+\*\*/i.test(executionMatch[1])) {
+    const executionContent = extractTagContent(phaseContent, "execution");
+    if (executionContent) {
+      if (!/\*\*Wave \d+\*\*/i.test(executionContent)) {
         warnings.push(`Phase ${phase.num}: Execution section missing Wave definitions`);
       }
     }
 
-    // Task metadata checks — extract tasks content
-    const tasksMatch = phaseContent.match(/<tasks>([\s\S]*?)<\/tasks>/i);
-    const tasksContent = tasksMatch ? tasksMatch[1] : "";
+    // Task metadata checks
+    const tasksContent = extractTagContent(phaseContent, "tasks") || "";
 
     const taskBlocks = tasksContent.match(/####\s+\d+\./g);
     if (taskBlocks && taskBlocks.length > 0) {
@@ -151,9 +139,9 @@ if (phases.length === 0) {
       }
     }
 
-    // Optional <test-contract> — if present, must have content
-    const testContractMatch = phaseContent.match(/<test-contract>([\s\S]*?)<\/test-contract>/i);
-    if (testContractMatch && !testContractMatch[1].trim()) {
+    // Optional <test-contract>
+    const testContractContent = extractTagContent(phaseContent, "test-contract");
+    if (testContractContent !== null && !testContractContent) {
       warnings.push(`Phase ${phase.num}: <test-contract> tag is empty`);
     }
 
@@ -165,13 +153,12 @@ if (phases.length === 0) {
     }
 
     // --- Wave conflict detection ---
-    // Extract tasks with their IDs and file references from <tasks> content
-    interface TaskInfo {
+    interface TaskFileInfo {
       id: string;
       files: string[];
     }
 
-    const tasks: TaskInfo[] = [];
+    const tasks: TaskFileInfo[] = [];
     const taskSections = tasksContent.split(/####\s+\d+\.\s+/);
 
     for (const section of taskSections.slice(1)) {
@@ -179,18 +166,16 @@ if (phases.length === 0) {
       if (!idMatch) continue;
 
       const taskId = idMatch[1];
-      // Extract file paths from backtick references
       const fileRefs = [...section.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)]
         .map((m) => m[1])
-        .filter((f) => /\.\w{1,5}$/.test(f)); // only paths with extensions
+        .filter((f) => /\.\w{1,5}$/.test(f));
 
       tasks.push({ id: taskId, files: fileRefs });
     }
 
-    // Extract wave definitions from <execution> content and check for file conflicts
-    const executionContent = executionMatch ? executionMatch[1] : "";
+    const executionBlock = extractTagContent(phaseContent, "execution") || "";
     const waveRegex = /\*\*Wave\s+(\d+)\*\*[^:]*:\s*(.+)/gi;
-    const waveMatches = [...executionContent.matchAll(waveRegex)];
+    const waveMatches = [...executionBlock.matchAll(waveRegex)];
 
     for (const waveMatch of waveMatches) {
       const waveNum = waveMatch[1];
@@ -199,9 +184,8 @@ if (phases.length === 0) {
         .map((t) => t.trim())
         .filter(Boolean);
 
-      // Check that referenced task IDs exist
       for (const tid of taskIds) {
-        if (tid.startsWith("validate")) continue; // validator tasks are implicit
+        if (tid.startsWith("validate")) continue;
         if (!tasks.some((t) => t.id === tid)) {
           warnings.push(
             `Phase ${phase.num}: Wave ${waveNum} references unknown task ID "${tid}"`
@@ -209,7 +193,6 @@ if (phases.length === 0) {
         }
       }
 
-      // Check for file overlaps within the same wave
       const waveTasks = tasks.filter((t) => taskIds.includes(t.id));
       for (let a = 0; a < waveTasks.length; a++) {
         for (let b = a + 1; b < waveTasks.length; b++) {
@@ -229,7 +212,6 @@ if (phases.length === 0) {
 
 // --- Output ---
 if (errors.length === 0) {
-  // Compute hash excluding any existing validated comment
   const cleanContent = content.replace(/<!-- Validated: [a-f0-9]{64} -->\n?/, "");
   const hash = createHash("sha256").update(cleanContent).digest("hex");
 
