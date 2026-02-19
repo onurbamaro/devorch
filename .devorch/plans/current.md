@@ -1,502 +1,428 @@
-# Plan: Always-Worktree Architecture + Smart Check Feedback
+# Plan: Devorch Unification — Single Command + Waste Elimination
 
 <description>
-Two architectural changes to devorch: (1) Make worktrees the default execution model — every plan runs in its own worktree with its own branch, explore-cache stays in the main repo (read-only for worktrees), and after build the user merges or keeps parked. (2) Smart check-implementation feedback loop — instead of just listing `/devorch:quick` suggestions, check-implementation now classifies issues into trivial (fix inline automatically), ambiguous (AskUserQuestion then fix), and complex (deliver ready-to-paste `/devorch:make-plan` prompt). New `/devorch:worktrees` command for listing, merging, and deleting worktrees.
+Unifica make-plan e quick num único comando /devorch com routing inteligente (conversa, quick path, plan path). Elimina ~600 linhas de código duplicado criando shared lib. Consolida scripts redundantes (merge extract-waves → init-phase, tally → extract-criteria). Remove desperdícios no pipeline de build (validação N+1, build-summary, state-history, phase commits vazios). Atualiza todos os templates e comandos para as novas interfaces.
 </description>
 
 <objective>
-Every `/devorch:make-plan` creates a worktree — no plans live in main's `current.md`. Build auto-detects the target worktree. Check-implementation fixes trivial issues inline, asks for clarification on ambiguous ones, and suggests make-plan for complex ones. A new `/devorch:worktrees` command provides full worktree lifecycle management.
+Quando completo: (1) /devorch é o único entry point — classifica automaticamente e roteia para conversa, quick path, ou plan path. (2) Scripts compartilham lib/ sem duplicação. (3) Build pipeline não re-faz trabalho desnecessário. (4) make-plan.md e quick.md não existem mais.
 </objective>
 
 <classification>
-Type: enhancement
+Type: refactor
 Complexity: complex
-Risk: medium
+Risk: high
 </classification>
 
 <decisions>
-- Check feedback model → Three-tier: trivial = fix inline automatically, ambiguous = AskUserQuestion then fix, complex = deliver ready-to-paste /devorch:make-plan prompt with detailed description
-- Inline fix execution → Execute directly in build context (check-implementation runs inline in build.md), no Task agent needed
-- Explore-cache location → Only in main repo (read-only for worktrees). Invalidation only happens on main when worktree merges.
-- current.md in main → Eliminated. Plans always live in worktrees. Legacy current.md auto-archived on first run.
-- Build without --plan → Auto-detect: 1 worktree = use it, 2+ = list and ask, 0 = error
-- /devorch:worktrees → Full command: list + merge + delete
+Aliases para make-plan/quick → Remover completamente. Só /devorch existe.
+Modo conversa → Agent Teams quando disponível, fallback para Explore agents simples.
+Worktree para simple plans → Manter worktree sempre. --auto vira default para simple/medium. --review para pausar.
+build-summary.md → Não gerar mais. Eliminar generate-summary.ts e o step de build-summary.
+Shared lib → scripts/lib/ com imports. Scripts continuam como entry points independentes.
+Install pipeline → install.ts copia lib/ também para ~/.claude/devorch-scripts/lib/.
+Arquivo do comando unificado → commands/devorch.md. install.ts instala em ~/.claude/commands/devorch.md (raiz, não subdir) para que o skill name seja /devorch.
 </decisions>
 
 <problem-statement>
-Two gaps in devorch's workflow: (1) After build, check-implementation finds issues but only outputs paste-ready `/devorch:quick` commands — the user must manually copy/paste each one, even for trivial fixes like leftover TODOs. When the check has doubts about what to do, it has no way to ask. (2) Worktrees are only used when there's already an in-progress plan, but they should be the default execution model — isolated branches with merge-at-end give better safety and parallelism for every plan, not just parallel ones.
+O devorch tem 3 entry points (make-plan, quick, e nenhum para conversa), forçando o usuário a classificar sua task antes de começar. Internamente, 19 scripts duplicam ~600 linhas de parsing e utilitários. O pipeline de build re-faz trabalho (validação N+1, plan re-parsed 5-6x/fase, explore cache descartado no check). Scripts consolidáveis existem separados (extract-waves, tally-criteria, generate-summary).
 </problem-statement>
 
 <solution-approach>
-**Always-worktree**: Remove all non-worktree code paths from make-plan.md. Every plan creates a worktree via setup-worktree.ts. Build.md auto-detects the target worktree when --plan is omitted. Explore-cache stays in main repo — scripts get new flags (--cache-root for init-phase.ts, --root for manage-cache.ts) to read/write cache from main while executing in a worktree. New list-worktrees.ts script provides data for the worktrees command.
-
-**Smart check feedback**: Rewrite check-implementation.md Step 6. After producing the report, classify each issue as trivial/ambiguous/complex. Trivial → edit files and commit inline (re-run check-project.ts after). Ambiguous → AskUserQuestion with concrete options, then fix based on answer. Complex → generate detailed /devorch:make-plan prompt. Re-verify after inline fixes.
-
-**Alternatives considered:**
-- Cache per worktree (copy on create): rejected — leads to stale/divergent caches across worktrees. Shared read-only cache is simpler.
-- Task agent for inline fixes: rejected — check already runs inline in build context, has all tools available, adding a Task adds overhead without benefit.
-- Separate merge script: rejected — merge logic is straightforward (4 git commands), keeping it inline in build.md and worktrees.md is cleaner.
+1. Criar scripts/lib/ com módulos compartilhados (plan-parser, args, fs-utils) — elimina duplicação na raiz.
+2. Consolidar scripts: merge extract-waves → init-phase, tally → extract-criteria, remover generate-summary e state-history.
+3. Atualizar templates/comandos para novas interfaces e corrigir desperdícios (validação condicional, explore-cache no check, phase commit condicional).
+4. Criar commands/devorch.md unificado com 3 paths: conversa (explore iterativo), quick (checklist binário preservado), plan (flow completo com --auto default).
+Alternativa descartada: consolidar scripts em poucos mega-scripts. Rejeitado porque cada script é um entry point independente que precisa funcionar standalone.
 </solution-approach>
 
 <relevant-files>
-- `scripts/init-phase.ts` — add --cache-root flag for reading explore-cache from main repo
-- `scripts/manage-cache.ts` — add --root flag for operating on cache at a different root
-- `scripts/setup-worktree.ts` — stop copying explore-cache.md to worktree
-- `commands/make-plan.md` — remove non-worktree paths, always create worktree
-- `commands/build.md` — auto-detect worktree, pass mainRoot to phase agents
-- `templates/build-phase.md` — use mainRoot for all cache operations
-- `commands/check-implementation.md` — three-tier feedback loop with inline execution
+- `scripts/init-phase.ts` — absorve extract-waves, refatorado para usar lib
+- `scripts/extract-waves.ts` — será deletado após merge em init-phase
+- `scripts/extract-criteria.ts` — absorve tally-criteria, ganha --tally flag
+- `scripts/tally-criteria.ts` — será deletado após merge em extract-criteria
+- `scripts/generate-summary.ts` — será deletado (build-summary eliminado)
+- `scripts/update-state.ts` — simplificado: remove state-history.md
+- `scripts/format-commit.ts` — ganha --goal flag para evitar re-read do plan
+- `scripts/map-project.ts` — ganha --persist para salvar em .devorch/project-map.md
+- `scripts/check-agent-teams.ts` — callers passam a usar templates do JSON output
+- `scripts/archive-plan.ts` — refatorado para usar lib
+- `scripts/check-project.ts` — refatorado para usar lib
+- `scripts/hash-plan.ts` — refatorado para usar lib
+- `scripts/list-worktrees.ts` — refatorado para usar lib
+- `scripts/manage-cache.ts` — refatorado para usar lib
+- `scripts/map-conventions.ts` — refatorado para usar lib
+- `scripts/run-validation.ts` — refatorado para usar lib
+- `scripts/setup-worktree.ts` — refatorado para usar lib
+- `scripts/validate-plan.ts` — refatorado para usar lib
+- `scripts/verify-build.ts` — refatorado para usar lib
+- `templates/build-phase.md` — remove step extract-waves, phase commit condicional
+- `commands/check-implementation.md` — validação condicional, explore-cache no Explore agent, usa templates do check-agent-teams
+- `commands/build.md` — remove generate-summary + build-summary commit, referências make-plan → /devorch
+- `commands/explore-deep.md` — usa templates do check-agent-teams output
+- `commands/review.md` — usa templates do check-agent-teams output
+- `commands/debug.md` — usa templates do check-agent-teams output
+- `commands/make-plan.md` — será deletado
+- `commands/quick.md` — será deletado
+- `install.ts` — copia lib/, instala devorch.md na raiz de commands
+- `uninstall.ts` — remove devorch-scripts/lib/, remove devorch.md da raiz
+- `README.md` — atualiza todas as referências
+- `.devorch/CONVENTIONS.md` — remove referência a state-history.md
 
 <new-files>
-- `scripts/list-worktrees.ts` — lists all worktrees with plan name, branch, build status
-- `commands/worktrees.md` — list/merge/delete worktrees command
+- `scripts/lib/plan-parser.ts` — extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle
+- `scripts/lib/args.ts` — parseArgs genérico com typed flag definitions
+- `scripts/lib/fs-utils.ts` — safeReadFile, safeWriteFile
+- `commands/devorch.md` — comando unificado com 3 paths (conversa, quick, plan)
 </new-files>
 </relevant-files>
 
-<phase1 name="Script Infrastructure">
-<goal>Add cache-root awareness to init-phase.ts and manage-cache.ts, create list-worktrees.ts, and stop setup-worktree.ts from copying explore-cache.</goal>
+<phase1 name="Shared Library Foundation">
+<goal>Criar módulos utilitários compartilhados e atualizar o pipeline de instalação para suportá-los.</goal>
 
 <tasks>
-#### 1. Add --cache-root to init-phase.ts
-- **ID**: add-cache-root-init
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Add optional `--cache-root <path>` flag to parseArgs in `scripts/init-phase.ts`
-- When `--cache-root` is provided: read explore-cache from `<cache-root>/.devorch/explore-cache.md` instead of from the plan file's directory
-- When `--cache-root` is NOT provided: keep existing behavior (read from plan's directory)
-- Update the JSDoc header to document the new flag
-- The filtering logic (matching cache sections by phase file paths) stays unchanged — only the source path of the cache file changes
+#### 1. Create plan-parser library module
+- **ID**: create-plan-parser
+- **Assigned To**: builder-1
+- Create `scripts/lib/plan-parser.ts` with:
+  - `extractTagContent(text: string, tagName: string): string | null` — Variant B (line-start-anchored regex: `^\s*<tagName>` with `im` flags). This is the canonical implementation.
+  - `interface PhaseBounds { phase: number; name: string; start: number; end: number; content: string }`
+  - `parsePhaseBounds(planContent: string): PhaseBounds[]` — single-pass line scan for `<phaseN name="...">` / `</phaseN>` pairs. Returns array sorted by phase number.
+  - `readPlan(planPath: string): string` — reads plan file with try/catch, exits 1 on failure with stderr message.
+  - `extractPlanTitle(planContent: string): string` — regex `^#\s+Plan:\s+(.+)$` match, defaults to "Untitled Plan".
+  - `extractFileEntries(block: string): Array<{ path: string; description: string }>` — parses `- \`path\` — description` format from relevant-files/new-files blocks.
+- Follow CONVENTIONS.md: double quotes, 2-space indent, semicolons, named imports from `fs` and `path`, Variant B regex only, no default exports — use named exports.
+- File must be importable by other scripts via `import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractFileEntries } from "./lib/plan-parser";`
 
-#### 2. Add --root to manage-cache.ts
-- **ID**: add-root-manage-cache
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Add optional `--root <path>` flag to parseArgs in `scripts/manage-cache.ts`
-- When `--root` is provided: resolve cache path as `<root>/.devorch/explore-cache.md` and run git commands with `cwd: <root>`
-- When `--root` is NOT provided: keep existing behavior (resolve relative to `process.cwd()`)
-- Update the JSDoc header to document the new flag
-- The `getChangedFiles()` function should also use the root as cwd for `git diff` when --root is provided
+#### 2. Create args and fs-utils library modules
+- **ID**: create-args-fsutils
+- **Assigned To**: builder-2
+- Create `scripts/lib/args.ts` with:
+  - `interface FlagDef { name: string; type: "string" | "number" | "boolean"; required?: boolean }`
+  - `parseArgs<T>(defs: FlagDef[]): T` — parses `process.argv.slice(2)` for `--flag value` pairs. Exits 1 with usage message if required flag missing. Returns typed object.
+  - Keep it simple — no positional args support (scripts that use positional args keep their own 1-line parse).
+- Create `scripts/lib/fs-utils.ts` with:
+  - `safeReadFile(filePath: string): string` — returns empty string on missing/unreadable file. Uses `existsSync` + `readFileSync` with try/catch.
+- Follow CONVENTIONS.md: named exports only, no third-party deps.
 
-#### 3. Create list-worktrees.ts
-- **ID**: create-list-worktrees
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Create `scripts/list-worktrees.ts` following existing script conventions (JSDoc header, parseArgs, JSON output, Bun APIs)
-- **Usage**: `bun list-worktrees.ts` (no required args)
-- **Logic**:
-  - Check if `.worktrees/` directory exists. If not, output empty result.
-  - Read directory entries in `.worktrees/` (filter for directories only)
-  - For each worktree directory:
-    - Read `.worktrees/<name>/.devorch/plans/current.md` → extract plan title from `# Plan: <title>` heading. If file missing, title = "(no plan)"
-    - Read `.worktrees/<name>/.devorch/state.md` → extract `Last completed phase: N` and `Status:` line. If missing, status = "not started", lastPhase = 0
-    - Count total phases by counting `<phaseN` tags in plan file (if readable)
-    - Get branch name: `git -C .worktrees/<name> branch --show-current` via Bun.spawnSync
-    - Validate worktree is live: check it appears in `git worktree list` output
-  - Sort by name alphabetically
-- **Output JSON**:
-  ```json
-  {
-    "worktrees": [
-      {
-        "name": "feature-a",
-        "path": ".worktrees/feature-a",
-        "branch": "devorch/feature-a",
-        "planTitle": "Add Auth System",
-        "status": "ready for phase 3",
-        "lastPhase": 2,
-        "totalPhases": 4,
-        "valid": true
-      }
-    ],
-    "count": 1
-  }
-  ```
-- **Error handling**: `.worktrees/` missing → `{"worktrees": [], "count": 0}`. Individual worktree read failure → include entry with available fields, set missing fields to defaults.
+#### 3. Update install and uninstall for lib directory
+- **ID**: update-install
+- **Assigned To**: builder-3
+- In `install.ts`:
+  - The scripts copy step already uses recursive copy. Verify that `scripts/lib/` is included when copying `scripts/` → `~/.claude/devorch-scripts/`. If not, ensure recursive copy includes subdirectories.
+  - Add handling for `commands/devorch.md`: if the file exists in source `commands/`, copy it to `~/.claude/commands/devorch.md` (root level, NOT into the devorch/ subdirectory). This makes the skill name `/devorch` instead of `/devorch:devorch`.
+  - Update the final console message from `"/devorch:make-plan"` to `"/devorch"`.
+- In `uninstall.ts`:
+  - Add removal of `~/.claude/commands/devorch.md` (root level file).
+  - Add removal of `~/.claude/devorch-templates/` (currently missing — oversight in original).
 
-#### 4. Stop copying explore-cache in setup-worktree.ts
-- **ID**: exclude-cache-setup
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- In `scripts/setup-worktree.ts`, modify the file copy loop (where uncommitted `.devorch/` files are copied to the worktree)
-- Add a filter: skip any file path that matches `explore-cache.md` (i.e., `.devorch/explore-cache.md`)
-- The explore-cache stays exclusively in the main repo — worktrees read it from there via init-phase.ts --cache-root
-- All other .devorch/ files (CONVENTIONS.md, state.md, plans/, etc.) continue to be copied as before
-
-#### 5. Validate Phase
+#### 4. Validate Phase
 - **ID**: validate-phase-1
 - **Assigned To**: validator
-- Verify init-phase.ts accepts --cache-root flag: read the file, check parseArgs handles the flag, and the explore-cache reading path uses cache-root when provided
-- Verify manage-cache.ts accepts --root flag: read the file, check parseArgs handles the flag, cachePath and git commands use the root when provided
-- Verify list-worktrees.ts exists with correct structure: scans .worktrees/, reads plan title + state + branch for each, outputs JSON array
-- Verify setup-worktree.ts filters out explore-cache.md from the copy loop
-- Run `bun scripts/list-worktrees.ts` — should output `{"worktrees":[],"count":0}` (no worktrees exist)
-- Run `bun scripts/init-phase.ts 2>&1 || true` — should show usage including --cache-root
-- Run `bun scripts/manage-cache.ts 2>&1 || true` — should show usage including --root
+- Verify `scripts/lib/plan-parser.ts` exports all 5 functions with correct signatures
+- Verify `scripts/lib/args.ts` exports `parseArgs` with correct signature
+- Verify `scripts/lib/fs-utils.ts` exports `safeReadFile` with correct signature
+- Run `bun C:/Users/bruno/Documents/Dev/devorch/.worktrees/devorch-unification/scripts/lib/plan-parser.ts` — should be importable (no runtime errors on import)
+- Verify install.ts handles commands/devorch.md root-level copy
+- Verify uninstall.ts removes devorch-templates/
 </tasks>
 
 <execution>
-**Wave 1** (parallel): add-cache-root-init, add-root-manage-cache, create-list-worktrees, exclude-cache-setup
-**Wave 2** (validation): validate-phase-1
+**Wave 1** (parallel): create-plan-parser, create-args-fsutils
+**Wave 2** (after wave 1): update-install
+**Wave 3** (validation): validate-phase-1
 </execution>
 
 <criteria>
-- [ ] `init-phase.ts` accepts `--cache-root <path>` and reads explore-cache from `<cache-root>/.devorch/explore-cache.md` when provided
-- [ ] `init-phase.ts` default behavior unchanged when `--cache-root` is not provided
-- [ ] `manage-cache.ts` accepts `--root <path>` and resolves cache path + git cwd to the specified root
-- [ ] `manage-cache.ts` default behavior unchanged when `--root` is not provided
-- [ ] `list-worktrees.ts` exists, scans `.worktrees/`, outputs JSON with name/path/branch/planTitle/status/lastPhase/totalPhases/valid
-- [ ] `list-worktrees.ts` outputs `{"worktrees":[],"count":0}` when no worktrees exist
-- [ ] `setup-worktree.ts` no longer copies `explore-cache.md` to the worktree
-- [ ] All scripts follow conventions: JSDoc, named fs imports, no npm deps, JSON stdout, exit 1 for bad args
+- [ ] scripts/lib/plan-parser.ts exists with all 5 named exports
+- [ ] scripts/lib/args.ts exists with parseArgs export
+- [ ] scripts/lib/fs-utils.ts exists with safeReadFile export
+- [ ] All lib files pass `bun --bun check` (typecheck)
+- [ ] install.ts copies scripts/lib/ to ~/.claude/devorch-scripts/lib/
+- [ ] install.ts copies commands/devorch.md to ~/.claude/commands/devorch.md (root)
+- [ ] uninstall.ts removes ~/.claude/commands/devorch.md and ~/.claude/devorch-templates/
 </criteria>
 
 <validation>
-- `bun scripts/list-worktrees.ts` — outputs valid JSON with empty worktrees array
-- `bun scripts/init-phase.ts 2>&1 | head -3` — shows usage including --cache-root
-- `bun scripts/manage-cache.ts 2>&1 | head -3` — shows usage including --root
-- `grep "cache-root" scripts/init-phase.ts` — flag exists
-- `grep "root" scripts/manage-cache.ts` — flag exists
-- `grep "explore-cache" scripts/setup-worktree.ts` — filter exists
+- `cd .worktrees/devorch-unification && bun scripts/lib/plan-parser.ts` — no import errors
+- `cd .worktrees/devorch-unification && bun scripts/lib/args.ts` — no import errors
 </validation>
 
 <handoff>
-Four script changes ready: init-phase.ts reads cache from configurable root, manage-cache.ts operates on configurable root, list-worktrees.ts provides worktree inventory, setup-worktree.ts no longer copies cache to worktrees. Next phase updates all command files to use always-worktree architecture with these new script capabilities.
+Shared lib is available at scripts/lib/. Phase 2 will refactor all 19 scripts to import from it, merge redundant scripts, and delete obsolete ones. The lib modules define the canonical implementations of parseArgs, extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, safeReadFile.
 </handoff>
 </phase1>
 
-<phase2 name="Always-Worktree Commands">
-<goal>Update make-plan.md, build.md, and build-phase.md to use always-worktree architecture — plans always live in worktrees, cache always reads from main.</goal>
+<phase2 name="Script Consolidation">
+<goal>Refatorar todos os 19 scripts para usar shared lib, consolidar scripts redundantes, e eliminar código morto.</goal>
 
 <tasks>
-#### 1. Update make-plan.md for always-worktree
-- **ID**: update-make-plan
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Modify `commands/make-plan.md` with these changes:
+#### 1. Merge extract-waves into init-phase and refactor
+- **ID**: merge-waves-into-init
+- **Assigned To**: builder-1
+- In `scripts/init-phase.ts`:
+  - Replace inline `extractTagContent`, `parsePhaseBounds`, `readPlan`, `extractPlanTitle`, `safeReadFile` with imports from `./lib/plan-parser` and `./lib/fs-utils`
+  - Replace inline `parseArgs` with import from `./lib/args`
+  - Add `waves` and `tasks` fields to the JSON output (same format as current extract-waves.ts output: `waves: Array<{ wave: number; taskIds: string[] }>`, `tasks: Record<string, { id: string; name: string; assignedTo: string; content: string }>`)
+  - Parse the `<execution>` block within the target phase to extract wave definitions
+  - Parse the `<tasks>` block to extract task details (ID, name, assigned-to, bullet content)
+  - The `filterCache` function stays in init-phase (it's specific to this script's logic)
+- Delete `scripts/extract-waves.ts`
 
-- **Step 1 (Load context)**: Replace the entire `If .devorch/plans/current.md exists:` block with migration logic:
-  - If `.devorch/plans/current.md` exists in main: archive it silently via `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. Report: "Migrated legacy plan to archive."
-  - Remove the "Archive old plan" vs "Run in parallel worktree" AskUserQuestion — it no longer applies.
-  - Remove the `worktreeMode` variable — it's always true now.
+#### 2. Merge tally into extract-criteria, simplify update-state and format-commit
+- **ID**: merge-tally-and-simplify
+- **Assigned To**: builder-2
+- In `scripts/extract-criteria.ts`:
+  - Replace inline parsing with imports from `./lib/plan-parser` and `./lib/args`
+  - Fix `extractTagContent` to use Variant B (currently uses Variant A — latent bug)
+  - Add `--tally` flag: when present, also reads `state.md` (relative to plan dir) and computes per-phase pass/fail tally. Output includes additional fields: `tally: { total: number; passed: number; perPhase: Array<{ phase: number; total: number; passed: number; status: string }> }`
+- Delete `scripts/tally-criteria.ts`
+- In `scripts/update-state.ts`:
+  - Replace inline parsing with imports from shared lib
+  - Remove all state-history.md logic: no more reading/appending to state-history.md. Only write state.md.
+- In `scripts/format-commit.ts`:
+  - Replace inline parsing with imports from shared lib
+  - Add `--goal <text>` flag as alternative to `--plan --phase`. When `--goal` is provided, skip plan file reading and use the goal text directly for the commit message. When `--plan --phase` is provided, behave as before (reading from plan).
 
-- **Step 8 (Create plan)**: Remove the "Otherwise" (non-worktree) branch entirely. The only path is:
-  1. Derive a kebab-case name from the plan's descriptive name
-  2. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`. Parse JSON output to get `worktreePath`.
-  3. Write the plan to `<worktreePath>/.devorch/plans/current.md`
-  4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if exists)
-  5. Do NOT copy explore-cache.md (it stays in main, worktrees read from main via --cache-root)
-  6. Set `planPath = <worktreePath>/.devorch/plans/current.md` for subsequent steps.
+#### 3. Refactor remaining plan-related scripts to use shared lib
+- **ID**: refactor-plan-scripts
+- **Assigned To**: builder-3
+- Refactor each script: replace inline `parseArgs`, `extractTagContent`, `parsePhaseBounds`, `readPlan`, `extractPlanTitle`, `safeReadFile`, and plan-read boilerplate with imports from `./lib/plan-parser`, `./lib/args`, `./lib/fs-utils`
+- Scripts to refactor: `run-validation.ts`, `validate-plan.ts`, `hash-plan.ts`, `archive-plan.ts`, `verify-build.ts`, `generate-summary.ts`
+- Note: generate-summary.ts will be deleted in Phase 3, but refactor it here for consistency — if build.md calls it before Phase 3 is deployed, it still works.
+- Ensure each script's CLI interface (args, JSON output format) remains identical. Only internals change.
 
-- **Step 10 (Reset state)**: Remove the "Otherwise" branch. Always: delete `<worktreePath>/.devorch/state.md` and `<worktreePath>/.devorch/state-history.md` if they exist.
+#### 4. Refactor remaining infrastructure scripts to use shared lib
+- **ID**: refactor-infra-scripts
+- **Assigned To**: builder-4
+- Scripts to refactor: `check-project.ts`, `check-agent-teams.ts`, `setup-worktree.ts`, `list-worktrees.ts`, `manage-cache.ts`, `map-project.ts`, `map-conventions.ts`
+- These scripts have less overlap with plan-parser (most only use parseArgs or safeReadFile), but standardize their arg parsing and file reading through the shared lib.
+- For `map-project.ts`: add `--persist` flag. When present, write the output to `.devorch/project-map.md` in the current directory (in addition to stdout). Include a `Generated: <ISO timestamp>` header.
+- Ensure CLI interfaces remain identical for all scripts.
 
-- **Step 11 (Auto-commit)**: Remove the "Otherwise" (non-worktree) branch. Always:
-  - Commit in worktree branch: `git -C <worktreePath> add .devorch/plans/current.md .devorch/CONVENTIONS.md` + commit `"chore(devorch): plan — <plan name>"`
-  - Commit in main: stage `.devorch/explore-cache.md`, `.devorch/CONVENTIONS.md` (if updated) + commit `"chore(devorch): add worktree for <plan name>"`
-
-- **Step 12 (Report)**: Remove the non-worktree branch from the report. Always show:
-  - If `--auto`: same behavior but always append `--plan <name>` to the build prompt
-  - If NOT `--auto`: always show `Plan saved to worktree: <worktreePath> (branch: <branch>)\n/clear\n/devorch:build --plan <name>`
-
-#### 2. Update build.md for auto-detect
-- **ID**: update-build
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Modify `commands/build.md` with these changes:
-
-- **Step 0 (Resolve plan path)**: Rewrite the resolution logic:
-  1. If `--plan <value>` provided: same as current (bare name → worktree, full path → as-is)
-  2. If `--plan` NOT provided (NEW LOGIC):
-     - Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output
-     - If `count == 0`: report error "No active worktrees. Run `/devorch:make-plan` first." and stop.
-     - If `count == 1`: auto-detect. Set `planPath = .worktrees/<name>/.devorch/plans/current.md`, `projectRoot = .worktrees/<name>`. Report: "Auto-detected worktree: <name> (<planTitle>)"
-     - If `count > 1`: use `AskUserQuestion` to present the worktrees as options (each option shows name + plan title + status). Set planPath and projectRoot based on the user's choice.
-  3. Remove the old default `planPath = .devorch/plans/current.md` — this path no longer exists.
-
-- **Set `isWorktree = true` always** (since plans always live in worktrees). Remove the conditional `isWorktree = projectRoot != "."`.
-
-- **Add `mainRoot`**: Set `mainRoot` to the repo root (where `.worktrees/` lives). This is the cwd of the build.md execution context. Pass `mainRoot` as context to phase agents.
-
-- **Step 2 (Phase loop)**: When launching phase agents, append to the prompt: `\n\nMain repo root for cache: <mainRoot>` so build-phase.md knows where to find/write the explore cache.
-
-- **Step 3 (check-implementation)**: Add note that check-implementation has access to `<planPath>`, `<projectRoot>`, and `<mainRoot>`.
-
-- **Step 5 (Merge)**: Remove the `Skip this step if isWorktree is false` guard — this step always runs now.
-
-#### 3. Update build-phase.md for main-root cache
-- **ID**: update-build-phase
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Modify `templates/build-phase.md` with these changes:
-
-- **Parse mainRoot**: At the start, extract `mainRoot` from the prompt context (the text appended by build.md: "Main repo root for cache: <path>"). If not found, default to cwd (backward compatibility).
-
-- **Step 1 (Init phase)**: Change init-phase.ts call to pass `--cache-root <mainRoot>`:
-  - Old: `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N`
-  - New: `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot>`
-
-- **Step 8 (Cache operations)**:
-  - When appending new Explore agent summaries: write to `<mainRoot>/.devorch/explore-cache.md` (not `<projectRoot>/.devorch/explore-cache.md`)
-  - Change manage-cache.ts call to use `--root <mainRoot>`:
-    - Old: `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000`
-    - New: `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
-
-#### 4. Validate Phase
+#### 5. Validate Phase
 - **ID**: validate-phase-2
 - **Assigned To**: validator
-- Verify make-plan.md:
-  - No longer references `worktreeMode` variable or conditional
-  - No "Archive old plan" vs "Run in parallel worktree" AskUserQuestion
-  - Legacy current.md is auto-archived on detection
-  - Step 8 always creates worktree (no "Otherwise" branch)
-  - Step 12 always shows worktree path
-  - explore-cache.md is NOT copied to worktree in step 8
-- Verify build.md:
-  - Step 0 runs list-worktrees.ts when no --plan provided
-  - Auto-detect with 1 worktree, AskUserQuestion with 2+, error with 0
-  - No default `planPath = .devorch/plans/current.md`
-  - `mainRoot` variable is set and passed to phase agents
-  - Step 5 has no `isWorktree` guard (always runs)
-- Verify build-phase.md:
-  - Parses mainRoot from prompt context
-  - init-phase.ts call includes `--cache-root <mainRoot>`
-  - manage-cache.ts call includes `--root <mainRoot>`
-  - Explore summary appends target `<mainRoot>/.devorch/explore-cache.md`
-- `grep -c "worktreeMode" commands/make-plan.md` — should be 0
-- `grep "current.md" commands/build.md` — should NOT appear as a default path (may appear in worktree resolution)
-- `grep "cache-root" templates/build-phase.md` — present
-- `grep "mainRoot" commands/build.md` — present
+- Verify extract-waves.ts is deleted
+- Verify tally-criteria.ts is deleted
+- Verify init-phase.ts output now includes `waves` and `tasks` fields
+- Verify extract-criteria.ts with --tally produces tally output
+- Verify update-state.ts no longer writes state-history.md
+- Verify format-commit.ts accepts --goal flag
+- Verify map-project.ts with --persist writes .devorch/project-map.md
+- Verify all 17 remaining scripts still produce valid JSON output (unchanged CLI interface)
+- Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` on the worktree
 </tasks>
 
 <execution>
-**Wave 1** (parallel): update-make-plan, update-build, update-build-phase
-**Wave 2** (validation): validate-phase-2
+**Wave 1** (parallel): merge-waves-into-init, merge-tally-and-simplify
+**Wave 2** (parallel, after wave 1): refactor-plan-scripts, refactor-infra-scripts
+**Wave 3** (validation): validate-phase-2
 </execution>
 
 <criteria>
-- [ ] make-plan.md always creates a worktree — no conditional worktreeMode, no non-worktree path
-- [ ] make-plan.md auto-archives legacy current.md in main repo
-- [ ] make-plan.md does NOT copy explore-cache.md to worktree
-- [ ] build.md auto-detects worktree when --plan is omitted (list-worktrees.ts → 0=error, 1=auto, 2+=ask)
-- [ ] build.md no longer defaults to `.devorch/plans/current.md`
-- [ ] build.md sets and passes `mainRoot` to phase agents
-- [ ] build.md Step 5 (merge) always runs (no isWorktree guard)
-- [ ] build-phase.md passes `--cache-root <mainRoot>` to init-phase.ts
-- [ ] build-phase.md passes `--root <mainRoot>` to manage-cache.ts
-- [ ] build-phase.md appends explore summaries to `<mainRoot>/.devorch/explore-cache.md`
+- [ ] extract-waves.ts deleted, init-phase.ts emits waves+tasks in JSON output
+- [ ] tally-criteria.ts deleted, extract-criteria.ts --tally works
+- [ ] update-state.ts does not reference state-history.md
+- [ ] format-commit.ts accepts --goal as alternative input
+- [ ] map-project.ts --persist writes .devorch/project-map.md
+- [ ] All 17 remaining scripts pass typecheck
+- [ ] No script contains inline extractTagContent, parsePhaseBounds, or parseArgs (all imported from lib)
+- [ ] extractTagContent uses only Variant B (line-start-anchored) everywhere
 </criteria>
 
 <validation>
-- `grep -c "worktreeMode" commands/make-plan.md` — returns 0
-- `grep "list-worktrees" commands/build.md` — present
-- `grep "cache-root" templates/build-phase.md` — present
-- `grep "mainRoot" templates/build-phase.md` — present
-- `grep "mainRoot" commands/build.md` — present
-- `grep "explore-cache" commands/make-plan.md` — should NOT appear in step 8 copy list
+- `cd .worktrees/devorch-unification && bun scripts/init-phase.ts --plan .devorch/plans/current.md --phase 1` — verify waves/tasks in output
+- `cd .worktrees/devorch-unification && bun scripts/extract-criteria.ts --plan .devorch/plans/current.md --tally` — verify tally fields
+- `cd .worktrees/devorch-unification && bun scripts/format-commit.ts --goal "test goal" --phase 1` — verify message output
 </validation>
 
 <handoff>
-All command files now use always-worktree architecture. make-plan always creates worktrees, build auto-detects the target, build-phase reads/writes cache from main repo root. Next phase adds the smart check-implementation feedback loop and the new /devorch:worktrees management command.
+All scripts now use shared lib. extract-waves.ts and tally-criteria.ts are deleted. init-phase.ts output includes waves+tasks. Phase 3 updates the .md templates and commands to reference the new interfaces. Key changes for Phase 3: build-phase.md must remove extract-waves step (use init-phase waves), check-implementation.md must use extract-criteria --tally instead of tally-criteria, build.md must remove generate-summary step.
 </handoff>
 </phase2>
 
-<phase3 name="Smart Check Feedback + Worktrees Command">
-<goal>Rewrite check-implementation.md with three-tier feedback (auto-fix trivial, ask ambiguous, suggest make-plan for complex) and create the /devorch:worktrees management command.</goal>
+<phase3 name="Build Pipeline Updates">
+<goal>Atualizar templates e comandos para as novas interfaces de script e eliminar desperdícios no pipeline de build.</goal>
 
 <tasks>
-#### 1. Rewrite check-implementation.md feedback loop
-- **ID**: rewrite-check-feedback
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Modify `commands/check-implementation.md` — replace Step 6 (Follow-up) entirely with this three-tier system:
+#### 1. Update build-phase template
+- **ID**: update-build-phase
+- **Assigned To**: builder-1
+- In `templates/build-phase.md`:
+  - **Remove Step 3** (extract-waves): delete the entire step. Waves and tasks now come from init-phase.ts output (Step 1). Update Step 4 to reference "waves and tasks from init-phase output" instead of "from extract-waves output".
+  - **Renumber steps**: after removing Step 3, renumber all subsequent steps (old Step 4 → new Step 3, etc.)
+  - **Conditional phase commit** (old Step 7, now Step 6): change from "If there are uncommitted changes after validation passes" to explicit check: "Run `git -C <projectRoot> status --porcelain`. If output is empty, skip commit. If output has changes, run format-commit.ts..."
+  - **format-commit with --goal** (same step): the phase goal is already available from init-phase output. Pass it directly: `bun ... format-commit.ts --goal "<goal text from init-phase>" --phase N` instead of `--plan <planPath> --phase N`. This eliminates one plan re-read.
+  - **Update state step** (old Step 9, now Step 8): remove mention of "archives the old phase summary to state-history.md". Just say "writes state.md with the latest phase summary".
+  - Keep all other steps (init-phase, explore, deploy builders, run-validation, deploy validator, manage-cache, report) unchanged.
 
-**Replace Step 6 with: Smart Dispatch**
+#### 2. Update check-implementation command
+- **ID**: update-check-impl
+- **Assigned To**: builder-2
+- In `commands/check-implementation.md`:
+  - **Replace tally-criteria.ts** (Step 3): change `bun .../tally-criteria.ts --plan <planPath>` to `bun .../extract-criteria.ts --plan <planPath> --tally`. Update the output parsing to match the new combined format.
+  - **Conditional validation re-run** (Step 3): instead of unconditionally re-running all validation commands from all phases, add logic: "For each phase's validation commands, check if the git diff (from Step 2) includes files in that phase's relevant-files list. Only re-run validation commands for phases whose files were touched by subsequent phases. Always run global checks (like `tsc --noEmit`, `bun test`) exactly once."
+  - **Pass explore-cache to Explore agent** (Step 3): add to the Explore agent prompt: "Read non-invalidated sections from `<mainRoot>/.devorch/explore-cache.md` for structural context of unchanged areas." This gives the agent cached knowledge without stale data risk.
+  - **Use check-agent-teams templates** (Step 4): remove the line "Read `.devorch/team-templates.md` and extract the `check-team` template". Instead: "Use the `templates` field from the check-agent-teams.ts JSON output (already parsed in this step) to get the check-team configuration."
+  - **Update make-plan references**: change `/devorch:make-plan` to `/devorch` in Step 6c (complex issue suggestion) and in the description/frontmatter.
 
-After producing the report (Step 5), if the verdict is FAIL or has warnings, classify each issue found (from cross-phase integration, automated checks, file artifacts, adversarial review):
+#### 3. Update build command
+- **ID**: update-build-cmd
+- **Assigned To**: builder-3
+- In `commands/build.md`:
+  - **Remove Step 4** (build summary): delete the entire generate-summary step including the commit. The step that ran `generate-summary.ts`, staged `build-summary.md`, and committed it is eliminated.
+  - **Renumber steps**: after removing Step 4, renumber subsequent steps.
+  - **Remove state-history.md reference**: in the prose about state files, remove mention of state-history.md.
+  - **Update error message**: change `"No active worktrees. Run /devorch:make-plan first."` to `"No active worktrees. Run /devorch first."`.
+  - **Delete generate-summary.ts**: the script has no callers after this change. Delete `scripts/generate-summary.ts`.
 
-**Issue Classification** (evaluate each issue against these rules, in order):
+#### 4. Update Agent Teams command files
+- **ID**: update-agent-teams-cmds
+- **Assigned To**: builder-4
+- In `commands/explore-deep.md`, `commands/review.md`, `commands/debug.md`:
+  - Each currently runs `check-agent-teams.ts` then separately reads `.devorch/team-templates.md` to extract their team template.
+  - Change: after running `check-agent-teams.ts`, use the `templates` field from its JSON output directly. Remove the separate "Read `.devorch/team-templates.md`" instruction.
+  - The template data is already in the JSON — callers just need to access `templates["explore-deep"]`, `templates["review"]`, or `templates["debug"]` respectively.
 
-1. **Trivial** — fix is self-evident, single-file, no ambiguity:
-   - Leftover `TODO`, `FIXME`, `HACK`, `XXX` comments from builders
-   - Unused imports or orphan exports
-   - Missing semicolons, trailing whitespace, formatting issues
-   - Obvious typos in strings or variable names
-   - Empty catch blocks or stub implementations that should have been filled
-   - A file that should exist but is missing from a simple copy/rename oversight
-
-2. **Ambiguous** — multiple valid interpretations, needs user input:
-   - Behavior change that might be intentional or accidental
-   - Naming that could follow multiple conventions
-   - Code that works but differs from the pattern in CONVENTIONS.md — unclear if deliberate
-   - A test that fails but the expected behavior is debatable
-   - A handoff contract that was partially honored — unclear which part matters
-
-3. **Complex** — requires architectural thought, multiple files, or new design:
-   - Missing feature that was in the plan but not implemented
-   - Structural issue affecting 4+ files
-   - Performance problem requiring algorithmic changes
-   - Security vulnerability requiring design-level fix
-   - Integration issue between multiple modules
-
-**Dispatch Logic** (execute in this order):
-
-**Step 6a — Fix trivial issues inline:**
-- For each trivial issue: edit the file directly using the Edit tool. Keep fixes minimal — only change what's needed.
-- After all trivial fixes: stage and commit changed files with message `fix(check): <concise description of fixes>`
-- Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` to verify no regressions
-- Report: "Fixed N trivial issues inline: [one-line list]"
-
-**Step 6b — Ask about ambiguous issues:**
-- For each ambiguous issue (or group of related ones): use `AskUserQuestion` with 2-4 concrete options describing the possible interpretations
-- Include file:line evidence and the specific ambiguity in the question
-- Based on the user's answer:
-  - If the answer makes the fix trivial → fix inline (same as 6a: edit, commit, check-project)
-  - If the answer reveals complexity → add to the complex list (Step 6c)
-- Report each resolution
-
-**Step 6c — Suggest make-plan for complex issues:**
-- Group related complex issues into a single coherent description
-- Generate a ready-to-paste command with full context:
-  ```
-  /devorch:make-plan <detailed description including: what's wrong, which files are affected, what the expected outcome should be>
-  ```
-- Do NOT attempt to fix complex issues inline — they need proper planning
-- Report: "These issues require planning. Suggested command above."
-
-**Step 6d — Re-verify (after any inline fixes):**
-- If any fixes were made in steps 6a or 6b:
-  - Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — verify lint + typecheck pass
-  - Re-run `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — verify artifacts
-  - If both pass and no complex issues remain: update verdict to **PASS**
-  - If both pass but complex issues exist: update verdict to **PASS with N complex issues noted**
-  - If re-verification fails: report the new failures (do not loop — one round of fixes only)
-
-- Also update the check-implementation.md header note to mention that it now resolves trivial issues automatically and asks for clarification on ambiguous ones
-- In Step 1 (Load plan data), parameterize the plan path: replace hardcoded `.devorch/plans/current.md` with `<planPath>` (passed from build.md context as the variable set in Step 0)
-- In Step 2 (Determine changed files), ensure git commands use the correct working directory when in a worktree (use `git -C <projectRoot>` pattern)
-
-#### 2. Create worktrees.md command
-- **ID**: create-worktrees-cmd
-- **Assigned To**: builder
-- Working directory: `C:\Users\bruno\Documents\Dev\devorch`
-- Create `commands/worktrees.md` with YAML frontmatter:
-  ```yaml
-  ---
-  description: List, merge, or delete devorch worktrees
-  model: opus
-  ---
-  ```
-
-- **Workflow**:
-
-  **Step 1 — List worktrees:**
-  - Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output
-  - If count == 0: report "No active worktrees." and stop.
-  - Display a formatted list:
-    ```
-    ## Active Worktrees
-
-    1. **feature-a** (branch: devorch/feature-a)
-       Plan: Add Auth System
-       Status: Phase 2/4 complete — ready for phase 3
-
-    2. **api-refactor** (branch: devorch/api-refactor)
-       Plan: Refactor API Layer
-       Status: Completed (all 3 phases)
-    ```
-
-  **Step 2 — Ask action:**
-  - Use `AskUserQuestion`:
-    - **"Merge a worktree"** — merge a completed worktree into main
-    - **"Delete a worktree"** — remove an abandoned worktree (branch + directory)
-    - **"Done"** — exit
-
-  **Step 3a — Merge flow (if "Merge"):**
-  - If only 1 worktree: use it. If multiple: `AskUserQuestion` to select which one.
-  - Show what will be merged: `git log --oneline <mainBranch>..<worktreeBranch>`
-  - Confirm via `AskUserQuestion`: "Merge N commits from <branch> into <mainBranch>?"
-  - If confirmed:
-    ```bash
-    git checkout <mainBranch>
-    git merge <worktreeBranch>
-    ```
-  - If merge succeeds:
-    ```bash
-    git worktree remove <worktreePath>
-    git branch -d <worktreeBranch>
-    ```
-    Report: "Merged and cleaned up <name>."
-  - If merge has conflicts: report conflicts, instruct manual resolution. Do NOT force.
-
-  **Step 3b — Delete flow (if "Delete"):**
-  - If only 1 worktree: use it. If multiple: `AskUserQuestion` to select which one.
-  - Confirm via `AskUserQuestion`: "Delete worktree <name>? This will remove the branch and all unmerged changes."
-  - If confirmed:
-    ```bash
-    git worktree remove <worktreePath> --force
-    git branch -D <worktreeBranch>
-    ```
-    Report: "Deleted worktree <name> and branch <branch>."
-
-- **Rules**:
-  - Do not narrate actions. Execute directly.
-  - Never force-merge or auto-resolve conflicts.
-  - Deletion is destructive (branch -D) — always confirm first.
-
-#### 3. Validate Phase
+#### 5. Validate Phase
 - **ID**: validate-phase-3
 - **Assigned To**: validator
-- Verify check-implementation.md:
-  - Step 6 has three-tier classification: trivial (fix inline), ambiguous (AskUserQuestion), complex (suggest make-plan)
-  - Trivial fixes: uses Edit tool, commits with `fix(check):` prefix, re-runs check-project.ts
-  - Ambiguous issues: uses AskUserQuestion with 2-4 options, file:line evidence included
-  - Complex issues: generates ready-to-paste `/devorch:make-plan <detailed description>` command
-  - Re-verification step (6d) runs after any inline fixes
-  - Step 1 uses `<planPath>` variable (not hardcoded current.md)
-  - Step 2 uses `git -C <projectRoot>` for worktree compatibility
-- Verify worktrees.md:
-  - YAML frontmatter with description and model: opus
-  - Step 1 calls list-worktrees.ts and formats output
-  - Step 2 offers Merge/Delete/Done via AskUserQuestion
-  - Merge flow: shows git log preview, confirms, runs merge sequence (checkout → merge → worktree remove → branch -d)
-  - Delete flow: confirms, runs force removal (worktree remove --force → branch -D)
-  - Handles merge conflicts (report, don't force)
-- `grep "AskUserQuestion" commands/check-implementation.md` — present (for ambiguous issues)
-- `grep "make-plan" commands/check-implementation.md` — present (for complex issues)
-- `grep "Edit" commands/check-implementation.md` — present (for trivial inline fixes)
-- `grep "list-worktrees" commands/worktrees.md` — present
-- `grep "AskUserQuestion" commands/worktrees.md` — present
-- `test -f commands/worktrees.md` — exists
+- Verify build-phase.md no longer references extract-waves.ts
+- Verify build-phase.md has explicit git status check before phase commit
+- Verify build-phase.md uses --goal flag for format-commit
+- Verify check-implementation.md references extract-criteria --tally (not tally-criteria)
+- Verify check-implementation.md has conditional validation logic
+- Verify check-implementation.md passes explore-cache to Explore agent
+- Verify check-implementation.md uses check-agent-teams templates (no manual team-templates.md read)
+- Verify build.md has no generate-summary step
+- Verify build.md has no build-summary commit step
+- Verify generate-summary.ts is deleted
+- Verify explore-deep.md, review.md, debug.md use check-agent-teams templates directly
+- Verify no .md file references tally-criteria.ts, extract-waves.ts, or generate-summary.ts
 </tasks>
 
 <execution>
-**Wave 1** (parallel): rewrite-check-feedback, create-worktrees-cmd
+**Wave 1** (parallel): update-build-phase, update-check-impl, update-build-cmd, update-agent-teams-cmds
 **Wave 2** (validation): validate-phase-3
 </execution>
 
 <criteria>
-- [ ] check-implementation.md Step 6 classifies issues as trivial/ambiguous/complex with clear rules for each category
-- [ ] Trivial issues are fixed inline: Edit tool + commit with `fix(check):` prefix + re-run check-project.ts
-- [ ] Ambiguous issues use AskUserQuestion with 2-4 concrete options and file:line evidence
-- [ ] Complex issues generate ready-to-paste `/devorch:make-plan <detailed description>` command
-- [ ] Re-verification (Step 6d) runs after inline fixes and can upgrade verdict to PASS
-- [ ] check-implementation.md uses `<planPath>` variable, not hardcoded `current.md`
-- [ ] check-implementation.md uses `git -C <projectRoot>` for worktree compatibility
-- [ ] worktrees.md exists with proper YAML frontmatter (description + model: opus)
-- [ ] worktrees.md lists worktrees via list-worktrees.ts with formatted display
-- [ ] worktrees.md supports merge flow (git log preview + confirm + merge + cleanup)
-- [ ] worktrees.md supports delete flow (confirm + force remove + branch -D)
-- [ ] worktrees.md handles merge conflicts gracefully (report, don't force)
+- [ ] build-phase.md: no extract-waves step, conditional phase commit with explicit git status, format-commit uses --goal, no state-history mention
+- [ ] check-implementation.md: uses extract-criteria --tally, conditional validation by diff, explore-cache in Explore agent prompt, check-agent-teams templates used directly
+- [ ] build.md: no generate-summary step, no build-summary commit, references /devorch instead of /devorch:make-plan
+- [ ] generate-summary.ts deleted
+- [ ] explore-deep.md, review.md, debug.md: no manual team-templates.md read, use check-agent-teams templates
+- [ ] Zero references to extract-waves.ts, tally-criteria.ts, or generate-summary.ts in any .md file
 </criteria>
 
 <validation>
-- `grep "AskUserQuestion" commands/check-implementation.md` — present
-- `grep "make-plan" commands/check-implementation.md` — present
-- `grep "fix(check)" commands/check-implementation.md` — present (inline fix commit format)
-- `grep "planPath" commands/check-implementation.md` — present (parameterized, not hardcoded)
-- `grep "projectRoot" commands/check-implementation.md` — present (worktree-aware git)
-- `test -f commands/worktrees.md` — exists
-- `grep "list-worktrees" commands/worktrees.md` — present
-- `grep "merge" commands/worktrees.md` — present
-- `grep "branch -D" commands/worktrees.md` — present (delete flow)
+- `grep -r "extract-waves" .worktrees/devorch-unification/commands/ .worktrees/devorch-unification/templates/` — zero results
+- `grep -r "tally-criteria" .worktrees/devorch-unification/commands/ .worktrees/devorch-unification/templates/` — zero results
+- `grep -r "generate-summary" .worktrees/devorch-unification/commands/ .worktrees/devorch-unification/templates/` — zero results
+- `grep -r "team-templates.md" .worktrees/devorch-unification/commands/` — zero results (all callers use check-agent-teams output)
 </validation>
+
+<handoff>
+All templates and commands now use the consolidated script interfaces. No .md file references deleted scripts. Phase 4 creates the unified /devorch command, deletes old command files, and updates documentation.
+</handoff>
 </phase3>
+
+<phase4 name="Unified Command + Cleanup">
+<goal>Criar o comando unificado /devorch com 3 paths, deletar comandos obsoletos, e atualizar toda documentação.</goal>
+
+<tasks>
+#### 1. Create unified /devorch command
+- **ID**: create-devorch-cmd
+- **Assigned To**: builder-1
+- Create `commands/devorch.md` with YAML frontmatter: `model: opus`, `description: "Unified devorch entry point — routes to conversation, quick fix, or full planning"`, `argument-hint: "<description of what you want to do>"`.
+- The command implements this flow:
+  - **Step 1 — Load context**: Run `map-project.ts --persist`. Read CONVENTIONS.md if exists. Same as current make-plan Step 1 (legacy migration, conventions generation).
+  - **Step 2 — Classify intent**: Based on user input, classify into one of 3 paths:
+    - **Conversation** — user is exploring an idea, asking a question, discussing architecture, or unsure what they want. Signals: question marks, words like "como", "será que", "pensei em", "dúvida", "ideia", "explorar", "entender", or explicitly saying they want to discuss.
+    - **Task** — user has a concrete change to make. Proceed to Step 3.
+  - **Step 3 — Quick gate (tasks only)**: Apply the binary checklist from quick.md (≤3 files, no API changes, no new deps, existing coverage, mechanically verifiable). ALL YES → Quick Path. ANY NO → Plan Path. No subjective judgment. "A frase 'mas nesse caso' é um red flag."
+  - **Quick Path** (Steps Q1-Q4): Same as current quick.md — optional Explore agent, implement, check-project, auto-commit, report.
+  - **Plan Path** (Steps P1-P10): Same as current make-plan.md — classify type/complexity/risk, optional Agent Teams, explore, clarify (AskUserQuestion), deep explore, design, create plan in worktree, validate, reset state, auto-commit. Then:
+    - If simple or medium complexity: auto-build (spawn build as Task, same as current --auto behavior). User can pass `--review` flag to pause instead.
+    - If complex: pause, show plan, instruct `/clear` then `/devorch:build --plan <name>`. User can pass `--auto` flag to skip the pause.
+  - **Conversation Path** (Steps C1-C4):
+    - C1: Run `check-agent-teams.ts`. If enabled → spawn explore-deep team (from templates). If not → launch 1-2 Explore agents for the topic.
+    - C2: Present synthesized findings with follow-up question via `AskUserQuestion`.
+    - C3: If user wants to dig deeper → targeted Explore agent for that thread. If user wants to act → classify the action (back to Step 3 for quick gate).
+    - C4: When conversation concludes naturally or user says to act, route to Quick Path or Plan Path as appropriate. If no action needed, end with optional report.
+- The command must include all the rules from make-plan.md: orchestrator never reads source directly (Explore agents only), explore-cache management, plan format specification, parallelization rules, sizing rules.
+- Include the complete Plan Format XML specification (same as current make-plan.md).
+
+#### 2. Delete old commands and update install
+- **ID**: delete-old-commands
+- **Assigned To**: builder-2
+- Delete `commands/make-plan.md`
+- Delete `commands/quick.md`
+- In `install.ts`: the commands/ copy step already handles all .md files. Since make-plan.md and quick.md are deleted, they won't be copied. Verify the devorch.md root-level copy from Phase 1 is working.
+- Delete `commands/plan-tests.md` and `commands/build-tests.md` if they reference make-plan by name and need updating. If they're independent, leave them.
+
+#### 3. Update all cross-references
+- **ID**: update-references
+- **Assigned To**: builder-3
+- Global search and replace across all remaining .md files:
+  - `/devorch:make-plan` → `/devorch` (in check-implementation.md already done in Phase 3, but verify build-tests.md, plan-tests.md, worktrees.md, any other .md)
+  - `/devorch:quick` → `/devorch` (same sweep)
+  - `make-plan.md` → `devorch.md` (in prose references)
+  - `quick.md` → `devorch.md` (in prose references)
+- In `.devorch/CONVENTIONS.md`:
+  - Remove line 102: `State.md contains only the latest phase summary — history goes to state-history.md` → replace with `State.md contains only the latest phase summary`
+  - Add note about shared lib: in the Patterns section, add that scripts import shared utilities from `./lib/plan-parser`, `./lib/args`, `./lib/fs-utils`
+- In `.devorch/team-templates.md`: the `make-plan-team` section header can stay (it's the team name, not the command name). No change needed.
+
+#### 4. Update README
+- **ID**: update-readme
+- **Assigned To**: builder-4
+- Rewrite relevant sections of `README.md`:
+  - Replace all `/devorch:make-plan` examples with `/devorch`
+  - Replace all `/devorch:quick` examples with `/devorch`
+  - Update the command reference table: remove make-plan and quick rows, add single /devorch row with description of 3-path routing
+  - Update the "Getting Started" section to show `/devorch` as the entry point
+  - Remove references to state-history.md and build-summary.md
+  - Add mention of scripts/lib/ in the architecture section
+  - Keep all other sections (build, check, explore-deep, review, debug, worktrees) accurate
+
+#### 5. Validate Phase
+- **ID**: validate-phase-4
+- **Assigned To**: validator
+- Verify commands/devorch.md exists with correct YAML frontmatter and all 3 paths
+- Verify commands/make-plan.md is deleted
+- Verify commands/quick.md is deleted
+- Verify zero references to `/devorch:make-plan` or `/devorch:quick` in any .md file (grep)
+- Verify CONVENTIONS.md no longer mentions state-history.md
+- Verify README.md references /devorch as the main entry point
+- Verify the Plan Format specification in devorch.md is complete (all XML tags documented)
+- Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` on the worktree
+</tasks>
+
+<execution>
+**Wave 1** (parallel): create-devorch-cmd, delete-old-commands
+**Wave 2** (parallel, after wave 1): update-references, update-readme
+**Wave 3** (validation): validate-phase-4
+</execution>
+
+<criteria>
+- [ ] commands/devorch.md exists with 3-path routing (conversation, quick, plan)
+- [ ] commands/make-plan.md deleted
+- [ ] commands/quick.md deleted
+- [ ] Quick path preserves the exact 5-item binary checklist (no subjective judgment)
+- [ ] Plan path includes --auto as default for simple/medium, --review to pause
+- [ ] Conversation path uses Agent Teams when available, Explore agents as fallback
+- [ ] Zero grep hits for `/devorch:make-plan` or `/devorch:quick` in any active .md file
+- [ ] CONVENTIONS.md: no state-history.md reference, mentions scripts/lib/
+- [ ] README.md: /devorch is the documented entry point
+</criteria>
+
+<validation>
+- `grep -r "devorch:make-plan" .worktrees/devorch-unification/commands/ .worktrees/devorch-unification/templates/ .worktrees/devorch-unification/README.md` — zero results
+- `grep -r "devorch:quick" .worktrees/devorch-unification/commands/ .worktrees/devorch-unification/templates/ .worktrees/devorch-unification/README.md` — zero results
+- `ls .worktrees/devorch-unification/commands/make-plan.md 2>/dev/null` — file not found
+- `ls .worktrees/devorch-unification/commands/quick.md 2>/dev/null` — file not found
+- `ls .worktrees/devorch-unification/commands/devorch.md` — file exists
+</validation>
+</phase4>
