@@ -1,7 +1,7 @@
 # devorch State
-- Plan: Always-Worktree Architecture + Smart Check Feedback
-- Last completed phase: 3
-- Status: plan complete — all 3 phases done
+- Plan: Devorch Unification — Single Command + Waste Elimination
+- Last completed phase: 2
+- Status: ready for phase 3
 
-## Phase 3 Summary
-Smart check feedback with three-tier dispatch (trivial=inline fix, ambiguous=AskUserQuestion, complex=make-plan prompt) replaces old Step 6 follow-up. New /devorch:worktrees command provides list/merge/delete lifecycle management. check-implementation.md parameterized for worktree paths (planPath, projectRoot).
+## Phase 2 Summary
+All 19 scripts refactored to use shared lib (scripts/lib/). extract-waves.ts merged into init-phase.ts (waves+tasks in output). tally-criteria.ts merged into extract-criteria.ts (--tally flag). update-state.ts simplified (no state-history.md). format-commit.ts gains --goal flag. map-project.ts gains --persist flag. extractTagContent fixed for single-line tags. 17 scripts remain, all typecheck passes.

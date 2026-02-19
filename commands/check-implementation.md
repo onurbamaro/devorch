@@ -3,7 +3,7 @@ description: Verifies the full plan was implemented correctly
 model: opus
 ---
 
-Post-build verification. Only checks what per-phase validators DON'T cover: file artifacts, cross-phase integration, final project health, and adversarial review. Resolves trivial issues automatically, asks for clarification on ambiguous ones, and suggests `/devorch:make-plan` for complex ones.
+Post-build verification. Only checks what per-phase validators DON'T cover: file artifacts, cross-phase integration, final project health, and adversarial review. Resolves trivial issues automatically, asks for clarification on ambiguous ones, and suggests `/devorch` for complex ones.
 
 Can be run:
 - Automatically at the end of `/devorch:build` (inline, not as Task)
@@ -37,17 +37,17 @@ Launch **everything** below in a single parallel batch.
 Launch via `Bash` with `run_in_background=true`:
 - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — final lint, typecheck, build, test run.
 - `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — new-file artifact verification.
-- Each **Validation Command** from every completed phase (from extract-criteria output). If multiple, chain with `&&`.
+- **Conditional validation re-run**: For each phase's validation commands (from extract-criteria output), check if the git diff (from Step 2) includes files in that phase's relevant-files list. Only re-run validation commands for phases whose files were touched by subsequent phases. Always run global checks (like `tsc --noEmit`, `bun test`) exactly once.
 
 **Criteria tally (Bash, background)**
 
-- `bun $CLAUDE_HOME/devorch-scripts/tally-criteria.ts --plan <planPath>` — deterministic X/Y score from plan + state. No agent needed — completed phases have all criteria passed (guaranteed by per-phase validator gate).
+- `bun $CLAUDE_HOME/devorch-scripts/extract-criteria.ts --plan <planPath> --tally` — deterministic X/Y score from plan + state. No agent needed — completed phases have all criteria passed (guaranteed by per-phase validator gate).
 
 **Cross-phase integration (one Explore agent, foreground)**
 
 Launch ONE Explore agent via **Task tool call** with `subagent_type="Explore"` (do NOT use `run_in_background`). This is a foreground blocking call.
 
-Prompt includes: the list of changed files from step 2, the new-files list, the phase goals and handoff sections from each completed phase, and CONVENTIONS.md content.
+Prompt includes: the list of changed files from step 2, the new-files list, the phase goals and handoff sections from each completed phase, and CONVENTIONS.md content. Also include: "Read non-invalidated sections from `<mainRoot>/.devorch/explore-cache.md` for structural context of unchanged areas."
 
 Task: Verify that work from different phases integrates correctly:
 - Imports between new modules resolve correctly
@@ -66,7 +66,7 @@ Report each finding with file:line evidence.
 1. Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
 2. If Agent Teams is NOT enabled (`enabled: false`): skip this step entirely. Proceed to step 5.
 3. If Agent Teams IS enabled:
-   - Read `.devorch/team-templates.md` and extract the `check-team` template. If missing or unparseable, use defaults: 3 reviewers, model opus.
+   - Use the `templates` field from the check-agent-teams.ts JSON output to get the check-team configuration. If `templates["check"]` is missing or unparseable, use defaults: 3 reviewers, model opus.
    - Create a team using `TeamCreate` with 3 adversarial reviewers from the template:
      - **security**: Adversarial security review — probe for vulnerabilities, injection risks, auth issues, data exposure
      - **quality**: Adversarial quality review — probe for correctness issues, edge case handling, maintainability concerns
@@ -116,7 +116,7 @@ Performance: <findings or clean>
 ### Verdict: PASS / FAIL (with N warnings)
 ```
 
-Parse the tally-criteria.ts output for the criteria section. Parse verify-build.ts JSON for the file artifacts section. Parse check-project.ts JSON for automated checks. Use Explore agent output for cross-phase integration.
+Parse the extract-criteria.ts --tally output for the criteria section. Parse verify-build.ts JSON for the file artifacts section. Parse check-project.ts JSON for automated checks. Use Explore agent output for cross-phase integration.
 
 ### 6. Smart Dispatch
 
@@ -168,7 +168,7 @@ If **FAIL** or warnings: classify each issue found (from cross-phase integration
 - Group related complex issues into a single coherent description
 - Generate a ready-to-paste command with full context:
   ```
-  /devorch:make-plan <detailed description including: what's wrong, which files are affected, what the expected outcome should be>
+  /devorch <detailed description including: what's wrong, which files are affected, what the expected outcome should be>
   ```
 - Do NOT attempt to fix complex issues inline — they need proper planning
 - Report: "These issues require planning. Suggested command above."
