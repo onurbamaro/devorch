@@ -157,7 +157,7 @@ Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON o
 
 **Agent Teams planning mode:**
 
-Read `.devorch/team-templates.md` and extract the `make-plan-team` template. If missing or unparseable, use defaults: 2 analysts, model opus.
+Use the `templates` field from the `check-agent-teams.ts` JSON output (already parsed in P2) to get the `make-plan-team` configuration. If the template is missing, use defaults: 2 analysts, model opus.
 
 Spawn a team using `TeammateTool` `spawnTeam` with 2 analysts from the template:
 - **scope-explorer**: Explores codebase to understand scope, dependencies, and impact of the requested change
@@ -303,7 +303,7 @@ Explain: planning consumes significant context — `/clear` frees it before buil
 
 Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
 
-- If Agent Teams is enabled → spawn an explore-deep team (read `.devorch/team-templates.md` for team structure). If missing or unparseable, use defaults: 3 explorers + 1 synthesizer, model opus.
+- If Agent Teams is enabled → use the `templates` field from the check-agent-teams.ts JSON output to get the `explore-deep` team configuration. If missing, use defaults: 3 explorers + 1 synthesizer, model opus. Spawn the explore-deep team.
 - If Agent Teams is NOT enabled → launch 1-2 Explore agents (`subagent_type="Explore"`) for the topic.
 
 ### C2. Present findings
