@@ -37,7 +37,6 @@ Launch **everything** below in a single parallel batch.
 Launch via `Bash` with `run_in_background=true`:
 - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — final lint, typecheck, build, test run.
 - `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — new-file artifact verification.
-- **Conditional validation re-run**: For each phase's validation commands (from extract-criteria output), check if the git diff (from Step 2) includes files in that phase's relevant-files list. Only re-run validation commands for phases whose files were touched by subsequent phases. Always run global checks (like `tsc --noEmit`, `bun test`) exactly once.
 
 **Criteria tally (Bash, background)**
 
@@ -103,10 +102,6 @@ Tests: ✅ (47/47)
 
 ### File Artifacts
 X/Y new files verified (verify-build.ts output)
-
-### Phase Validation Commands
-Phase 1: `cmd1` ✅, `cmd2` ✅
-Phase 2: `cmd3` ✅
 
 ### Adversarial Review (if agent teams enabled)
 Security: <findings or clean>
