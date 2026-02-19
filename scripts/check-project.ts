@@ -9,11 +9,14 @@ import { join } from "path";
 // Positional + flag args (shared lib doesn't handle positional args)
 let cwd = process.cwd();
 let timeoutOverride: number | null = null;
+let noTest = false;
 
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--timeout" && argv[i + 1]) {
     timeoutOverride = parseInt(argv[++i], 10);
+  } else if (argv[i] === "--no-test") {
+    noTest = true;
   } else if (!argv[i].startsWith("--")) {
     cwd = argv[i];
   }
@@ -136,43 +139,27 @@ async function runCheck(name: string, command: string, timeoutMs: number): Promi
   }
 }
 
-// --- Run lint + typecheck in parallel, then build, then test ---
-const lintCmd = checks[0].detect();
-const typecheckCmd = checks[1].detect();
-const buildCmd = checks[2].detect();
-const testCmd = checks[3].detect();
-
-// Parallel: lint + typecheck
+// --- Run all checks in parallel ---
 const defaultTimeout = timeoutOverride ?? DEFAULT_TIMEOUT_MS;
-const parallelChecks: Promise<[string, string]>[] = [];
-if (lintCmd) {
-  parallelChecks.push(runCheck("lint", lintCmd, defaultTimeout).then((r) => ["lint", r]));
-} else {
-  results.lint = "skip";
-}
-if (typecheckCmd) {
-  parallelChecks.push(runCheck("typecheck", typecheckCmd, defaultTimeout).then((r) => ["typecheck", r]));
-} else {
-  results.typecheck = "skip";
+const allChecks: Promise<[string, string]>[] = [];
+
+for (const check of checks) {
+  if (noTest && check.name === "test") {
+    results.test = "skip";
+    continue;
+  }
+  const cmd = check.detect();
+  if (cmd) {
+    const timeout = check.name === "test" ? (timeoutOverride ?? TEST_TIMEOUT_MS) : defaultTimeout;
+    allChecks.push(runCheck(check.name, cmd, timeout).then((r) => [check.name, r]));
+  } else {
+    results[check.name] = "skip";
+  }
 }
 
-const parallelResults = await Promise.all(parallelChecks);
-for (const [name, result] of parallelResults) {
+const allResults = await Promise.all(allChecks);
+for (const [name, result] of allResults) {
   results[name] = result;
-}
-
-// Sequential: build
-if (buildCmd) {
-  results.build = await runCheck("build", buildCmd, timeoutOverride ?? DEFAULT_TIMEOUT_MS);
-} else {
-  results.build = "skip";
-}
-
-// Sequential: test
-if (testCmd) {
-  results.test = await runCheck("test", testCmd, timeoutOverride ?? TEST_TIMEOUT_MS);
-} else {
-  results.test = "skip";
 }
 
 console.log(JSON.stringify(results, null, 2));
