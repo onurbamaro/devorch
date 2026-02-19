@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, cpSync, readdirSync, readFileSync, writeFileSync, rmSync, statSync } from "fs";
 import { join, resolve } from "path";
 import { homedir } from "os";
 
@@ -49,28 +49,45 @@ for (const { src, dest, label } of targets) {
   }
   mkdirSync(dest, { recursive: true });
 
-  const files = readdirSync(src);
+  const claudeHomeFwd = CLAUDE_HOME.replaceAll("\\", "/");
   let count = 0;
 
-  const claudeHomeFwd = CLAUDE_HOME.replaceAll("\\", "/");
-
-  for (const file of files) {
-    const srcFile = join(src, file);
-    const destFile = join(dest, file);
-
-    if (file.endsWith(".md")) {
-      // Template substitution: resolve $CLAUDE_HOME to actual path
-      const content = readFileSync(srcFile, "utf-8");
-      const processed = content.replaceAll("$CLAUDE_HOME", claudeHomeFwd);
-      writeFileSync(destFile, processed);
-    } else {
-      cpSync(srcFile, destFile, { force: true });
+  function copyDir(srcDir: string, destDir: string) {
+    mkdirSync(destDir, { recursive: true });
+    const entries = readdirSync(srcDir);
+    for (const entry of entries) {
+      const srcEntry = join(srcDir, entry);
+      const destEntry = join(destDir, entry);
+      if (statSync(srcEntry).isDirectory()) {
+        copyDir(srcEntry, destEntry);
+      } else if (entry.endsWith(".md")) {
+        const content = readFileSync(srcEntry, "utf-8");
+        const processed = content.replaceAll("$CLAUDE_HOME", claudeHomeFwd);
+        writeFileSync(destEntry, processed);
+        count++;
+      } else {
+        cpSync(srcEntry, destEntry, { force: true });
+        count++;
+      }
     }
-    count++;
   }
+
+  copyDir(src, dest);
 
   console.log(`  ${label}: ${count} files -> ${dest}`);
   totalFiles += count;
+}
+
+// Copy commands/devorch.md to root level for /devorch skill name
+const rootDevorchSrc = join(ROOT, "commands", "devorch.md");
+if (existsSync(rootDevorchSrc)) {
+  const claudeHomeFwd = CLAUDE_HOME.replaceAll("\\", "/");
+  mkdirSync(join(CLAUDE_HOME, "commands"), { recursive: true });
+  const content = readFileSync(rootDevorchSrc, "utf-8");
+  const processed = content.replaceAll("$CLAUDE_HOME", claudeHomeFwd);
+  writeFileSync(join(CLAUDE_HOME, "commands", "devorch.md"), processed);
+  console.log(`  commands/devorch.md -> ${join(CLAUDE_HOME, "commands", "devorch.md")} (root level)`);
+  totalFiles++;
 }
 
 // Configure statusline in settings.json
@@ -109,4 +126,4 @@ writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
 console.log(`\nInstalled ${totalFiles} files.`);
 console.log("Restart Claude Code for the statusline to take effect.");
-console.log("Run /devorch:make-plan in any project to get started.");
+console.log("Run /devorch in any project to get started.");

@@ -4,11 +4,16 @@ import { homedir } from "os";
 
 const CLAUDE_HOME = join(homedir(), ".claude");
 
-const removals: { path: string; label: string; mode: "dir" | "glob" }[] = [
+const removals: { path: string; label: string; mode: "dir" | "glob" | "file" }[] = [
   {
     path: join(CLAUDE_HOME, "commands", "devorch"),
     label: "commands/devorch",
     mode: "dir",
+  },
+  {
+    path: join(CLAUDE_HOME, "commands", "devorch.md"),
+    label: "commands/devorch.md",
+    mode: "file",
   },
   {
     path: join(CLAUDE_HOME, "agents"),
@@ -18,6 +23,11 @@ const removals: { path: string; label: string; mode: "dir" | "glob" }[] = [
   {
     path: join(CLAUDE_HOME, "devorch-scripts"),
     label: "devorch-scripts",
+    mode: "dir",
+  },
+  {
+    path: join(CLAUDE_HOME, "devorch-templates"),
+    label: "devorch-templates",
     mode: "dir",
   },
 ];
@@ -30,7 +40,10 @@ for (const { path, label, mode } of removals) {
     continue;
   }
 
-  if (mode === "dir") {
+  if (mode === "file") {
+    unlinkSync(path);
+    console.log(`  REMOVED ${label}`);
+  } else if (mode === "dir") {
     rmSync(path, { recursive: true, force: true });
     console.log(`  REMOVED ${label}`);
   } else if (mode === "glob") {
