@@ -37,7 +37,6 @@ Launch **everything** below in a single parallel batch.
 Launch via `Bash` with `run_in_background=true`:
 - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — final lint, typecheck, build, test run.
 - `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — new-file artifact verification.
-- **Conditional validation re-run**: For each phase's validation commands (from extract-criteria output), check if the git diff (from Step 2) includes files in that phase's relevant-files list. Only re-run validation commands for phases whose files were touched by subsequent phases. Always run global checks (like `tsc --noEmit`, `bun test`) exactly once.
 
 **Criteria tally (Bash, background)**
 
@@ -48,6 +47,8 @@ Launch via `Bash` with `run_in_background=true`:
 Launch ONE Explore agent via **Task tool call** with `subagent_type="Explore"` (do NOT use `run_in_background`). This is a foreground blocking call.
 
 Prompt includes: the list of changed files from step 2, the new-files list, the phase goals and handoff sections from each completed phase, and CONVENTIONS.md content. Also include: "Read non-invalidated sections from `<mainRoot>/.devorch/explore-cache.md` for structural context of unchanged areas."
+
+**Focus ONLY on files listed in the git diff from Step 2. Do NOT read files that were not modified. Use explore-cache for context on unchanged surrounding code.**
 
 Task: Verify that work from different phases integrates correctly:
 - Imports between new modules resolve correctly
@@ -103,10 +104,6 @@ Tests: ✅ (47/47)
 
 ### File Artifacts
 X/Y new files verified (verify-build.ts output)
-
-### Phase Validation Commands
-Phase 1: `cmd1` ✅, `cmd2` ✅
-Phase 2: `cmd3` ✅
 
 ### Adversarial Review (if agent teams enabled)
 Security: <findings or clean>
@@ -175,7 +172,10 @@ If **FAIL** or warnings: classify each issue found (from cross-phase integration
 
 **Step 6d — Re-verify (after any inline fixes):**
 - If any fixes were made in steps 6a or 6b:
-  - Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — verify lint + typecheck pass
+  - Classify the fix scope and run the minimum check set that covers it:
+    - **Formatting-only** (whitespace, semicolons, trailing commas): re-run only the linter (e.g., `bun run lint` or equivalent)
+    - **Structural** (imports, exports, type changes): re-run linter + typecheck
+    - **Behavioral** (logic changes, new functions, control flow): re-run full `bun $CLAUDE_HOME/devorch-scripts/check-project.ts`
   - Re-run `bun $CLAUDE_HOME/devorch-scripts/verify-build.ts --plan <planPath>` — verify artifacts
   - If both pass and no complex issues remain: update verdict to **PASS**
   - If both pass but complex issues exist: update verdict to **PASS with N complex issues noted**

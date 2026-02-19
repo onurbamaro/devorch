@@ -10,6 +10,7 @@ const targets = [
     src: join(ROOT, "commands"),
     dest: join(CLAUDE_HOME, "commands", "devorch"),
     label: "commands",
+    exclude: ["devorch.md"],
   },
   {
     src: join(ROOT, "agents"),
@@ -37,7 +38,7 @@ console.log("devorch install\n");
 
 let totalFiles = 0;
 
-for (const { src, dest, label } of targets) {
+for (const { src, dest, label, exclude } of targets) {
   if (!existsSync(src)) {
     console.log(`  SKIP ${label} — source not found: ${src}`);
     continue;
@@ -50,12 +51,14 @@ for (const { src, dest, label } of targets) {
   mkdirSync(dest, { recursive: true });
 
   const claudeHomeFwd = CLAUDE_HOME.replaceAll("\\", "/");
+  const excludeSet = new Set(exclude ?? []);
   let count = 0;
 
   function copyDir(srcDir: string, destDir: string) {
     mkdirSync(destDir, { recursive: true });
     const entries = readdirSync(srcDir);
     for (const entry of entries) {
+      if (srcDir === src && excludeSet.has(entry)) continue;
       const srcEntry = join(srcDir, entry);
       const destEntry = join(destDir, entry);
       if (statSync(srcEntry).isDirectory()) {
