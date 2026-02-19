@@ -13,7 +13,9 @@ export interface PhaseBounds {
 }
 
 export function extractTagContent(text: string, tagName: string): string | null {
-  const match = text.match(new RegExp(`^\\s*<${tagName}>([\\s\\S]*?)^\\s*<\\/${tagName}>`, "im"));
+  // Opening tag anchored to line start (avoids false matches on backtick-quoted tags).
+  // Closing tag not anchored — supports both single-line and multi-line content.
+  const match = text.match(new RegExp(`^\\s*<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "im"));
   return match ? match[1].trim() : null;
 }
 
