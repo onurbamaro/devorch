@@ -5,6 +5,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
 
+// Positional arg (shared lib doesn't handle positional args)
 const cwd = process.argv[2] || process.cwd();
 
 const lines: string[] = [];

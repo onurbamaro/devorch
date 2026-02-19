@@ -6,34 +6,29 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
-
-function parseArgs(): { action: string; maxLines: number; root: string } {
-  const args = process.argv.slice(2);
-  let action = "";
-  let maxLines = 3000;
-  let root = "";
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--action" && args[i + 1]) {
-      action = args[++i];
-    } else if (args[i] === "--max-lines" && args[i + 1]) {
-      maxLines = parseInt(args[++i], 10);
-    } else if (args[i] === "--root" && args[i + 1]) {
-      root = args[++i];
-    }
-  }
-
-  if (!action) {
-    console.error("Usage: manage-cache.ts --action <invalidate|trim|invalidate,trim> [--max-lines 3000] [--root <path>]");
-    process.exit(1);
-  }
-
-  return { action, maxLines, root };
-}
+import { parseArgs } from "./lib/args";
 
 interface CacheSection {
   header: string;
   content: string;
+}
+
+const args = parseArgs<{ action: string; "max-lines": number; root: string }>([
+  { name: "action", type: "string", required: true },
+  { name: "max-lines", type: "number" },
+  { name: "root", type: "string" },
+]);
+
+const action = args.action;
+const maxLines = args["max-lines"] || 3000;
+const root = args.root;
+const actions = action.split(",").map((a) => a.trim().toLowerCase());
+const baseDir = root || process.cwd();
+const cachePath = resolve(baseDir, ".devorch/explore-cache.md");
+
+if (!existsSync(cachePath)) {
+  console.log(JSON.stringify({ action, sectionsRemoved: 0, sectionsRemaining: 0, linesAfter: 0 }));
+  process.exit(0);
 }
 
 function parseCacheSections(text: string): { preamble: string; sections: CacheSection[] } {
@@ -86,16 +81,6 @@ function getChangedFiles(gitCwd?: string): string[] {
   } catch {
     return [];
   }
-}
-
-const { action, maxLines, root } = parseArgs();
-const actions = action.split(",").map((a) => a.trim().toLowerCase());
-const baseDir = root || process.cwd();
-const cachePath = resolve(baseDir, ".devorch/explore-cache.md");
-
-if (!existsSync(cachePath)) {
-  console.log(JSON.stringify({ action, sectionsRemoved: 0, sectionsRemaining: 0, linesAfter: 0 }));
-  process.exit(0);
 }
 
 let cacheContent = readFileSync(cachePath, "utf-8");

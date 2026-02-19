@@ -4,8 +4,10 @@
  * Output: JSON {"worktrees": [...], "count": N}
  * Each worktree entry: {name, path, branch, planTitle, status, lastPhase, totalPhases, valid}
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "fs";
+import { existsSync, readdirSync, statSync } from "fs";
 import { join, resolve } from "path";
+import { extractPlanTitle } from "./lib/plan-parser";
+import { safeReadFile } from "./lib/fs-utils";
 
 interface WorktreeInfo {
   name: string;
@@ -16,22 +18,6 @@ interface WorktreeInfo {
   lastPhase: number;
   totalPhases: number;
   valid: boolean;
-}
-
-function safeReadFile(filePath: string): string {
-  try {
-    if (existsSync(filePath)) {
-      return readFileSync(filePath, "utf-8");
-    }
-  } catch {
-    // ignore — optional file
-  }
-  return "";
-}
-
-function extractPlanTitle(planContent: string): string {
-  const match = planContent.match(/^#\s+Plan:\s+(.+)$/m);
-  return match ? match[1].trim() : "(no plan)";
 }
 
 function countPhases(planContent: string): number {

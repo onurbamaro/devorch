@@ -1,11 +1,23 @@
 /**
  * map-project.ts — Collects project info and outputs ~80 lines of Markdown.
- * Usage: bun ~/.claude/devorch-scripts/map-project.ts [project-dir]
+ * Usage: bun ~/.claude/devorch-scripts/map-project.ts [project-dir] [--persist]
+ * --persist: writes output to .devorch/project-map.md in addition to stdout.
  */
-import { existsSync, readFileSync, readdirSync } from "fs";
-import { join, basename } from "path";
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
+import { join, basename, dirname } from "path";
 
-const cwd = process.argv[2] || process.cwd();
+// Positional + flag args (shared lib doesn't handle positional args)
+let cwd = process.cwd();
+let persist = false;
+
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === "--persist") {
+    persist = true;
+  } else if (!argv[i].startsWith("--")) {
+    cwd = argv[i];
+  }
+}
 
 const lines: string[] = [];
 const push = (s: string) => lines.push(s);
@@ -51,6 +63,11 @@ const stackFiles: StackFile[] = [
   { file: "composer.json", tech: "PHP" },
   { file: "tsconfig.json", tech: "TypeScript" },
 ];
+
+if (persist) {
+  push(`Generated: ${new Date().toISOString()}`);
+  push("");
+}
 
 push("# Project Map");
 push("");
@@ -102,7 +119,6 @@ function listDir(dir: string, depth: number, prefix: string): void {
   const dirs = entries.filter((e) => e.isDirectory());
   const files = entries.filter((e) => e.isFile());
 
-  // Show files at this level (max 5)
   for (const f of files.slice(0, 5)) {
     push(`${prefix}${f.name}`);
   }
@@ -110,7 +126,6 @@ function listDir(dir: string, depth: number, prefix: string): void {
     push(`${prefix}... +${files.length - 5} files`);
   }
 
-  // Recurse into dirs
   for (const d of dirs) {
     push(`${prefix}${d.name}/`);
     listDir(join(dir, d.name), depth + 1, prefix + "  ");
@@ -201,4 +216,12 @@ try {
 }
 
 // --- Output ---
-console.log(lines.join("\n"));
+const finalOutput = lines.join("\n");
+console.log(finalOutput);
+
+// --- Persist ---
+if (persist) {
+  const mapPath = join(cwd, ".devorch", "project-map.md");
+  mkdirSync(dirname(mapPath), { recursive: true });
+  writeFileSync(mapPath, finalOutput, "utf-8");
+}

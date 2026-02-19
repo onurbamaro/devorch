@@ -1,20 +1,21 @@
 /**
  * check-project.ts — Detects and runs project validation scripts.
- * Usage: bun ~/.claude/devorch-scripts/check-project.ts [project-dir]
+ * Usage: bun ~/.claude/devorch-scripts/check-project.ts [project-dir] [--timeout <ms>]
  * Output: JSON with results for lint, typecheck, build, test
  */
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
+// Positional + flag args (shared lib doesn't handle positional args)
 let cwd = process.cwd();
 let timeoutOverride: number | null = null;
 
-const args = process.argv.slice(2);
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === "--timeout" && args[i + 1]) {
-    timeoutOverride = parseInt(args[++i], 10);
-  } else if (!args[i].startsWith("--")) {
-    cwd = args[i];
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === "--timeout" && argv[i + 1]) {
+    timeoutOverride = parseInt(argv[++i], 10);
+  } else if (!argv[i].startsWith("--")) {
+    cwd = argv[i];
   }
 }
 
