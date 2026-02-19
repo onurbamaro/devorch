@@ -164,7 +164,7 @@ If **FAIL** or warnings: classify each issue found (from cross-phase integration
   - If the answer reveals complexity → add to the complex list (Step 6c)
 - Report each resolution
 
-**Step 6c — Suggest make-plan for complex issues:**
+**Step 6c — Suggest /devorch for complex issues:**
 - Group related complex issues into a single coherent description
 - Generate a ready-to-paste command with full context:
   ```
