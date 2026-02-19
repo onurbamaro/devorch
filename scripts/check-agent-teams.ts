@@ -3,8 +3,8 @@
  * Usage: bun ~/.claude/devorch-scripts/check-agent-teams.ts
  * Output: JSON with {enabled, instructions?, templates}
  */
-import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { safeReadFile } from "./lib/fs-utils";
 
 interface Role {
   name: string;
@@ -86,15 +86,8 @@ function checkFeatureFlag(): { enabled: boolean; instructions?: string } {
   };
 }
 
-function parseTemplatesFile(filePath: string): Record<string, TeamTemplate> | null {
-  if (!existsSync(filePath)) return null;
-
-  let content: string;
-  try {
-    content = readFileSync(filePath, "utf-8");
-  } catch {
-    return null;
-  }
+function parseTemplatesFile(content: string): Record<string, TeamTemplate> | null {
+  if (!content) return null;
 
   const templates: Record<string, TeamTemplate> = {};
   const sectionRegex = /^## (\S+)/gm;
@@ -139,7 +132,8 @@ function parseTemplatesFile(filePath: string): Record<string, TeamTemplate> | nu
 const flagResult = checkFeatureFlag();
 const cwd = process.cwd();
 const templatesPath = join(cwd, ".devorch", "team-templates.md");
-const parsedTemplates = parseTemplatesFile(templatesPath);
+const templatesContent = safeReadFile(templatesPath);
+const parsedTemplates = parseTemplatesFile(templatesContent);
 
 const output: Output = {
   enabled: flagResult.enabled,

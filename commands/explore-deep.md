@@ -20,7 +20,7 @@ If `enabled` is `false`, stop and display the `instructions` field to the user. 
 
 ### 2. Load context
 
-Read `.devorch/team-templates.md` and extract the `explore-deep` template. If missing or unparseable, use defaults: 3 explorers + 1 synthesizer, model opus.
+Use the `templates` field from the check-agent-teams.ts JSON output (parsed in step 1) to get the `explore-deep` configuration via `templates["explore-deep"]`. If missing or unparseable, use defaults: 3 explorers + 1 synthesizer, model opus.
 
 Read `.devorch/CONVENTIONS.md` if it exists — pass relevant patterns to explorers for context.
 

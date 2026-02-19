@@ -1,83 +1,45 @@
 /**
- * format-commit.ts — Generates a deterministic phase commit message from plan goal.
+ * format-commit.ts — Generates a deterministic phase commit message from plan goal or direct goal text.
  * Usage: bun ~/.claude/devorch-scripts/format-commit.ts --plan <path> --phase <N>
+ *    OR: bun ~/.claude/devorch-scripts/format-commit.ts --goal <text> --phase <N>
  * Output: JSON {"message", "phase", "goal"}
  */
-import { readFileSync } from "fs";
+import { parseArgs } from "./lib/args";
+import { extractTagContent, parsePhaseBounds, readPlan } from "./lib/plan-parser";
 
 const MAX_GOAL_LENGTH = 50;
 
-interface PhaseBounds {
-  num: number;
-  name: string;
-  start: number;
-  end: number;
-}
+const args = parseArgs<{ plan: string; phase: number; goal: string }>([
+  { name: "plan", type: "string" },
+  { name: "phase", type: "number", required: true },
+  { name: "goal", type: "string" },
+]);
 
-function parseArgs(): { plan: string; phase: number } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  let phase = 0;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    } else if (args[i] === "--phase" && args[i + 1]) {
-      phase = parseInt(args[++i], 10);
-    }
-  }
-  if (!plan || !phase) {
-    console.error("Usage: format-commit.ts --plan <path> --phase <N>");
-    process.exit(1);
-  }
-  return { plan, phase };
-}
+const planPath = args.plan;
+const phaseNum = args.phase;
+let goal = args.goal;
 
-function extractTagContent(text: string, tagName: string): string {
-  const match = text.match(new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, "i"));
-  return match ? match[1].trim() : "";
-}
-
-const { plan: planPath, phase: phaseNum } = parseArgs();
-
-let content: string;
-try {
-  content = readFileSync(planPath, "utf-8");
-} catch {
-  console.error(`Could not read plan: ${planPath}`);
+if (!goal && !planPath) {
+  console.error("Usage: format-commit.ts --plan <path> --phase <N>  OR  --goal <text> --phase <N>");
   process.exit(1);
 }
-
-// Find phase boundaries
-const lines = content.split("\n");
-const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/i;
-const phaseCloseRegex = /<\/phase(\d+)>/i;
-const phases: PhaseBounds[] = [];
-
-for (let i = 0; i < lines.length; i++) {
-  const openMatch = lines[i].match(phaseOpenRegex);
-  if (openMatch) {
-    phases.push({ num: parseInt(openMatch[1], 10), name: openMatch[2], start: i, end: lines.length });
-  }
-  const closeMatch = lines[i].match(phaseCloseRegex);
-  if (closeMatch) {
-    const closeNum = parseInt(closeMatch[1], 10);
-    const phase = phases.find((p) => p.num === closeNum);
-    if (phase) { phase.end = i + 1; }
-  }
-}
-
-const target = phases.find((p) => p.num === phaseNum);
-if (!target) {
-  console.error(`Phase ${phaseNum} not found. Available: ${phases.map((p) => p.num).join(", ")}`);
-  process.exit(1);
-}
-
-const phaseContent = lines.slice(target.start, target.end).join("\n");
-const goal = extractTagContent(phaseContent, "goal");
 
 if (!goal) {
-  console.error(`Phase ${phaseNum}: no <goal> tag found.`);
-  process.exit(1);
+  const content = readPlan(planPath);
+  const phases = parsePhaseBounds(content);
+
+  const target = phases.find((p) => p.phase === phaseNum);
+  if (!target) {
+    console.error(`Phase ${phaseNum} not found. Available: ${phases.map((p) => p.phase).join(", ")}`);
+    process.exit(1);
+  }
+
+  goal = extractTagContent(target.content, "goal") || "";
+
+  if (!goal) {
+    console.error(`Phase ${phaseNum}: no <goal> tag found.`);
+    process.exit(1);
+  }
 }
 
 // Truncate goal

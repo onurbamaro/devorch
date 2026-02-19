@@ -33,15 +33,11 @@ bun run install.ts
 ### Your first build in 30 seconds
 
 ```bash
-# 1. Plan the work
-/devorch:make-plan "add user authentication with JWT"
-
-# 2. Clear context and build
-/clear
-/devorch:build
+# Describe what you want — devorch routes automatically
+/devorch "add user authentication with JWT"
 ```
 
-That's it. devorch explores your codebase, creates a phased plan with parallel waves, deploys builder agents, validates each phase, and commits the results. Coding conventions are detected automatically on the first plan.
+That's it. devorch classifies your intent, explores your codebase, creates a phased plan with parallel waves, deploys builder agents, validates each phase, and commits the results. Simple and medium tasks auto-build immediately. Coding conventions are detected automatically on the first plan.
 
 ---
 
@@ -50,26 +46,30 @@ That's it. devorch explores your codebase, creates a phased plan with parallel w
 ### Start a new project from scratch
 
 ```
-/devorch:make-plan "..."   # detects empty project, runs discovery Q&A, plans first milestone
-/clear                      # free context before building
-/devorch:build              # execute all phases + verify
+/devorch "..."   # detects empty project, runs discovery Q&A, plans first milestone
 ```
 
 ### Add features to an existing project
 
 ```
-/devorch:make-plan "..."   # plan the work (auto-generates CONVENTIONS.md on first run)
-/clear                      # free context before building
-/devorch:build              # execute all phases + verify
+/devorch "..."   # auto-generates CONVENTIONS.md on first run, plans and builds
 ```
 
 ### Ship a quick fix
 
 ```
-/devorch:quick "fix the login redirect bug"
+/devorch "fix the login redirect bug"
 ```
 
-Direct implementation with auto-commit. Automatically escalates to a full plan if the change is too complex.
+If the change touches 3 files or fewer with no API changes, devorch implements it directly with auto-commit. Otherwise it automatically escalates to a full plan.
+
+### Explore an idea
+
+```
+/devorch "how does the auth module work? is it safe to refactor?"
+```
+
+Conversation mode: devorch explores the codebase and presents findings. If you decide to act, it routes to quick fix or full planning.
 
 ### Plan and generate tests
 
@@ -82,13 +82,15 @@ Direct implementation with auto-commit. Automatically escalates to a full plan i
 
 ## How It Works
 
-devorch follows a **plan -- execute -- verify** cycle:
+devorch uses a unified `/devorch` command that classifies your intent into one of three paths:
 
-1. **Plan** -- `/make-plan` classifies work by type, complexity, and risk. It explores the codebase with parallel Explore agents, then produces a structured plan with phases, waves, and tasks.
+1. **Conversation** -- You're exploring an idea or asking a question. devorch launches Explore agents, presents findings, and iterates with you until you're ready to act (or not).
 
-2. **Execute** -- `/build` deploys builder agents in parallel waves. Each builder gets only the context it needs: task details, relevant conventions, and filtered Explore summaries.
+2. **Quick Path** -- Your change is small (3 files or fewer, no API changes, no new deps). devorch implements it directly, validates, and auto-commits.
 
-3. **Verify** -- A validator agent checks acceptance criteria and runs automated checks (lint, typecheck, build, tests). Failed builders get one automatic retry with diagnostic context.
+3. **Plan Path** -- Your change needs planning. devorch classifies work by type, complexity, and risk. It explores the codebase with parallel Explore agents, clarifies ambiguities with you, then produces a structured plan with phases, waves, and tasks. Simple/medium plans auto-build; complex plans pause for review.
+
+After planning, `/devorch:build` deploys builder agents in parallel waves. Each builder gets only the context it needs: task details, relevant conventions, and filtered Explore summaries. A validator agent checks acceptance criteria and runs automated checks (lint, typecheck, build, tests). Failed builders get one automatic retry with diagnostic context.
 
 ### Agents
 
@@ -103,14 +105,18 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 
 | Script | Purpose |
 |--------|---------|
+| `init-phase.ts` | Loads phase context: objective, decisions, conventions, explore cache. Returns JSON. |
 | `check-project.ts` | Runs lint + typecheck in parallel, then build, then test. Returns JSON. |
-| `extract-phase.ts` | Extracts a single phase from a plan file (saves ~30-40% tokens). |
-| `extract-criteria.ts` | Extracts all acceptance criteria and validation commands as structured JSON. |
-| `hash-plan.ts` | SHA-256 hash of plan content. Detects modifications since validation. |
+| `extract-criteria.ts` | Extracts acceptance criteria and validation commands as structured JSON. |
+| `run-validation.ts` | Runs validation commands for a phase. Returns pass/fail per command. |
+| `format-commit.ts` | Generates conventional commit messages from phase content. |
+| `update-state.ts` | Writes state.md with phase summary. |
 | `map-project.ts` | Collects tech stack, folder structure, dependencies, scripts, git history. |
-| `map-conventions.ts` | Analyzes naming, exports, style, testing patterns from code samples. |
 | `validate-plan.ts` | Validates plan structure (sections, phase numbering, task metadata, wave consistency). |
 | `check-agent-teams.ts` | Validates Agent Teams feature flag and parses team templates. |
+| `manage-cache.ts` | Invalidates and trims explore-cache.md. |
+
+Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils).
 
 ### Key Concepts
 
@@ -118,7 +124,7 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 - **Waves** -- Groups of tasks within a phase that run in parallel. Tasks in the same wave never modify the same file.
 - **Tasks** -- Atomic units of work assigned to individual builder agents.
 - **Explore cache** -- Summaries from Explore agents, reused across phases to avoid redundant exploration.
-- **State tracking** -- `state.md` tracks the last completed phase. Previous summaries live in `state-history.md`.
+- **State tracking** -- `state.md` tracks the last completed phase and handoff summary.
 
 ---
 
@@ -126,10 +132,9 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 
 | Command | What it does | Uses agents |
 |---------|-------------|-------------|
-| `/devorch:make-plan` | Creates phased plan. Auto-detects new projects (discovery Q&A + ARCHITECTURE.md). Auto-generates CONVENTIONS.md. | Explore |
+| `/devorch` | Unified entry point. Routes to conversation, quick fix, or full planning based on intent. | Explore |
 | `/devorch:build` | Executes all remaining phases + runs check-implementation. | Explore, Builder, Validator |
 | `/devorch:check-implementation` | Verifies full implementation against all criteria. | Explore |
-| `/devorch:quick` | Small fix with auto-commit. Escalates to make-plan if complex. | Explore |
 | `/devorch:plan-tests` | Plans testing strategy per module. | Explore |
 | `/devorch:build-tests` | Generates and runs tests from the test plan. | Explore, Builder |
 | `/devorch:debug` | Agent Teams hypothesis-testing investigation. | Agent Teams |
@@ -154,7 +159,7 @@ export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 
 Optional flags on existing commands:
 
-- `/devorch:make-plan --team` -- Spawns a 2-analyst planning team. Auto-escalates for complex tasks.
+- `/devorch --team` -- Spawns a 2-analyst planning team. Auto-escalates for complex tasks.
 - `/devorch:check-implementation --team` -- Adds adversarial review layer (security + quality + performance).
 
 Team structure is configured per project in `.devorch/team-templates.md`, generated on first use with sensible defaults.
@@ -168,6 +173,7 @@ devorch/
   commands/          # slash command definitions (.md)
   agents/            # agent type definitions (.md)
   scripts/           # TypeScript utilities (Bun)
+    lib/             # shared modules (plan-parser, args, fs-utils)
   hooks/             # post-edit lint + statusline
   install.ts         # installer
   uninstall.ts       # uninstaller
@@ -206,10 +212,10 @@ capabilities:
   - Agent Teams for debugging, review, and deep exploration
 
 commands:
-  - name: make-plan
-    signature: /devorch:make-plan "<description>"
-    purpose: Create phased plan. Discovers new projects, auto-generates CONVENTIONS.md
-    flags: [--team]
+  - name: devorch
+    signature: /devorch "<description>"
+    purpose: Unified entry point — routes to conversation, quick fix, or full planning
+    flags: [--auto, --review, --team]
   - name: build
     signature: /devorch:build
     purpose: Execute all remaining phases then verify
@@ -217,9 +223,6 @@ commands:
     signature: /devorch:check-implementation
     purpose: Verify full implementation against all acceptance criteria
     flags: [--team]
-  - name: quick
-    signature: /devorch:quick "<description>"
-    purpose: Small fix with auto-commit, escalates if complex
   - name: plan-tests
     signature: /devorch:plan-tests
     purpose: Plan testing strategy per module
@@ -247,14 +250,21 @@ architecture:
       model: opus
       mode: read-only
   scripts:
+    - init-phase.ts (phase context loading)
     - check-project.ts (lint + typecheck + build + test)
-    - extract-phase.ts (phase extraction from plan)
     - extract-criteria.ts (criteria extraction as JSON)
-    - hash-plan.ts (plan integrity via SHA-256)
+    - run-validation.ts (validation command execution)
+    - format-commit.ts (commit message generation)
+    - update-state.ts (state tracking)
     - map-project.ts (tech stack and structure collection)
     - map-conventions.ts (code pattern analysis)
     - validate-plan.ts (plan structure validation)
     - check-agent-teams.ts (Agent Teams feature flag validation)
+    - manage-cache.ts (explore cache management)
+  shared_lib:
+    - scripts/lib/plan-parser.ts (plan file parsing utilities)
+    - scripts/lib/args.ts (CLI argument parsing)
+    - scripts/lib/fs-utils.ts (file system utilities)
 
 key_concepts:
   - phase: Sequential milestone, max 5 tasks, handoff summary to next phase
@@ -262,13 +272,12 @@ key_concepts:
   - task: Atomic work unit assigned to one builder agent
   - explore_cache: Reusable Explore agent summaries (.devorch/explore-cache.md)
   - state: Last completed phase tracked in .devorch/state.md
-  - state_history: Previous phase summaries in .devorch/state-history.md
 
 state_files:
   - path: .devorch/ARCHITECTURE.md
-    purpose: Architecture design (generated by /make-plan for new projects)
+    purpose: Architecture design (generated by /devorch for new projects)
   - path: .devorch/CONVENTIONS.md
-    purpose: Coding conventions, auto-generated by /make-plan
+    purpose: Coding conventions, auto-generated by /devorch
   - path: .devorch/explore-cache.md
     purpose: Cached Explore agent summaries
   - path: .devorch/plans/current.md
@@ -279,19 +288,18 @@ state_files:
     purpose: Completed plans (auto-archived)
   - path: .devorch/state.md
     purpose: Last completed phase and handoff summary
-  - path: .devorch/state-history.md
-    purpose: Previous phase summaries (append-only)
 
 file_structure:
   source:
-    - commands/ (9 .md slash command definitions)
+    - commands/ (8 .md slash command definitions)
     - agents/ (2 .md agent type definitions)
-    - scripts/ (8 .ts utility scripts)
+    - scripts/ (17 .ts utility scripts + lib/)
     - hooks/ (post-edit lint + statusline)
     - install.ts (installer)
     - uninstall.ts (uninstaller)
   installed:
     - ~/.claude/commands/devorch/ (commands)
+    - ~/.claude/commands/devorch.md (root-level unified command)
     - ~/.claude/agents/ (agent definitions)
     - ~/.claude/devorch-scripts/ (utility scripts)
     - ~/.claude/hooks/ (hooks)

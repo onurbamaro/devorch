@@ -5,21 +5,8 @@
  */
 import { existsSync, readFileSync, statSync } from "fs";
 import { resolve } from "path";
-
-function parseArgs(): { plan: string } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    }
-  }
-  if (!plan) {
-    console.error("Usage: verify-build.ts --plan <path>");
-    process.exit(1);
-  }
-  return { plan };
-}
+import { parseArgs } from "./lib/args";
+import { extractTagContent, readPlan } from "./lib/plan-parser";
 
 interface FileResult {
   path: string;
@@ -28,12 +15,18 @@ interface FileResult {
   indicators?: string[];
 }
 
-function extractNewFiles(content: string): { path: string; description: string }[] {
-  const match = content.match(/<new-files>([\s\S]*?)<\/new-files>/i);
-  if (!match) return [];
+const args = parseArgs<{ plan: string }>([
+  { name: "plan", type: "string", required: true },
+]);
+
+const content = readPlan(args.plan);
+
+function extractNewFiles(text: string): { path: string; description: string }[] {
+  const block = extractTagContent(text, "new-files");
+  if (!block) return [];
 
   const files: { path: string; description: string }[] = [];
-  const lines = match[1].split("\n");
+  const lines = block.split("\n");
   for (const line of lines) {
     const fileMatch = line.match(/^[-*]\s*`([^`]+)`\s*(?:—|--|-)\s*(.*)/);
     if (fileMatch) {
@@ -44,7 +37,6 @@ function extractNewFiles(content: string): { path: string; description: string }
 }
 
 function stripLiterals(line: string): string {
-  // Remove regex literals, string literals, and template expressions to avoid false positives
   return line
     .replace(/\/[^/\n]+\/[gimsuy]*/g, "")
     .replace(/"[^"]*"/g, "")
@@ -53,17 +45,16 @@ function stripLiterals(line: string): string {
 }
 
 function checkStub(filePath: string): string[] {
-  let content: string;
+  let fileContent: string;
   try {
-    content = readFileSync(filePath, "utf-8");
+    fileContent = readFileSync(filePath, "utf-8");
   } catch {
     return [];
   }
 
   const indicators: string[] = [];
-  const lines = content.split("\n");
+  const lines = fileContent.split("\n");
 
-  // Check for standalone stub keywords (strip literals to avoid false positives on detection code)
   for (let i = 0; i < lines.length; i++) {
     const cleaned = stripLiterals(lines[i]);
     if (/\bTODO\b/i.test(cleaned)) {
@@ -83,7 +74,6 @@ function checkStub(filePath: string): string[] {
     }
   }
 
-  // Check for too few meaningful lines
   const meaningfulLines = lines.filter((l) => {
     const trimmed = l.trim();
     return trimmed.length > 0 && !trimmed.startsWith("//") && !trimmed.startsWith("/*") && !trimmed.startsWith("*");
@@ -93,16 +83,6 @@ function checkStub(filePath: string): string[] {
   }
 
   return indicators;
-}
-
-const { plan: planPath } = parseArgs();
-
-let content: string;
-try {
-  content = readFileSync(planPath, "utf-8");
-} catch {
-  console.error(`Could not read plan: ${planPath}`);
-  process.exit(1);
 }
 
 const declaredFiles = extractNewFiles(content);

@@ -20,7 +20,7 @@ If `enabled` is `false`, stop and display the `instructions` field to the user. 
 
 ### 2. Load context
 
-Read `.devorch/team-templates.md` and extract the `debug` template. If missing or unparseable, use defaults: 4 investigators, model opus.
+Use the `templates` field from the check-agent-teams.ts JSON output (parsed in step 1) to get the `debug` configuration via `templates["debug"]`. If missing or unparseable, use defaults: 4 investigators, model opus.
 
 Read `.devorch/CONVENTIONS.md` if it exists — pass relevant sections to investigators as context.
 

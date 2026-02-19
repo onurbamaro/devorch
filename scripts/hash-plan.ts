@@ -3,33 +3,15 @@
  * Usage: bun ~/.claude/devorch-scripts/hash-plan.ts --plan <path>
  * Output: JSON {"hash":"...","validated":"...|null","match":true|false}
  */
-import { readFileSync } from "fs";
 import { createHash } from "crypto";
+import { parseArgs } from "./lib/args";
+import { readPlan } from "./lib/plan-parser";
 
-function parseArgs(): { plan: string } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    }
-  }
-  if (!plan) {
-    console.error("Usage: hash-plan.ts --plan <path>");
-    process.exit(1);
-  }
-  return { plan };
-}
+const args = parseArgs<{ plan: string }>([
+  { name: "plan", type: "string", required: true },
+]);
 
-const { plan: planPath } = parseArgs();
-
-let content: string;
-try {
-  content = readFileSync(planPath, "utf-8");
-} catch {
-  console.error(`Could not read plan: ${planPath}`);
-  process.exit(1);
-}
+const content = readPlan(args.plan);
 
 // Extract validated hash from comment if present
 const validatedMatch = content.match(/<!-- Validated: ([a-f0-9]{64}) -->/);

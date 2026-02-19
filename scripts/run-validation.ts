@@ -3,17 +3,11 @@
  * Usage: bun ~/.claude/devorch-scripts/run-validation.ts --plan <path> --phase <N>
  * Output: JSON {"totalCommands", "passed", "failed", "results": [{command, description, cwd, status, output?}]}
  */
-import { readFileSync } from "fs";
 import { resolve } from "path";
+import { parseArgs } from "./lib/args";
+import { extractTagContent, parsePhaseBounds, readPlan } from "./lib/plan-parser";
 
 const DEFAULT_TIMEOUT_MS = 30000;
-
-interface PhaseBounds {
-  num: number;
-  name: string;
-  start: number;
-  end: number;
-}
 
 interface ValidationResult {
   command: string;
@@ -23,51 +17,40 @@ interface ValidationResult {
   output?: string;
 }
 
-function parseArgs(): { plan: string; phase: number } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  let phase = 0;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    } else if (args[i] === "--phase" && args[i + 1]) {
-      phase = parseInt(args[++i], 10);
-    }
-  }
-  if (!plan || !phase) {
-    console.error("Usage: run-validation.ts --plan <path> --phase <N>");
-    process.exit(1);
-  }
-  return { plan, phase };
+const args = parseArgs<{ plan: string; phase: number }>([
+  { name: "plan", type: "string", required: true },
+  { name: "phase", type: "number", required: true },
+]);
+
+const planPath = args.plan;
+const phaseNum = args.phase;
+
+const content = readPlan(planPath);
+const phases = parsePhaseBounds(content);
+
+const targetPhase = phases.find((p) => p.phase === phaseNum);
+if (!targetPhase) {
+  console.error(`Phase ${phaseNum} not found in plan.`);
+  process.exit(1);
 }
 
-function extractTagContent(text: string, tagName: string): string {
-  const match = text.match(new RegExp(`^\\s*<${tagName}>([\\s\\S]*?)^\\s*<\\/${tagName}>`, "im"));
-  return match ? match[1].trim() : "";
+const phaseContent = targetPhase.content;
+const validationContent = extractTagContent(phaseContent, "validation");
+if (!validationContent) {
+  console.log(JSON.stringify({ totalCommands: 0, passed: 0, failed: 0, results: [] }));
+  process.exit(0);
 }
 
-function findPhaseContent(content: string, phaseNum: number): string {
-  const lines = content.split("\n");
-  const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/i;
-  const phaseCloseRegex = /<\/phase(\d+)>/i;
-  const phases: PhaseBounds[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const openMatch = lines[i].match(phaseOpenRegex);
-    if (openMatch) {
-      phases.push({ num: parseInt(openMatch[1], 10), name: openMatch[2], start: i, end: lines.length });
-    }
-    const closeMatch = lines[i].match(phaseCloseRegex);
-    if (closeMatch) {
-      const closeNum = parseInt(closeMatch[1], 10);
-      const phase = phases.find((p) => p.num === closeNum);
-      if (phase) { phase.end = i + 1; }
+function parseValidationCommands(text: string): { command: string; description: string }[] {
+  const commands: { command: string; description: string }[] = [];
+  const lines = text.split("\n").filter((l) => l.trim());
+  for (const line of lines) {
+    const cmdMatch = line.trim().match(/^[-*]\s*`([^`]+)`\s*(?:—|--|-)\s*(.*)/);
+    if (cmdMatch) {
+      commands.push({ command: cmdMatch[1], description: cmdMatch[2].trim() });
     }
   }
-
-  const target = phases.find((p) => p.num === phaseNum);
-  if (!target) return "";
-  return lines.slice(target.start, target.end).join("\n");
+  return commands;
 }
 
 function extractWorkingDirs(tasksContent: string): string[] {
@@ -82,26 +65,13 @@ function extractWorkingDirs(tasksContent: string): string[] {
   return [...dirs];
 }
 
-function parseValidationCommands(validationContent: string): { command: string; description: string }[] {
-  const commands: { command: string; description: string }[] = [];
-  const lines = validationContent.split("\n").filter((l) => l.trim());
-  for (const line of lines) {
-    const cmdMatch = line.trim().match(/^[-*]\s*`([^`]+)`\s*(?:—|--|-)\s*(.*)/);
-    if (cmdMatch) {
-      commands.push({ command: cmdMatch[1], description: cmdMatch[2].trim() });
-    }
-  }
-  return commands;
-}
-
 function lastNLines(text: string, n: number): string {
   const lines = text.split("\n").filter((l) => l.trim());
   return lines.slice(-n).join("\n");
 }
 
 async function runCommand(command: string, cwd: string): Promise<{ status: "pass" | "fail" | "timeout"; output: string }> {
-  const isWin = process.platform === "win32";
-  const shell = isWin ? ["bash", "-c", command] : ["bash", "-c", command];
+  const shell = ["bash", "-c", command];
 
   try {
     const proc = Bun.spawn(shell, {
@@ -144,7 +114,6 @@ function determineCwd(command: string, workingDirs: string[]): string {
   if (workingDirs.length === 0) return process.cwd();
   if (workingDirs.length === 1) return workingDirs[0];
 
-  // Try to match path fragments in the command to a working directory
   for (const dir of workingDirs) {
     const dirNorm = dir.replaceAll("\\", "/");
     const parts = dirNorm.split("/");
@@ -154,31 +123,7 @@ function determineCwd(command: string, workingDirs: string[]): string {
     }
   }
 
-  // Default to first working directory
   return workingDirs[0];
-}
-
-// --- Main ---
-const { plan: planPath, phase: phaseNum } = parseArgs();
-
-let content: string;
-try {
-  content = readFileSync(planPath, "utf-8");
-} catch {
-  console.error(`Could not read plan: ${planPath}`);
-  process.exit(1);
-}
-
-const phaseContent = findPhaseContent(content, phaseNum);
-if (!phaseContent) {
-  console.error(`Phase ${phaseNum} not found in plan.`);
-  process.exit(1);
-}
-
-const validationContent = extractTagContent(phaseContent, "validation");
-if (!validationContent) {
-  console.log(JSON.stringify({ totalCommands: 0, passed: 0, failed: 0, results: [] }));
-  process.exit(0);
 }
 
 const commands = parseValidationCommands(validationContent);
@@ -187,7 +132,7 @@ if (commands.length === 0) {
   process.exit(0);
 }
 
-const tasksContent = extractTagContent(phaseContent, "tasks");
+const tasksContent = extractTagContent(phaseContent, "tasks") || "";
 const workingDirs = extractWorkingDirs(tasksContent);
 
 const results: ValidationResult[] = [];

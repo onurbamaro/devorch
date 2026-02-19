@@ -6,23 +6,13 @@
  */
 import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
+import { parseArgs } from "./lib/args";
 
-function parseArgs(): { name: string } {
-  const args = process.argv.slice(2);
-  let name = "";
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--name" && args[i + 1]) {
-      name = args[++i];
-    }
-  }
-  if (!name) {
-    console.error("Usage: setup-worktree.ts --name <kebab-case-name>");
-    process.exit(1);
-  }
-  return { name };
-}
+const args = parseArgs<{ name: string }>([
+  { name: "name", type: "string", required: true },
+]);
 
-const { name } = parseArgs();
+const name = args.name;
 const cwd = process.cwd();
 const worktreesDir = join(cwd, ".worktrees");
 const worktreePath = join(worktreesDir, name);
@@ -68,7 +58,6 @@ const devorchDst = join(worktreePath, ".devorch");
 let devorchCopied = false;
 
 if (existsSync(devorchSrc)) {
-  // Find files that differ from committed versions (uncommitted changes)
   const diffProc = Bun.spawnSync(["git", "diff", "--name-only", "HEAD", "--", ".devorch/"], {
     cwd,
     stdout: "pipe",

@@ -52,6 +52,7 @@
 - Config-driven detection: define arrays of `CheckDef`-like objects, iterate with `.find()` or `.filter()`
 - Regex-based parsing for XML tags and patterns (no XML parser libraries)
 - Single-pass algorithms — process input once
+- Scripts import shared utilities from `./lib/plan-parser`, `./lib/args`, `./lib/fs-utils`
 
 ### Async Execution
 - `Bun.spawn()` for subprocess execution (not `child_process`)
@@ -99,4 +100,4 @@
 - `validate-plan.ts` returns `"block"` or `"continue"` — not boolean
 - Builders must call `TaskUpdate(status: "completed")` as their absolute last action or the pipeline stalls
 - Phase numbers must be sequential integers starting at 1 — no gaps
-- State.md contains only the latest phase summary — history goes to state-history.md
+- State.md contains only the latest phase summary

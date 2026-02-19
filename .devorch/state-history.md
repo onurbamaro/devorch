@@ -1,5 +1,5 @@
-## Phase 1 Summary
-Script infrastructure complete: init-phase.ts accepts --cache-root for worktree cache reads, manage-cache.ts accepts --root for remote cache operations, list-worktrees.ts created for worktree inventory, setup-worktree.ts excludes explore-cache from worktree copies.
-
 ## Phase 2 Summary
-Always-worktree commands complete: make-plan.md removes all non-worktree paths and auto-archives legacy current.md, build.md auto-detects worktrees via list-worktrees.ts and passes mainRoot to phase agents, build-phase.md routes cache reads/writes through mainRoot.
+All 19 scripts refactored to use shared lib (scripts/lib/). extract-waves.ts merged into init-phase.ts (waves+tasks in output). tally-criteria.ts merged into extract-criteria.ts (--tally flag). update-state.ts simplified (no state-history.md). format-commit.ts gains --goal flag. map-project.ts gains --persist flag. extractTagContent fixed for single-line tags. 17 scripts remain, all typecheck passes.
+
+## Phase 3 Summary
+All templates and commands updated for consolidated script interfaces. build-phase.md: removed extract-waves step (uses init-phase waves), conditional phase commit with git status check, format-commit uses --goal flag, no state-history.md mention. check-implementation.md: extract-criteria --tally replaces tally-criteria, conditional validation re-run by diff, explore-cache passed to Explore agent, check-agent-teams templates used directly. build.md: removed generate-summary step and build-summary commit, /devorch replaces /devorch:make-plan. generate-summary.ts deleted. explore-deep.md, review.md, debug.md: use check-agent-teams templates directly instead of reading team-templates.md. Zero references to extract-waves.ts, tally-criteria.ts, or generate-summary.ts in any .md file.

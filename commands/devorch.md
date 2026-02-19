@@ -1,21 +1,24 @@
 ---
-description: Creates a phased implementation plan with team orchestration
-argument-hint: <description of what to build/change>
+description: "Unified devorch entry point — routes to conversation, quick fix, or full planning"
+argument-hint: "<description of what you want to do>"
 model: opus
 disallowed-tools: EnterPlanMode
 ---
 
-Create a phased implementation plan for the project.
+Unified entry point for devorch. Routes to conversation, quick fix, or full planning based on user intent.
 
-**Input**: $ARGUMENTS (description of what to build/change, optionally with `--auto` flag). If empty, stop and ask the user.
+**Input**: $ARGUMENTS (description of what you want to do, optionally with `--auto`, `--review`, or `--team` flags). If empty, stop and ask the user.
 
-**Flag detection**: If `$ARGUMENTS` contains `--auto`, set the auto flag for later use (step 12). Strip `--auto` from the description before passing it to the planning workflow.
+**Flag detection**: Extract flags from `$ARGUMENTS` before processing:
+- `--auto` — Force auto-build after planning (even for complex tasks). Strip from description.
+- `--review` — Force pause after planning (even for simple/medium tasks). Strip from description.
+- `--team` — Request Agent Teams for planning. Strip from description.
 
 ## Steps
 
 ### 1. Load context
 
-**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context for planning — do not save it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
+**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --persist` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context — do not save it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
 **New project detection**: If map-project.ts output shows no source code files and no dependencies (empty or scaffold-only project), enter discovery mode:
 
@@ -50,7 +53,7 @@ Create a phased implementation plan for the project.
    [Architectural patterns chosen and why]
    ```
 
-After discovery, skip CONVENTIONS.md generation (no code to analyze yet) and skip steps 3-4 (no codebase to explore). Continue to step 5 (Clarify) for implementation-specific questions about the first milestone.
+After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Continue to **Plan Path step P5** (Clarify) for implementation-specific questions about the first milestone.
 
 **Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
@@ -81,7 +84,60 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet) and ski
 
 **Legacy plan migration**: If `.devorch/plans/current.md` exists in the main repo, archive it silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. Report: "Migrated legacy plan to archive." Plans now always live in worktrees — this path only triggers once during migration.
 
-### 2. Classify
+### 2. Classify intent
+
+Based on user input, classify into one of two categories:
+
+- **Conversation** — user is exploring an idea, asking a question, discussing architecture, or unsure what they want. Signals: question marks, words like "como", "sera que", "pensei em", "duvida", "ideia", "explorar", "entender", or explicitly saying they want to discuss.
+- **Task** — user has a concrete change to make. Proceed to Step 3.
+
+If classified as **Conversation** → go to **Conversation Path** (Step C1).
+If classified as **Task** → go to **Step 3** (Quick gate).
+
+### 3. Quick gate (tasks only)
+
+Checklist binario, sem julgamento subjetivo. Todas as condicoes abaixo devem ser **YES** para prosseguir como quick fix:
+
+- [ ] Modifica **3 arquivos ou menos**?
+- [ ] **Zero** mudancas de interface, API publica, ou assinaturas de tipo exportadas?
+- [ ] **Zero** novas dependencias (npm, imports de modulos novos)?
+- [ ] Existe codigo (teste ou producao) que ja cobre o comportamento afetado?
+- [ ] A mudanca e **mecanicamente verificavel** (lint + typecheck passam)?
+
+**ALL YES** → **Quick Path** (Step Q1).
+**ANY NO** → **Plan Path** (Step P1).
+
+NAO use julgamento subjetivo. NAO racionalize "mas nesse caso e diferente...". A frase "mas nesse caso" e um red flag — significa que a mudanca NAO e trivial.
+
+---
+
+## Quick Path
+
+### Q1. Explore (optional)
+
+Use Explore agents (`subagent_type="Explore"`) to understand relevant code before changing it. Skip only if the change is trivially obvious from the project map.
+
+### Q2. Implement
+
+- Make the changes following project conventions
+- Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` to validate
+- If checks fail, fix the issues
+
+### Q3. Auto-commit
+
+Commit with a conventional message:
+- Format: `feat|fix|refactor|chore|docs(scope): description`
+- Stage only the files you changed (not `git add .`)
+
+### Q4. Report
+
+Show what was changed and the commit hash.
+
+---
+
+## Plan Path
+
+### P1. Classify
 
 Determine before exploring:
 
@@ -89,11 +145,9 @@ Determine before exploring:
 - **Complexity**: `simple` (1-2 files) | `medium` (3-10 files, some design) | `complex` (10+ files, architecture/compatibility)
 - **Risk**: `low` (additive) | `medium` (modifies behavior, shared code) | `high` (runtime/build/deps, compatibility, data)
 
-### 3. Agent Teams exploration (conditional)
+### P2. Agent Teams exploration (conditional)
 
 Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
-
-Check if `--team` flag is present in `$ARGUMENTS`.
 
 **Conditional logic:**
 
@@ -103,19 +157,19 @@ Check if `--team` flag is present in `$ARGUMENTS`.
 
 **Agent Teams planning mode:**
 
-Read `.devorch/team-templates.md` and extract the `make-plan-team` template. If missing or unparseable, use defaults: 2 analysts, model opus.
+Use the `templates` field from the `check-agent-teams.ts` JSON output (already parsed in P2) to get the `make-plan-team` configuration. If the template is missing, use defaults: 2 analysts, model opus.
 
 Spawn a team using `TeammateTool` `spawnTeam` with 2 analysts from the template:
 - **scope-explorer**: Explores codebase to understand scope, dependencies, and impact of the requested change
 - **risk-assessor**: Identifies risks, edge cases, and potential blockers
 
-Analysts explore in parallel via Agent Teams and report findings via messages. Lead synthesizes analyst findings into additional context for the explore cache and uses them to generate deeper, more informed clarification questions in step 5.
+Analysts explore in parallel via Agent Teams and report findings via messages. Lead synthesizes analyst findings into additional context for the explore cache and uses them to generate deeper, more informed clarification questions in P4.
 
 Analysts must use `subagent_type="Explore"` for all codebase reading — they follow the same orchestrator rule (never read source files directly).
 
-After the team completes, continue with step 4 — the Agent Teams exploration supplements, not replaces, the existing Explore agents.
+After the team completes, continue with P3 — the Agent Teams exploration supplements, not replaces, the existing Explore agents.
 
-### 4. Initial exploration
+### P3. Initial exploration
 
 Before asking the user anything, understand the codebase. Launch Explore agents to map the affected areas — structure, patterns, constraints, edge cases. This ensures questions are informed, not guesses.
 
@@ -125,7 +179,7 @@ Use the **Task tool call** with `subagent_type="Explore"`. Scale to complexity:
 - **Medium** — Parallel Explore agents: one per affected area.
 - **Complex** — Parallel Explore agents covering every affected area + dependency check.
 
-### 5. Clarify with the user (never skip)
+### P4. Clarify with the user (never skip)
 
 Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open question before planning. Each question must have 2-4 clickable options (the user can always type a custom answer). This step prevents expensive rework later — an unanswered question now becomes a wrong assumption in the plan.
 
@@ -151,7 +205,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 - Don't ask what the codebase or conventions already answer.
 - Don't ask the user to make decisions you're better equipped to make (pure implementation details).
 
-### 6. Deep exploration (informed by user answers)
+### P5. Deep exploration (informed by user answers)
 
 If user answers revealed new areas to explore, or if the initial exploration was shallow, launch additional Explore agents now — targeted by the user's choices.
 
@@ -159,7 +213,7 @@ Use the **Task tool call** with `subagent_type="Explore"` for all codebase explo
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
-**Cache exploration results**: After all Explore agents return (from both step 4 and step 6), write `.devorch/explore-cache.md` with the combined summaries. This cache serves two purposes: (1) reused by `/devorch:build` to avoid re-exploring the same areas, and (2) keeps the orchestrator's context free — findings live on disk, not in the planning window.
+**Cache exploration results**: After all Explore agents return (from both P3 and P5), write `.devorch/explore-cache.md` with the combined summaries. This cache serves two purposes: (1) reused by `/devorch:build` to avoid re-exploring the same areas, and (2) keeps the orchestrator's context free — findings live on disk, not in the planning window.
 
 ```markdown
 # Explore Cache
@@ -174,11 +228,11 @@ Generated: <ISO timestamp>
 
 Each section title should match the area explored (e.g., "Auth module", "API routes", "Database layer").
 
-### 7. Design solution (medium/complex only)
+### P6. Design solution (medium/complex only)
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
-### 8. Create plan
+### P7. Create plan
 
 1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" → `courier-payroll-export`).
 2. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`. Parse the JSON output to get `worktreePath`.
@@ -187,19 +241,19 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 5. Do NOT copy `explore-cache.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
 6. Set `planPath = <worktreePath>/.devorch/plans/current.md` for subsequent steps.
 
-### 9. Validate
+### P8. Validate
 
 Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <planPath>`. Fix issues if blocked.
 
-`planPath` is set in step 8 to the worktree plan location.
+`planPath` is set in P7 to the worktree plan location.
 
-### 10. Reset state
+### P9. Reset state
 
-Delete `<worktreePath>/.devorch/state.md` and `<worktreePath>/.devorch/state-history.md` if they exist.
+Delete `<worktreePath>/.devorch/state.md` if it exists.
 
 A new plan means fresh state. Previous plan's progress is irrelevant.
 
-### 11. Auto-commit
+### P10. Auto-commit
 
 Commit in the worktree's branch:
 ```bash
@@ -211,18 +265,28 @@ Also commit any devorch files changed in the main repo (explore-cache.md, CONVEN
 - Stage `.devorch/explore-cache.md`, `.devorch/CONVENTIONS.md` (if created/updated)
 - Format: `chore(devorch): add worktree for <plan name>`
 
-### 12. Report or auto-build
+### P11. Report or auto-build
 
-**If `--auto` flag was set:**
+Determine build behavior based on complexity and flags:
+
+- **Simple or medium complexity** (default: auto-build):
+  - Unless `--review` flag was set, auto-build immediately.
+  - If `--review` flag was set: pause and show plan (same as complex below).
+
+- **Complex complexity** (default: pause):
+  - Unless `--auto` flag was set, pause and show plan.
+  - If `--auto` flag was set: auto-build immediately.
+
+**Auto-build flow:**
 
 1. Write `.devorch/config.json` with `{"auto_advance": true}`.
 2. Read `$CLAUDE_HOME/commands/devorch/build.md`. Strip YAML frontmatter (remove everything between the first `---` pair, inclusive).
-3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt. Append `\n\n--plan <name>` to the prompt (where `<name>` is the kebab-case worktree name from step 8).
+3. Launch the build as a **Task tool call** with `subagent_type="general-purpose"`, passing the stripped build.md content as the prompt. Append `\n\n--plan <name>` to the prompt (where `<name>` is the kebab-case worktree name from P7).
 4. After the Task returns, update `.devorch/config.json` to `{"auto_advance": false}`.
 
-**If `--auto` flag was NOT set:**
+**Pause flow:**
 
-Show classification, phases with goals, wave structure, then instruct (where `<name>` is the kebab-case worktree name from step 8):
+Show classification, phases with goals, wave structure, then instruct (where `<name>` is the kebab-case worktree name from P7):
 ```
 Plan saved to worktree: <worktreePath> (branch: <branch>)
 /clear
@@ -230,6 +294,40 @@ Plan saved to worktree: <worktreePath> (branch: <branch>)
 ```
 
 Explain: planning consumes significant context — `/clear` frees it before build starts. The plan is saved to disk, so nothing is lost.
+
+---
+
+## Conversation Path
+
+### C1. Explore the topic
+
+Run `bun $CLAUDE_HOME/devorch-scripts/check-agent-teams.ts` and parse the JSON output.
+
+- If Agent Teams is enabled → use the `templates` field from the check-agent-teams.ts JSON output to get the `explore-deep` team configuration. If missing, use defaults: 3 explorers + 1 synthesizer, model opus. Spawn the explore-deep team.
+- If Agent Teams is NOT enabled → launch 1-2 Explore agents (`subagent_type="Explore"`) for the topic.
+
+### C2. Present findings
+
+Present synthesized findings with a follow-up question via `AskUserQuestion`. Offer options like:
+- "Dig deeper into [specific area]"
+- "I want to make a change based on this"
+- "I have another question about [related topic]"
+- "That's enough, thanks"
+
+### C3. Iterate or transition
+
+Based on user response:
+- **Dig deeper** → launch a targeted Explore agent for that specific thread. Return to C2 with new findings.
+- **Make a change** → classify the action (go to Step 3, Quick gate).
+- **Another question** → refine the exploration scope. Return to C1 with new focus.
+
+### C4. Conclude
+
+When the conversation concludes naturally or the user says to act:
+- If action needed → route to Quick Path or Plan Path as appropriate via Step 3.
+- If no action needed → end with an optional summary report.
+
+---
 
 ## Parallelization Rules
 
@@ -348,7 +446,7 @@ Risk: <risk>
 </phase2>
 ```
 
-### Rules
+### Plan Format Rules
 
 - Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
@@ -357,8 +455,14 @@ Risk: <risk>
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- **PLANNING ONLY.** Do not build, write code, or deploy builder agents.
+- **PLANNING AND ROUTING ONLY for Plan Path.** Do not build, write code, or deploy builder agents when in Plan Path.
+- **Quick Path implements directly.** No planning step needed — just explore, implement, validate, commit.
 - **The orchestrator NEVER reads source code files directly.** Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
 - **Explore agents focus on source code.** Devorch state files (`.devorch/*`) are read by the orchestrator, not by Explore agents. This keeps agent prompts focused and avoids conflicting reads.
-- Always validate the plan before reporting.
+- Always validate the plan before reporting (Plan Path).
 - Create `.devorch/plans/` directory if needed.
+- All user-facing text in Portuguese must use correct pt-BR accentuation and grammar (e.g., "nao", "acao", "e", "codigo", "sera"). Never write Portuguese without proper accents.
+- Complexity in Quick Path is determined by the checklist, not by intuition. Do not override the checklist with subjective judgment.
+- No Task agents except Explore in Quick Path (for understanding code before changing it).
+- Always validate with check-project.ts before committing (Quick Path).
+- If conventions file exists, follow it strictly (Quick Path).

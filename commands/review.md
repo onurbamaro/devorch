@@ -20,7 +20,7 @@ If `enabled` is `false`, stop and display the `instructions` field to the user. 
 
 ### 2. Load context
 
-Read `.devorch/team-templates.md` and extract the `review` template. If missing or unparseable, use defaults: 4 reviewers (security, quality, performance, tests), model opus.
+Use the `templates` field from the check-agent-teams.ts JSON output (parsed in step 1) to get the `review` configuration via `templates["review"]`. If missing or unparseable, use defaults: 4 reviewers (security, quality, performance, tests), model opus.
 
 Read `.devorch/CONVENTIONS.md` if it exists — pass to the quality reviewer for convention compliance checking.
 

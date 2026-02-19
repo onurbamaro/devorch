@@ -25,7 +25,7 @@ Parse `$ARGUMENTS` for `--plan <value>`.
    - Otherwise → treat as worktree name. Set `planPath = .worktrees/<value>/.devorch/plans/current.md`, `projectRoot = .worktrees/<value>`.
 2. If `--plan` NOT provided:
    - Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output.
-   - If `count == 0`: report error "No active worktrees. Run `/devorch:make-plan` first." and stop.
+   - If `count == 0`: report error "No active worktrees. Run `/devorch` first." and stop.
    - If `count == 1`: auto-detect. Set `planPath = .worktrees/<name>/.devorch/plans/current.md`, `projectRoot = .worktrees/<name>`. Report: "Auto-detected worktree: `<name>` (<planTitle>)"
    - If `count > 1`: use `AskUserQuestion` to present the worktrees as options (each option shows name + plan title + status). Set `planPath` and `projectRoot` based on the user's choice.
 
@@ -33,7 +33,7 @@ Verify the plan file exists. If not, report error and stop.
 
 Set `mainRoot` to the current working directory (the main repo root where `.worktrees/` lives). Plans always live in worktrees, so `isWorktree` is always true.
 
-All `state.md`, `state-history.md`, and `build-summary.md` references in subsequent steps use `<projectRoot>/.devorch/`. All scripts receive `--plan <planPath>`.
+All `state.md` references in subsequent steps use `<projectRoot>/.devorch/`. All scripts receive `--plan <planPath>`.
 
 All `git` and `bun` commands in phase agents must run with `cwd` set to `<projectRoot>`.
 
@@ -67,17 +67,7 @@ Use `<planPath>` for all `--plan` arguments in scripts called by check-implement
 
 This is the single source of truth for post-build verification — do not duplicate its logic here.
 
-### 4. Build summary
-
-If the implementation check verdict is **PASS**:
-
-1. Run `bun $CLAUDE_HOME/devorch-scripts/generate-summary.ts --plan <planPath>`
-2. Stage `<projectRoot>/.devorch/build-summary.md` and commit: `chore(devorch): build summary — <plan name>`. Use `git -C <projectRoot>` for the commit.
-3. Report: "Build summary saved to `<projectRoot>/.devorch/build-summary.md`"
-
-If the verdict is **FAIL**, skip this step.
-
-### 5. Merge worktree
+### 4. Merge worktree
 
 After a successful build:
 
