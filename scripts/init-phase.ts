@@ -1,133 +1,72 @@
 /**
- * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache.
+ * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache + waves/tasks.
  * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>]
- * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, and content (or contentFile if >25000 chars).
- * Compound init: returns phase context, conventions, state, and filtered explore-cache as structured JSON.
+ * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >25000 chars).
+ * Compound init: returns phase context, conventions, state, filtered explore-cache, and structured waves/tasks as JSON.
  * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/explore-cache.md instead of from the plan's directory.
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
+import { parseArgs } from "./lib/args";
+import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle } from "./lib/plan-parser";
+import { safeReadFile } from "./lib/fs-utils";
 
 const CONTENT_THRESHOLD = 25000;
 const CONTEXT_FILE = ".devorch/.phase-context.md";
 
-function parseArgs(): { plan: string; phase: number; cacheRoot: string } {
-  const args = process.argv.slice(2);
-  let plan = "";
-  let phase = 0;
-  let cacheRoot = "";
-
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--plan" && args[i + 1]) {
-      plan = args[++i];
-    } else if (args[i] === "--phase" && args[i + 1]) {
-      phase = parseInt(args[++i], 10);
-    } else if (args[i] === "--cache-root" && args[i + 1]) {
-      cacheRoot = args[++i];
-    }
-  }
-
-  if (!plan || !phase) {
-    console.error("Usage: init-phase.ts --plan <path> --phase <N> [--cache-root <path>]");
-    process.exit(1);
-  }
-
-  return { plan, phase, cacheRoot };
+interface WaveInfo {
+  wave: number;
+  taskIds: string[];
+  type: "parallel" | "sequential" | "validation";
 }
 
-function extractTagContent(text: string, tagName: string): string {
-  // Match tags at line start (after optional whitespace) to skip inline backtick references
-  const match = text.match(new RegExp(`^\\s*<${tagName}>([\\s\\S]*?)^\\s*<\\/${tagName}>`, "im"));
-  return match ? match[1].trim() : "";
+interface TaskInfo {
+  id: string;
+  assignedTo: string;
+  title: string;
+  content: string;
 }
 
-function safeReadFile(filePath: string): string {
-  try {
-    if (existsSync(filePath)) {
-      return readFileSync(filePath, "utf-8");
-    }
-  } catch {
-    // ignore — optional file
-  }
-  return "";
-}
+const args = parseArgs<{ plan: string; phase: number; "cache-root": string }>([
+  { name: "plan", type: "string", required: true },
+  { name: "phase", type: "number", required: true },
+  { name: "cache-root", type: "string" },
+]);
 
-interface PhaseBounds {
-  num: number;
-  name: string;
-  start: number;
-  end: number;
-}
+const planPath = args.plan;
+const phaseNum = args.phase;
+const cacheRoot = args["cache-root"];
 
-const { plan: planPath, phase: phaseNum, cacheRoot } = parseArgs();
-
-let content: string;
-try {
-  content = readFileSync(planPath, "utf-8");
-} catch {
-  console.error(`Could not read plan: ${planPath}`);
-  process.exit(1);
-}
-
-const lines = content.split("\n");
-
-// --- Single pass: find all phase boundaries ---
-const phaseOpenRegex = /<phase(\d+)\s+name="([^"]*)">/i;
-const phaseCloseRegex = /<\/phase(\d+)>/i;
-
-const phases: PhaseBounds[] = [];
-
-for (let i = 0; i < lines.length; i++) {
-  const openMatch = lines[i].match(phaseOpenRegex);
-  if (openMatch) {
-    phases.push({
-      num: parseInt(openMatch[1], 10),
-      name: openMatch[2],
-      start: i,
-      end: lines.length,
-    });
-  }
-  const closeMatch = lines[i].match(phaseCloseRegex);
-  if (closeMatch) {
-    const closeNum = parseInt(closeMatch[1], 10);
-    const phase = phases.find((p) => p.num === closeNum);
-    if (phase) {
-      phase.end = i + 1;
-    }
-  }
-}
+const content = readPlan(planPath);
+const phases = parsePhaseBounds(content);
 
 if (phases.length === 0) {
   console.error("No phases found in plan.");
   process.exit(1);
 }
 
-// --- Find target phase ---
-const targetPhase = phases.find((p) => p.num === phaseNum);
+const targetPhase = phases.find((p) => p.phase === phaseNum);
 if (!targetPhase) {
-  console.error(`Phase ${phaseNum} not found. Available: ${phases.map((p) => p.num).join(", ")}`);
+  console.error(`Phase ${phaseNum} not found. Available: ${phases.map((p) => p.phase).join(", ")}`);
   process.exit(1);
 }
 
-// --- Extract plan title ---
-const titleMatch = content.match(/^#\s+Plan:\s+(.+)$/m);
-const planTitle = titleMatch ? titleMatch[1].trim() : "Untitled Plan";
+const planTitle = extractPlanTitle(content);
 
 // --- Extract plan-level fields ---
-const objective = extractTagContent(content, "objective");
-const decisions = extractTagContent(content, "decisions");
-const solutionApproach = extractTagContent(content, "solution-approach");
+const objective = extractTagContent(content, "objective") || "";
+const decisions = extractTagContent(content, "decisions") || "";
+const solutionApproach = extractTagContent(content, "solution-approach") || "";
 
 // --- Extract phase content ---
-const phaseContent = lines.slice(targetPhase.start, targetPhase.end).join("\n");
+const phaseContent = targetPhase.content;
 
 // --- Extract handoff from N-1 ---
 let handoff = "";
 if (phaseNum > 1) {
-  const prevPhase = phases.find((p) => p.num === phaseNum - 1);
+  const prevPhase = phases.find((p) => p.phase === phaseNum - 1);
   if (prevPhase) {
-    const prevContent = lines.slice(prevPhase.start, prevPhase.end).join("\n");
-    handoff = extractTagContent(prevContent, "handoff");
+    handoff = extractTagContent(prevPhase.content, "handoff") || "";
   }
 }
 
@@ -145,8 +84,7 @@ const cacheRaw = safeReadFile(cacheSource);
 function filterCache(cache: string, phaseText: string): string {
   if (!cache) return "";
 
-  // Extract file paths mentioned in the phase tasks
-  const tasksContent = extractTagContent(phaseText, "tasks");
+  const tasksContent = extractTagContent(phaseText, "tasks") || "";
   const fileRefs = new Set<string>();
   const filePatterns = [...tasksContent.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)];
   for (const match of filePatterns) {
@@ -156,19 +94,16 @@ function filterCache(cache: string, phaseText: string): string {
     }
   }
 
-  if (fileRefs.size === 0) return cache; // no file refs → include all cache
+  if (fileRefs.size === 0) return cache;
 
-  // Split cache into sections by ## headers
   const sections = cache.split(/(?=^## )/m);
   const matched: string[] = [];
 
   for (const section of sections) {
     if (!section.startsWith("## ")) {
-      // Header or preamble — always include
       matched.push(section);
       continue;
     }
-    // Check if any file ref appears in this section
     let sectionMatches = false;
     for (const ref of fileRefs) {
       if (section.includes(ref)) {
@@ -176,7 +111,6 @@ function filterCache(cache: string, phaseText: string): string {
         break;
       }
     }
-    // Also match directory prefixes (e.g., "scripts/" matches "scripts/init-phase.ts")
     if (!sectionMatches) {
       for (const ref of fileRefs) {
         const dir = ref.split("/")[0];
@@ -195,6 +129,70 @@ function filterCache(cache: string, phaseText: string): string {
 }
 
 const filteredCache = filterCache(cacheRaw, phaseContent);
+
+// --- Parse waves from <execution> block ---
+function parseWaves(phaseText: string): WaveInfo[] {
+  const executionContent = extractTagContent(phaseText, "execution");
+  if (!executionContent) return [];
+
+  const waves: WaveInfo[] = [];
+  const waveRegex = /\*\*Wave\s+(\d+)\*\*\s*(?:\(([^)]*)\))?\s*:\s*(.+)/gi;
+  let waveMatch: RegExpExecArray | null;
+
+  while ((waveMatch = waveRegex.exec(executionContent)) !== null) {
+    const waveNum = parseInt(waveMatch[1], 10);
+    const annotation = (waveMatch[2] || "").trim().toLowerCase();
+    const taskIdStr = waveMatch[3];
+
+    let type: "parallel" | "sequential" | "validation" = "parallel";
+    if (annotation === "validation") {
+      type = "validation";
+    } else if (annotation === "sequential" || annotation.startsWith("after wave")) {
+      type = "sequential";
+    }
+
+    const taskIds = taskIdStr
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    waves.push({ wave: waveNum, taskIds, type });
+  }
+
+  return waves;
+}
+
+// --- Parse tasks from <tasks> block ---
+function parseTasks(phaseText: string): Record<string, TaskInfo> {
+  const tasksContent = extractTagContent(phaseText, "tasks") || "";
+  const tasks: Record<string, TaskInfo> = {};
+
+  const taskHeaderRegex = /^####\s+\d+\.\s+/m;
+  const taskSections = tasksContent.split(taskHeaderRegex);
+  const taskHeaders = [...tasksContent.matchAll(/^####\s+\d+\.\s+(.+)$/gm)];
+
+  for (let i = 0; i < taskHeaders.length; i++) {
+    const title = taskHeaders[i][1].trim();
+    const sectionContent = taskSections[i + 1] || "";
+
+    const idMatch = sectionContent.match(/\*\*ID\*\*:\s*(\S+)/i);
+    const id = idMatch ? idMatch[1] : "";
+
+    const assignedMatch = sectionContent.match(/\*\*Assigned To\*\*:\s*(\S+)/i);
+    const assignedTo = assignedMatch ? assignedMatch[1] : "";
+
+    const fullContent = `#### ${taskHeaders[i][0].match(/\d+/)?.[0] || i + 1}. ${title}\n${sectionContent.trimEnd()}`;
+
+    if (id) {
+      tasks[id] = { id, assignedTo, title, content: fullContent };
+    }
+  }
+
+  return tasks;
+}
+
+const waves = parseWaves(phaseContent);
+const tasks = parseTasks(phaseContent);
 
 // --- Build output content ---
 const parts: string[] = [];
@@ -264,6 +262,8 @@ const result: {
   phaseName: string;
   totalPhases: number;
   planTitle: string;
+  waves: WaveInfo[];
+  tasks: Record<string, TaskInfo>;
   content?: string;
   contentFile?: string;
 } = {
@@ -271,6 +271,8 @@ const result: {
   phaseName: targetPhase.name,
   totalPhases: phases.length,
   planTitle,
+  waves,
+  tasks,
 };
 
 if (fullContent.length > CONTENT_THRESHOLD) {
