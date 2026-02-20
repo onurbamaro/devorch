@@ -37,23 +37,6 @@ Generated: 2026-02-19T02:20:00Z
 | Conditional re-run | 1x | varies (redundant) |
 | Cross-phase Explore | 1x | medium-slow (15-60s) |
 
-## Skill Naming Mechanism
-
-### How names are determined
-- Purely filesystem path relative to `~/.claude/commands/`
-- `~/.claude/commands/<name>.md` → `/name`
-- `~/.claude/commands/<dir>/<name>.md` → `/dir:name`
-- No frontmatter field controls the name
-
-### Current install.ts behavior
-- Bulk copy: all files from `commands/` → `~/.claude/commands/devorch/` (line 11-12 targets)
-- Special root copy: `commands/devorch.md` → `~/.claude/commands/devorch.md` (lines 81-91)
-- Result: devorch.md exists in BOTH locations → both `/devorch` and `/devorch:devorch` work
-- Fix: exclude devorch.md from the bulk copy to `devorch/` subdirectory
-
-### References to clean
-- `.devorch/plans/current.md:113` — only active reference to `devorch:devorch`
-
 ## Scripts Architecture
 19 TypeScript scripts in scripts/, all self-contained CLI tools with JSON stdout output. Shared utilities in `./lib/` (plan-parser, args, fs-utils).
 
@@ -68,10 +51,3 @@ Key scripts and their I/O:
 - check-project.ts: positional + --timeout → JSON with check results
 - manage-cache.ts: --action --max-lines --root → invalidates/trims explore-cache.md
 - verify-build.ts: parses `<new-files>` from plan, checks each file exists and isn't a stub
-
-## Files to Modify
-
-1. **agents/devorch-builder.md** — Remove step 4 (check-project.ts call), update Red Flags table
-2. **templates/build-phase.md** — Add check-project.ts 1x after all builders finish (between steps 3 and 4), remove "Do NOT include check-project.ts" note
-3. **commands/check-implementation.md** — Remove conditional per-phase validation re-run (lines 40-41), update report template
-4. **install.ts** — Exclude devorch.md from subdirectory copy
