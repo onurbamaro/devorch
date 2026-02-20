@@ -25,7 +25,7 @@ Parse `$ARGUMENTS` for `--plan <value>`.
    - Otherwise → treat as worktree name. Set `planPath = .worktrees/<value>/.devorch/plans/current.md`, `projectRoot = .worktrees/<value>`.
 2. If `--plan` NOT provided:
    - Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output.
-   - If `count == 0`: report error "No active worktrees. Run `/devorch` first." and stop.
+   - If `count == 0`: report error "No active worktrees. Run `/devorch:talk` first." and stop.
    - If `count == 1`: auto-detect. Set `planPath = .worktrees/<name>/.devorch/plans/current.md`, `projectRoot = .worktrees/<name>`. Report: "Auto-detected worktree: `<name>` (<planTitle>)"
    - If `count > 1`: use `AskUserQuestion` to present the worktrees as options (each option shows name + plan title + status). Set `planPath` and `projectRoot` based on the user's choice.
 
@@ -59,13 +59,77 @@ For each remaining phase N (sequentially):
    - If verified → report "Phase N/Y complete." and continue to next phase.
    - If NOT verified → the phase agent handles retries internally (up to 1 retry per failed builder). If the phase still fails after retries, stop and report: "Phase N did not complete successfully. Check agent output."
 
-### 3. Implementation check
+### 3. Final verification
 
-After all phases complete successfully, run the full implementation verification **inline in this context** — read `$CLAUDE_HOME/commands/devorch/check-implementation.md` and follow its steps directly. Do NOT spawn a Task agent for check-implementation. Execute it here so that any agents it launches (Explore, Agent Teams) are first-level Task calls, not nested.
+After all phases complete successfully, execute the full implementation verification **inline in this context** (not as Task — so that agents are first-level Task calls).
 
-Use `<planPath>` for all `--plan` arguments in scripts called by check-implementation. The check has access to `<planPath>`, `<projectRoot>`, and `<mainRoot>`.
+#### 3a. Determine changed files
 
-This is the single source of truth for post-build verification — do not duplicate its logic here.
+Run `git -C <projectRoot> diff --name-only` against the baseline:
+- If all phases complete: diff against the parent of the first `phase(1):` commit. Scan `git -C <projectRoot> log --oneline` for the first commit matching `phase(1):` and use its parent.
+- If partial: diff up to the last completed phase.
+- Fallback: diff against the plan commit (`chore(devorch): plan`).
+
+#### 3b. Launch everything parallel (single message)
+
+Launch ALL of the following in a single parallel batch:
+
+1. **Automated checks** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` via Bash with `run_in_background=true` (full check, WITH tests).
+
+2. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
+   - Prompt includes: changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
+   - Focus ONLY on files listed in the git diff
+   - Verify: imports resolve, no orphan exports, no leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders, type consistency across module boundaries, no dead code, handoff contracts honored
+   - Report each finding with file:line evidence
+
+3. **3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
+   - Each agent receives: plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
+   - Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
+   - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
+   - **quality-reviewer**: edge cases, error handling, correctness, maintainability
+   - **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
+
+All checks launch in a single message. Bash calls run in background; Explore/review agents block as foreground Task calls. After agents return, collect background Bash results.
+
+#### 3c. Synthesize and dispatch
+
+Collect results from: check-project.ts, cross-phase Explore, 3 reviewers.
+
+For each finding:
+- **Trivial** (fix is self-evident, no ambiguity): fix directly with Edit tool. Examples: leftover TODO/FIXME, unused import, typo, formatting.
+- **Complex** (multiple files, design decision, potential regression): do NOT fix. Generate a ready-to-paste prompt:
+  ```
+  /devorch:fix <detailed description including: what's wrong, which files are affected, what the reviewers found, suggested approach>
+  ```
+
+After fixing trivials:
+- Commit: `fix(check): <concise description of fixes>`
+- Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` if any fixes were made
+
+#### 3d. Report
+
+```
+## Verificação Final: <plan name>
+
+### Checks Automatizados
+Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M)
+
+### Integração Cross-phase
+<findings do Explore agent ou "✅ OK">
+
+### Review Adversarial
+Security: <findings ou "✅ clean">
+Quality: <findings ou "✅ clean">
+Completeness: <findings ou "✅ clean">
+
+### Correções Automáticas
+<N issues triviais corrigidos inline> (ou "Nenhum")
+
+### Issues Pendentes
+<prompts /devorch:fix gerados> (ou "Nenhum")
+
+### Verdict: PASS / PASS com N issues pendentes / FAIL
+```
 
 ### 4. Merge worktree
 
@@ -97,3 +161,5 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 - Stop on first failure. Report which phase failed.
 - The orchestrator only reads `<projectRoot>/.devorch/state.md` and `<planPath>` between phases. Everything else is inside the per-phase agents.
 - **Context discipline**: build is a thin supervisor. It does NOT launch builders, poll tasks, manage waves, or run validation directly. All of that is delegated to the per-phase Task agent which follows build-phase.md instructions.
+- Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
+- Auto-fix trivial findings without user interaction. Only escalate complex issues with `/devorch:fix` prompt.
