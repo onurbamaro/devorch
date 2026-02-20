@@ -74,7 +74,7 @@
 - YAML frontmatter: `description`, `model`, optional `argument-hint`, `hooks`, `disallowed-tools`
 - Sections: brief intro → input/output → workflow (numbered steps) → rules
 - References scripts via `bun $CLAUDE_HOME/devorch-scripts/<name>.ts`
-- Agent references via `subagent_type=devorch-builder` or `subagent_type=devorch-validator`
+- Agent references via `subagent_type="devorch-builder"`
 
 ### Script Output Format
 - All scripts output **JSON** to stdout (not markdown)
