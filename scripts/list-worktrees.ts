@@ -1,13 +1,14 @@
 /**
  * list-worktrees.ts — Lists all devorch worktrees with their plan and status info.
  * Usage: bun ~/.claude/devorch-scripts/list-worktrees.ts
- * Output: JSON {"worktrees": [...], "count": N}
+ * Output: JSON {"worktrees": [...], "count": N, "mainBranch": "main"|"master"}
  * Each worktree entry: {name, path, branch, planTitle, status, lastPhase, totalPhases, valid}
  */
 import { existsSync, readdirSync, statSync } from "fs";
 import { join, resolve } from "path";
 import { extractPlanTitle } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
+import { getMainBranch } from "./lib/git-utils";
 
 interface WorktreeInfo {
   name: string;
@@ -77,8 +78,10 @@ function getValidWorktrees(): Set<string> {
 const cwd = process.cwd();
 const worktreesDir = join(cwd, ".worktrees");
 
+const mainBranch = getMainBranch();
+
 if (!existsSync(worktreesDir)) {
-  console.log(JSON.stringify({ worktrees: [], count: 0 }));
+  console.log(JSON.stringify({ worktrees: [], count: 0, mainBranch }));
   process.exit(0);
 }
 
@@ -120,4 +123,4 @@ for (const name of entries) {
   });
 }
 
-console.log(JSON.stringify({ worktrees, count: worktrees.length }, null, 2));
+console.log(JSON.stringify({ worktrees, count: worktrees.length, mainBranch }, null, 2));

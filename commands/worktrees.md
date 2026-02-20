@@ -9,7 +9,7 @@ Worktree lifecycle management. Lists active devorch worktrees with their plan an
 
 ### Step 1 — List worktrees
 
-Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output.
+Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output. The output includes a `mainBranch` field (e.g., "main" or "master") — use this value everywhere `<mainBranch>` appears below.
 
 If count == 0: report "No active worktrees." and stop.
 
