@@ -1,4 +1,4 @@
-Generated: 2026-02-21T01:57:06.094Z
+Generated: 2026-02-21T17:09:48.520Z
 
 # Project Map
 
@@ -27,11 +27,11 @@ devorch/
     devorch-statusline.cjs
   scripts/
     setup-worktree.ts
+    phase-summary.ts
     list-worktrees.ts
     run-validation.ts
     manage-cache.ts
-    format-commit.ts
-    ... +7 files
+    ... +8 files
     lib/
   commands/
     build.md
@@ -56,14 +56,14 @@ devorch/
 ## Recent Commits
 
 ```
-4acb24f feat(worktrees): detect main branch dynamically
-a7dfd4d chore(devorch): add project config and update explore cache
-46f9035 docs: update README for devorch v2
-2755396 phase(3): Remover arquivos deprecated e atualizar install.ts...
-8bbc223 chore(devorch): update installer for v2 structure
-79f7557 chore(devorch): remove deprecated v1 files
-76a3288 chore(devorch): rewrite build system for v2
-251d90b feat(devorch): add talk.md and fix.md commands for v2
-d94d2ab chore(devorch): plan — devorch v2 3 comandos com Agent Teams
-263f5c8 Merge branch 'devorch/optimize-build-performance'
+dbdee83 Merge branch 'devorch/optimize-build-scripts'
+925faeb fix(check): sync local check-project.ts with global --with-validation changes
+7399114 phase(3): Atualizar build-phase.md para usar phase-summary.t...
+9d73bfc phase(1): Criar script que gera commit message e escreve sta...
+c458fd1 chore(devorch): add worktree for optimize-build-scripts
+30f78a1 chore(devorch): plan — Optimize Build Scripts — Reduce Think Cycles
+5c69570 Merge branch 'devorch/satellite-worktrees'
+5d28b39 fix(check): add JSON array validation, encoding consistency, and duplicate path check
+aa8db0b phase(3): Merge dry-run + sequencial em todos os repos, list...
+17a7259 feat(worktrees): add satellite listing, coordinated merge, and cascading delete
 ```
