@@ -80,3 +80,23 @@ export function extractFileEntries(block: string): Array<{ path: string; descrip
 
   return entries;
 }
+
+export interface SecondaryRepo {
+  name: string;
+  path: string;
+}
+
+export function extractSecondaryRepos(planContent: string): SecondaryRepo[] {
+  const block = extractTagContent(planContent, "secondary-repos");
+  if (!block) return [];
+
+  const repos: SecondaryRepo[] = [];
+  const lineRegex = /^-\s+`([^`]+)`\s+—\s+(.+)$/gm;
+  let match: RegExpExecArray | null;
+
+  while ((match = lineRegex.exec(block)) !== null) {
+    repos.push({ name: match[1], path: match[2].trim() });
+  }
+
+  return repos;
+}
