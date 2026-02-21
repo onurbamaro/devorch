@@ -229,6 +229,14 @@ if (secondaryRepos.length > 0) {
     }
   }
 
+  // Duplicate paths
+  const repoPaths = secondaryRepos.map((r) => r.path);
+  const uniquePaths = new Set(repoPaths);
+  if (uniquePaths.size !== repoPaths.length) {
+    const dupes = repoPaths.filter((p, i) => repoPaths.indexOf(p) !== i);
+    errors.push(`Secondary repos: duplicate paths: ${[...new Set(dupes)].join(", ")}`);
+  }
+
   // Path validation (warning only)
   for (const repo of secondaryRepos) {
     if (/^[A-Z]:\\|^\//.test(repo.path)) {

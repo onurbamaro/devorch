@@ -35,7 +35,12 @@ interface SatelliteStatus {
 let satelliteEntries: SatelliteStatus[] = [];
 if (args.satellites) {
   try {
-    satelliteEntries = JSON.parse(args.satellites);
+    const parsed = JSON.parse(args.satellites);
+    if (Array.isArray(parsed)) {
+      satelliteEntries = parsed;
+    } else {
+      console.error("--satellites must be a JSON array");
+    }
   } catch {
     console.error("Failed to parse --satellites JSON");
   }

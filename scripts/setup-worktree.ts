@@ -50,7 +50,7 @@ const worktreeProc = Bun.spawnSync(["git", "worktree", "add", worktreePath, "-b"
 });
 
 if (worktreeProc.exitCode !== 0) {
-  const stderr = worktreeProc.stderr.toString().trim();
+  const stderr = worktreeProc.stderr.toString("utf-8").trim();
   console.error(`Failed to create worktree: ${stderr}`);
   process.exit(1);
 }
@@ -107,7 +107,12 @@ const satellites: SatelliteResult[] = [];
 if (args.secondary) {
   let secondaryRepos: Array<{ name: string; path: string }>;
   try {
-    secondaryRepos = JSON.parse(args.secondary);
+    const parsed = JSON.parse(args.secondary);
+    if (!Array.isArray(parsed)) {
+      console.error("--secondary must be a JSON array");
+      process.exit(1);
+    }
+    secondaryRepos = parsed;
   } catch {
     console.error("Failed to parse --secondary JSON");
     process.exit(1);
@@ -159,7 +164,7 @@ if (args.secondary) {
     );
 
     if (satProc.exitCode !== 0) {
-      const stderr = satProc.stderr.toString().trim();
+      const stderr = satProc.stderr.toString("utf-8").trim();
       console.error(`Failed to create satellite worktree for "${repo.name}": ${stderr}`);
       process.exit(1);
     }
