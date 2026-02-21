@@ -5,7 +5,7 @@
  */
 import { createHash } from "crypto";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, readPlan } from "./lib/plan-parser";
+import { extractTagContent, extractSecondaryRepos, readPlan } from "./lib/plan-parser";
 
 const args = parseArgs<{ plan: string }>([
   { name: "plan", type: "string", required: true },
@@ -204,6 +204,57 @@ if (phases.length === 0) {
               `Phase ${phase.num}: Wave ${waveNum} conflict — tasks "${waveTasks[a].id}" and "${waveTasks[b].id}" both touch: ${overlap.join(", ")}`
             );
           }
+        }
+      }
+    }
+  }
+}
+
+// --- Secondary repos validation ---
+const secondaryRepos = extractSecondaryRepos(content);
+
+if (secondaryRepos.length > 0) {
+  // Unique names
+  const repoNames = secondaryRepos.map((r) => r.name);
+  const uniqueNames = new Set(repoNames);
+  if (uniqueNames.size !== repoNames.length) {
+    const dupes = repoNames.filter((n, i) => repoNames.indexOf(n) !== i);
+    errors.push(`Secondary repos: duplicate names: ${[...new Set(dupes)].join(", ")}`);
+  }
+
+  // Reserved name "primary"
+  for (const repo of secondaryRepos) {
+    if (repo.name.toLowerCase() === "primary") {
+      errors.push(`Secondary repos: name "primary" is reserved`);
+    }
+  }
+
+  // Path validation (warning only)
+  for (const repo of secondaryRepos) {
+    if (/^[A-Z]:\\|^\//.test(repo.path)) {
+      warnings.push(`Secondary repos: "${repo.name}" has absolute path "${repo.path}" — expected relative`);
+    }
+    if (/\s/.test(repo.path)) {
+      warnings.push(`Secondary repos: "${repo.name}" path contains whitespace`);
+    }
+  }
+
+  // Validate **Repo** references in tasks across all phases
+  const validRepoNames = new Set(repoNames);
+  for (const phase of phases) {
+    const tasksContent = extractTagContent(phase.content, "tasks") || "";
+    const taskSections = tasksContent.split(/####\s+\d+\.\s+/);
+
+    for (const section of taskSections.slice(1)) {
+      const idMatch = section.match(/\*\*ID\*\*:\s*(\S+)/i);
+      const repoMatch = section.match(/\*\*Repo\*\*:\s*(\S+)/i);
+      if (repoMatch) {
+        const repoName = repoMatch[1];
+        if (repoName.toLowerCase() !== "primary" && !validRepoNames.has(repoName)) {
+          const taskId = idMatch ? idMatch[1] : "unknown";
+          errors.push(
+            `Phase ${phase.num}: task "${taskId}" references unknown repo "${repoName}"`
+          );
         }
       }
     }
