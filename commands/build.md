@@ -137,11 +137,37 @@ After a successful build:
 
 1. Detect the worktree branch name: `git -C <projectRoot> branch --show-current` → e.g., `devorch/feature-b`.
 2. Detect the main branch: use the branch the worktree was created from (typically `master` or `main`). Run `git log --oneline <mainBranch>..<worktreeBranch>` to show what will be merged.
-3. Ask the user via `AskUserQuestion`:
-   - **"Merge now"** — Merge the worktree branch into the main branch and clean up.
+3. **Detect satellites**: Read the plan file and parse `<secondary-repos>`. For each secondary repo, resolve its worktree path: `<repoPath>/.worktrees/<worktreeName>` (where `worktreeName` is the last segment of `<projectRoot>`). Verify each satellite worktree exists via `git -C <repoPath> worktree list`.
+4. Ask the user via `AskUserQuestion`:
+   - **"Merge now"** — Merge the worktree branch into the main branch and clean up (all repos).
    - **"Keep worktree"** — Leave the worktree and branch for manual merge later.
 
 If **merge**:
+
+**With satellites (coordinated merge)**:
+
+a. **Dry-run all repos first** — For each repo (primary + all satellites), run:
+```bash
+git -C <repoMainPath> merge --no-commit --no-ff <worktreeBranch>
+git -C <repoMainPath> merge --abort
+```
+If any dry-run fails: report which repo has conflicts and stop. Do NOT merge any repo.
+
+b. **Merge sequentially** (only if all dry-runs pass) — Primary first, then satellites in order:
+```bash
+git checkout <mainBranch>
+git merge <worktreeBranch>
+```
+
+c. **Cleanup all repos** — For each repo (primary + satellites):
+```bash
+git -C <repoMainPath> worktree remove <worktreePath>
+git -C <repoMainPath> branch -d <worktreeBranch>
+```
+
+Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All worktrees removed."
+
+**Without satellites** (standard merge):
 ```bash
 git checkout <mainBranch>
 git merge <worktreeBranch>
@@ -150,7 +176,7 @@ git branch -d <worktreeBranch>
 ```
 Report: "Merged `<worktreeBranch>` into `<mainBranch>`. Worktree removed."
 
-If merge has conflicts: report the conflicts and instruct the user to resolve manually. Do NOT force or auto-resolve.
+If merge has conflicts: report the conflicting files and repo, and instruct the user to resolve manually. Do NOT force or auto-resolve.
 
 If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>`). Merge manually when ready: `git merge <worktreeBranch>`"
 
