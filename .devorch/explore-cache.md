@@ -1,48 +1,43 @@
 # Explore Cache
-Generated: 2026-02-21T17:10:30Z
+Generated: 2026-02-21T17:57:00Z
 
-## setup-worktree.ts — Lifecycle & Error Handling
+## Current Merge Section (Section 4 of build.md)
+The merge step runs in the **orchestrator context** (build.md), not delegated to builders. It:
+1. Detects worktree branch + main branch
+2. Detects satellites from plan file `<secondary-repos>`
+3. Asks user: "Merge now" or "Keep worktree"
+4. If merge with satellites: dry-run ALL repos first (atomic check), then merge sequentially, then cleanup
+5. If merge without satellites: checkout → merge → worktree remove → branch delete
+6. **Assumes working tree is clean** in all repos — no handling for uncommitted changes
 
-**Criacao**: `git worktree add <path> -b devorch/<name>` — atomico, se falha nao deixa residuos.
+Key variables: `<projectRoot>`, `<mainBranch>`, `<worktreeBranch>`, `<repoMainPath>`, `<worktreePath>`
 
-**Cenarios de falha identificados**:
-1. **Worktree ja existe** (line 25-27): exit 1 imediato, sem cleanup.
-2. **Branch ja existe**: `git worktree add -b` falha com `fatal: a branch named '...' already exists`. Script propaga o erro mas **nao tenta deletar a branch**.
-3. **Falha parcial em satellites**: Se satellite N falha apos 1..N-1 criados, script exit(1) sem limpar os satellites criados nem a worktree principal.
+## Git Stash Edge Cases
+Critical findings for the stash+merge workflow:
 
-**O que NAO existe**:
-- Nenhum flag `--recreate` ou `--force`
-- Nenhum flag `--add-secondary` para worktree existente
-- Nenhum cleanup automatico de branches orfas
-- Nenhum rollback de satellites parciais
+1. **--ours/--theirs is INVERTED after stash pop** — after `git stash pop` conflicts:
+   - `--ours` = HEAD (post-merge state, i.e. the worktree branch changes merged in)
+   - `--theirs` = stashed changes (pre-merge local modifications)
+   - The user's original proposal had this backwards
 
-**Satellites**: Criados sequencialmente (nao em paralelo). Cada um recebe a mesma branch `devorch/<name>`. Validacao: isGitRepo + checkBranchExists + warn uncommitted.
+2. **Stash pop auto-drops on success, keeps entry on failure** — must track whether to drop manually
 
-## map-project.ts — Capacidades e Limitacoes
+3. **`git stash push` with no tracked changes** = "No local changes to save" (exit 0, no entry created). Must filter `git status --porcelain` to exclude `??` lines before deciding to stash.
 
-**O que faz**: Scan recursivo (2 niveis), detecta 16 tech stacks por marker files, extrai deps/scripts de package.json, git log recente. Output: Markdown. `--persist` salva em `.devorch/project-map.md`.
+4. **After failed stash pop**: repo is in merge-conflict state with conflict markers. NOT a clean state.
 
-**O que NAO faz**:
-- Deteccao de repos irmaos/nested `.git`
-- Deteccao de monorepo com git roots separados
-- Deteccao de workspaces (pnpm/yarn/npm)
-- Deteccao de submodules ou worktrees existentes
-- `.git` esta no IGNORE list — completamente invisivel
+5. **Don't use --include-untracked** — risks stashing build artifacts, node_modules. Filter status output instead.
 
-**Impacto**: Quando o projeto esta em `packages/web` e `packages/core` tem seu proprio `.git`, o map-project.ts nao reporta isso. O orchestrator descobre tarde demais (durante exploracao), depois da worktree ja ter sido criada sem `--secondary`.
+6. **Merge fails after stash**: need to `merge --abort` then `stash pop` to restore state.
 
-## Fluxo orchestrator → worktree — Gaps no Multi-Repo
+7. **Multi-repo coordination**: stash/dry-run/merge/pop must be coordinated across primary + satellites.
 
-**Fluxo atual**: talk.md Step 3 menciona perguntar sobre secondary repos, mas **nao especifica quem/como descobre os repos irmaos**. A informacao de secondary repos vem da resposta do usuario, nao de deteccao automatica.
-
-**Problema raiz**: A criacao da worktree (Step 7) acontece DEPOIS da exploracao (Step 2), mas a exploracao e que descobre a necessidade de secondary repos. Se a worktree ja foi criada sem `--secondary`, nao ha como adicionar satellites depois.
-
-**Path resolution inconsistencia**: setup-worktree usa `resolve(cwd, repo.path)`, init-phase usa `resolve(projectRoot, repo.path)`, list-worktrees usa `resolve(mainRepoRoot, repo.path)`. Funcionam igual na maioria dos casos mas podem divergir.
-
-## Pipeline Flow & Round-trip Bottlenecks (cache anterior)
-
-- Talk phase: ~8 think cycles
-- Build phase (per phase): ~6 think cycles
-- Total 3-phase build: ~25-35 think cycles, ~30-40% overhead
-- Script proliferation: 12+ sequential script calls
-- Redundant plan parsing: 5x, secondary-repos parsed 3x
+## Style Patterns for build.md
+- Top-level sections: `### N. Section Name`
+- Sub-steps: numbered lists (1., 2., a., b., c.)
+- Single commands: inline backticks. Multi-line sequences: ```bash code blocks
+- Conditionals: English prose "If X: do Y"
+- Error handling: "report error and stop", "verify X, if not Y"
+- Imperative verbs: "Run", "Parse", "Check", "Detect", "Report"
+- Variables: angle brackets `<varName>` for runtime values
+- Merge section is orchestrator-context (uses AskUserQuestion, git commands directly)
