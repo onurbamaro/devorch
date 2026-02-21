@@ -141,6 +141,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 - **Naming / conventions** — When the codebase doesn't have a clear precedent for something, ask.
 - **Edge cases** — Anything the exploration revealed that has no obvious right answer.
 - **Multi-repo** — When the task involves or mentions multiple projects/repos, ask which secondary repos should be included as satellites. Present discovered repo paths as options. Each satellite gets its own worktree with the same branch name.
+- **Sibling repos (automatic)** — If the map-project.ts output from Step 1 contains a "## Sibling Repos" section, include a question asking which of those repos should be satellites for this plan. List each detected repo as an option (name + relative path). Always include the option "Nenhum — só o repo principal" as the last choice. This question should appear even if the user did not explicitly mention multi-repo.
 
 **Ask in rounds.** Use up to 4 questions per `AskUserQuestion` call (tool limit). If more questions remain, make another call after the user answers. Continue until all ambiguity is resolved — there is no cap on rounds. The goal is **zero assumptions** in the plan.
 
@@ -178,6 +179,7 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 
 1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" -> `courier-payroll-export`).
 2. **Setup worktree** (with optional satellites):
+   - If the user selected sibling repos as satellites during Step 3, include them in the plan as `<secondary-repos>` entries (name + relative path from the "## Sibling Repos" section of map-project.ts output).
    - If the plan includes `<secondary-repos>`, parse it and build a JSON array: `[{"name": "<name>", "path": "<relative-path>"}, ...]`
    - Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
    - If no `<secondary-repos>`: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`

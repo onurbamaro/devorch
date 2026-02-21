@@ -4,7 +4,7 @@
  * --persist: writes output to .devorch/project-map.md in addition to stdout.
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
-import { join, basename, dirname } from "path";
+import { join, basename, dirname, resolve, relative } from "path";
 
 // Positional + flag args (shared lib doesn't handle positional args)
 let cwd = process.cwd();
@@ -213,6 +213,63 @@ try {
   }
 } catch {
   push("(git not available)");
+}
+
+// --- Sibling repos detection ---
+interface SiblingRepo {
+  name: string;
+  relativePath: string;
+  branch: string;
+}
+
+function detectSiblingRepos(cwd: string): SiblingRepo[] {
+  const parentDir = resolve(cwd, "..");
+  let entries: import("fs").Dirent[];
+  try {
+    entries = readdirSync(parentDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const resolvedCwd = resolve(cwd);
+  const siblings: SiblingRepo[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+
+    const siblingPath = join(parentDir, entry.name);
+    if (resolve(siblingPath) === resolvedCwd) continue;
+
+    try {
+      const gitCheck = Bun.spawnSync(
+        ["git", "-C", siblingPath, "rev-parse", "--git-dir"],
+        { stderr: "pipe" }
+      );
+      if (gitCheck.exitCode !== 0) continue;
+
+      const branchResult = Bun.spawnSync(
+        ["git", "-C", siblingPath, "branch", "--show-current"],
+        { stderr: "pipe" }
+      );
+      const branch = branchResult.stdout.toString().trim() || "HEAD";
+
+      const relPath = relative(cwd, siblingPath).replaceAll("\\", "/");
+      siblings.push({ name: entry.name, relativePath: relPath, branch });
+    } catch {
+      // ignore — not a git repo or git not available
+    }
+  }
+
+  return siblings;
+}
+
+const siblingRepos = detectSiblingRepos(cwd);
+if (siblingRepos.length > 0) {
+  heading("Sibling Repos");
+  for (const repo of siblingRepos) {
+    push(`- \`${repo.name}\` — ${repo.relativePath} (branch: ${repo.branch})`);
+  }
 }
 
 // --- Output ---
