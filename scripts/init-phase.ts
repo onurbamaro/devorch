@@ -219,6 +219,39 @@ function parseTasks(phaseText: string): Record<string, TaskInfo> {
 const waves = parseWaves(phaseContent);
 const tasks = parseTasks(phaseContent);
 
+// --- Validate task repo fields against satellites ---
+const repoRefs = new Map<string, string[]>();
+for (const task of Object.values(tasks)) {
+  if (task.repo && task.repo !== "primary") {
+    if (!repoRefs.has(task.repo)) {
+      repoRefs.set(task.repo, []);
+    }
+    repoRefs.get(task.repo)!.push(task.id);
+  }
+}
+
+const satelliteNames = satellites.map((s) => s.name);
+for (const [repoName, taskIds] of repoRefs) {
+  if (!satelliteNames.includes(repoName)) {
+    for (const taskId of taskIds) {
+      console.error(
+        `Task '${taskId}' references repo '${repoName}' but no satellite with that name exists. Available satellites: ${satelliteNames.join(", ") || "(none)"}`,
+      );
+    }
+    process.exit(1);
+  }
+}
+
+// --- Validate satellite worktree paths exist ---
+for (const sat of satellites) {
+  if (!existsSync(sat.worktreePath)) {
+    console.error(
+      `Satellite worktree for '${sat.name}' not found at ${sat.worktreePath}. Run setup-worktree.ts with --add-secondary to create it.`,
+    );
+    process.exit(1);
+  }
+}
+
 // --- Build output content ---
 const parts: string[] = [];
 
