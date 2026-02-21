@@ -144,6 +144,16 @@ After a successful build:
 
 If **merge**:
 
+5. **Pre-flight: stash dirty repos** — For each repo (primary + all satellites detected in step 3), check for uncommitted tracked changes and stash them before merging:
+
+   For each repo, run `git -C <repoMainPath> status --porcelain` and filter out lines starting with `??` (untracked files). If any tracked changes remain:
+   ```bash
+   git -C <repoMainPath> stash push -m "devorch-pre-merge"
+   ```
+   Record that this repo was stashed. If no tracked changes exist, skip stash and record the repo as clean.
+
+   Report: "Stashed changes in N repos: `<list>`" or "All repos clean, proceeding."
+
 **With satellites (coordinated merge)**:
 
 a. **Dry-run all repos first** — For each repo (primary + all satellites), run:
@@ -151,13 +161,25 @@ a. **Dry-run all repos first** — For each repo (primary + all satellites), run
 git -C <repoMainPath> merge --no-commit --no-ff <worktreeBranch>
 git -C <repoMainPath> merge --abort
 ```
-If any dry-run fails: report which repo has conflicts and stop. Do NOT merge any repo.
+If any dry-run fails: restore stashed changes in all repos that were stashed before reporting the conflict:
+```bash
+git -C <repoMainPath> stash pop
+```
+Report which repo has conflicts between branches and stop. Do NOT merge any repo.
 
 b. **Merge sequentially** (only if all dry-runs pass) — Primary first, then satellites in order:
 ```bash
 git checkout <mainBranch>
 git merge <worktreeBranch>
 ```
+
+b2. **Restore stashed changes** — After all merges succeed, for each repo that was stashed in step 5:
+```bash
+git -C <repoMainPath> stash pop
+```
+If `stash pop` fails (exit code != 0): run `git -C <repoMainPath> status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict in `<repo>`: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup or pop stash in remaining repos.
+
+If `stash pop` succeeds: the stash is auto-removed, continue to next repo.
 
 c. **Cleanup all repos** — For each repo (primary + satellites):
 ```bash
@@ -168,9 +190,32 @@ git -C <repoMainPath> branch -d <worktreeBranch>
 Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All worktrees removed."
 
 **Without satellites** (standard merge):
+
+Run pre-flight stash for the primary repo as described in step 5 above.
+
+a. **Dry-run**:
+```bash
+git merge --no-commit --no-ff <worktreeBranch>
+git merge --abort
+```
+If dry-run fails and the repo was stashed: run `git stash pop` to restore changes. Report the conflict between branches and stop.
+
+b. **Merge**:
 ```bash
 git checkout <mainBranch>
 git merge <worktreeBranch>
+```
+
+b2. **Restore stashed changes** — If the primary repo was stashed in step 5:
+```bash
+git stash pop
+```
+If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
+
+If `stash pop` succeeds: the stash is auto-removed, continue.
+
+c. **Cleanup**:
+```bash
 git worktree remove <projectRoot>
 git branch -d <worktreeBranch>
 ```
