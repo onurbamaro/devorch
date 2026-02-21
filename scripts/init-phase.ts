@@ -8,7 +8,7 @@
 import { existsSync, writeFileSync, mkdirSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle } from "./lib/plan-parser";
+import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 
 const CONTENT_THRESHOLD = 25000;
@@ -23,8 +23,15 @@ interface WaveInfo {
 interface TaskInfo {
   id: string;
   assignedTo: string;
+  repo: string;
   title: string;
   content: string;
+}
+
+interface SatelliteInfo {
+  name: string;
+  path: string;
+  worktreePath: string;
 }
 
 const args = parseArgs<{ plan: string; phase: number; "cache-root": string }>([
@@ -73,6 +80,21 @@ if (phaseNum > 1) {
 // --- Resolve plan directory for relative file paths ---
 const planDir = dirname(resolve(planPath));
 const projectRoot = resolve(planDir, "../..");
+
+// --- Extract secondary repos (satellites) ---
+const secondaryRepos = extractSecondaryRepos(content);
+
+function deriveWorktreeName(title: string): string {
+  return title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+}
+
+const worktreeName = deriveWorktreeName(planTitle);
+
+const satellites: SatelliteInfo[] = secondaryRepos.map((repo) => {
+  const resolvedPath = resolve(projectRoot, repo.path);
+  const wtPath = resolve(resolvedPath, ".worktrees", worktreeName);
+  return { name: repo.name, path: resolvedPath, worktreePath: wtPath };
+});
 
 // --- Read optional files ---
 const conventions = safeReadFile(resolve(projectRoot, ".devorch/CONVENTIONS.md"));
@@ -181,10 +203,13 @@ function parseTasks(phaseText: string): Record<string, TaskInfo> {
     const assignedMatch = sectionContent.match(/\*\*Assigned To\*\*:\s*(\S+)/i);
     const assignedTo = assignedMatch ? assignedMatch[1] : "";
 
+    const repoMatch = sectionContent.match(/\*\*Repo\*\*:\s*(\S+)/i);
+    const repo = repoMatch ? repoMatch[1] : "primary";
+
     const fullContent = `#### ${taskHeaders[i][0].match(/\d+/)?.[0] || i + 1}. ${title}\n${sectionContent.trimEnd()}`;
 
     if (id) {
-      tasks[id] = { id, assignedTo, title, content: fullContent };
+      tasks[id] = { id, assignedTo, repo, title, content: fullContent };
     }
   }
 
@@ -262,6 +287,7 @@ const result: {
   phaseName: string;
   totalPhases: number;
   planTitle: string;
+  satellites: SatelliteInfo[];
   waves: WaveInfo[];
   tasks: Record<string, TaskInfo>;
   content?: string;
@@ -271,6 +297,7 @@ const result: {
   phaseName: targetPhase.name,
   totalPhases: phases.length,
   planTitle,
+  satellites,
   waves,
   tasks,
 };
