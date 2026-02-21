@@ -1,4 +1,4 @@
-Generated: 2026-02-21T17:09:48.520Z
+Generated: 2026-02-21T17:57:21.498Z
 
 # Project Map
 
@@ -56,14 +56,14 @@ devorch/
 ## Recent Commits
 
 ```
+b2a2953 Merge branch 'devorch/robust-multi-repo'
+e653125 chore: add .gitattributes to enforce LF line endings
+ab7e8f8 phase(3): init-phase.ts valida campo repo dos tasks, build-phase.md roda check-project em satellites e coleta status explicitamente
+79c4fc5 phase(2): map-project.ts detecta repos irmãos automaticamente e talk.md integra detecção
+7410994 phase(1): Adicionar flags --recreate e --add-secondary ao se...
+8caeba9 feat(setup-worktree): add --recreate and --add-secondary flags
+6aa5f56 chore(devorch): add worktree for robust-multi-repo
+8e932ae chore(devorch): plan — Robust Multi-Repo — Worktree Resilience + Build Validation
 dbdee83 Merge branch 'devorch/optimize-build-scripts'
 925faeb fix(check): sync local check-project.ts with global --with-validation changes
-7399114 phase(3): Atualizar build-phase.md para usar phase-summary.t...
-9d73bfc phase(1): Criar script que gera commit message e escreve sta...
-c458fd1 chore(devorch): add worktree for optimize-build-scripts
-30f78a1 chore(devorch): plan — Optimize Build Scripts — Reduce Think Cycles
-5c69570 Merge branch 'devorch/satellite-worktrees'
-5d28b39 fix(check): add JSON array validation, encoding consistency, and duplicate path check
-aa8db0b phase(3): Merge dry-run + sequencial em todos os repos, list...
-17a7259 feat(worktrees): add satellite listing, coordinated merge, and cascading delete
 ```
