@@ -1,8 +1,8 @@
-Generated: 2026-02-19T02:17:51.245Z
+Generated: 2026-02-21T01:57:06.094Z
 
 # Project Map
 
-**Directory**: `C:\Users\bruno\Documents\Dev\devorch`
+**Directory**: `/home/bruno/dev/devorch`
 
 ## Tech Stack
 
@@ -14,33 +14,30 @@ Generated: 2026-02-19T02:17:51.245Z
 
 ```
 devorch/
-  bun.lock
-  install.ts
   LICENSE
+  install.ts
+  uninstall.ts
+  bun.lock
   nul
-  package.json
   ... +3 files
   agents/
     devorch-builder.md
-    devorch-validator.md
-  commands/
-    build-tests.md
-    build.md
-    check-implementation.md
-    debug.md
-    devorch.md
-    ... +4 files
   hooks/
-    devorch-statusline.cjs
     post-edit-lint.ts
+    devorch-statusline.cjs
   scripts/
-    archive-plan.ts
-    check-agent-teams.ts
-    check-project.ts
-    extract-criteria.ts
+    setup-worktree.ts
+    list-worktrees.ts
+    run-validation.ts
+    manage-cache.ts
     format-commit.ts
-    ... +11 files
+    ... +7 files
     lib/
+  commands/
+    build.md
+    talk.md
+    fix.md
+    worktrees.md
   templates/
     build-phase.md
 ```
@@ -59,14 +56,14 @@ devorch/
 ## Recent Commits
 
 ```
-bc3a38d Merge branch 'devorch/devorch-unification'
-cca8c40 fix(check): remove team-templates.md direct reads from devorch.md
-c498bba chore(devorch): update state — phase 4 complete
-d20aee9 docs(devorch): update README for unified /devorch command
-86e7685 chore(devorch): update cross-references for unified /devorch command
-52a0f8d chore(devorch): delete obsolete make-plan.md and quick.md commands
-12667bc feat(devorch): add unified /devorch command with 3-path routing
-b11bda6 refactor(templates): update commands and templates for consolidated script interfaces
-77216a7 refactor(scripts): infra scripts use shared lib, map-project gains --persist
-79dc1d7 refactor(scripts): plan-related scripts use shared lib imports
+4acb24f feat(worktrees): detect main branch dynamically
+a7dfd4d chore(devorch): add project config and update explore cache
+46f9035 docs: update README for devorch v2
+2755396 phase(3): Remover arquivos deprecated e atualizar install.ts...
+8bbc223 chore(devorch): update installer for v2 structure
+79f7557 chore(devorch): remove deprecated v1 files
+76a3288 chore(devorch): rewrite build system for v2
+251d90b feat(devorch): add talk.md and fix.md commands for v2
+d94d2ab chore(devorch): plan — devorch v2 3 comandos com Agent Teams
+263f5c8 Merge branch 'devorch/optimize-build-performance'
 ```
