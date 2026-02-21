@@ -13,7 +13,7 @@ Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output. 
 
 If count == 0: report "No active worktrees." and stop.
 
-Display a formatted list:
+Display a formatted list. Each worktree entry includes a `satellites` array — if non-empty, show satellite repos indented below the worktree:
 
 ```
 ## Active Worktrees
@@ -21,11 +21,16 @@ Display a formatted list:
 1. **feature-a** (branch: devorch/feature-a)
    Plan: Add Auth System
    Status: Phase 2/4 complete — ready for phase 3
+   Satellites:
+     - backend (exists)
+     - frontend (missing)
 
 2. **api-refactor** (branch: devorch/api-refactor)
    Plan: Refactor API Layer
    Status: Completed (all 3 phases)
 ```
+
+For each satellite, show `(exists)` or `(missing)` based on the `exists` field in the satellite entry.
 
 ### Step 2 — Ask action
 
@@ -43,7 +48,47 @@ Show what will be merged:
 git log --oneline <mainBranch>..<worktreeBranch>
 ```
 
-Confirm via `AskUserQuestion`: "Merge N commits from `<branch>` into `<mainBranch>`?"
+If the selected worktree has satellites, also show commits from each existing satellite:
+```bash
+git -C <satellite.repoPath> log --oneline <mainBranch>..<worktreeBranch>
+```
+
+Confirm via `AskUserQuestion`: "Merge N commits from `<branch>` into `<mainBranch>`?" (mention satellite repos if present)
+
+**With satellites (coordinated merge)**:
+
+a. **Dry-run all repos first** — For each repo (primary + existing satellites), run:
+```bash
+git -C <repoMainPath> merge --no-commit --no-ff <worktreeBranch>
+git -C <repoMainPath> merge --abort
+```
+If any dry-run fails: report which repo has conflicts and stop. Do NOT merge any repo.
+
+b. **Merge sequentially** (only if all dry-runs pass) — Primary first, then satellites:
+```bash
+git checkout <mainBranch>
+git merge <worktreeBranch>
+```
+For each existing satellite:
+```bash
+git -C <satellite.repoPath> checkout <mainBranch>
+git -C <satellite.repoPath> merge <worktreeBranch>
+```
+
+c. **Cleanup all repos** — For each repo (primary + existing satellites):
+```bash
+git worktree remove <worktreePath>
+git branch -d <worktreeBranch>
+```
+For satellites:
+```bash
+git -C <satellite.repoPath> worktree remove <satellite.worktreePath>
+git -C <satellite.repoPath> branch -d <worktreeBranch>
+```
+
+Report: "Merged and cleaned up `<name>` across N repos."
+
+**Without satellites** (standard merge):
 
 If confirmed:
 ```bash
@@ -58,20 +103,33 @@ git branch -d <worktreeBranch>
 ```
 Report: "Merged and cleaned up `<name>`."
 
-If merge has conflicts: report the conflicting files and instruct the user to resolve manually. Do NOT force-resolve.
+If merge has conflicts: report the conflicting files and repo, and instruct the user to resolve manually. Do NOT force-resolve.
 
 ### Step 3b — Delete flow (if "Delete")
 
 If only 1 worktree: use it. If multiple: `AskUserQuestion` to select which one.
 
-Confirm via `AskUserQuestion`: "Delete worktree `<name>`? This will remove the branch and all unmerged changes."
+If the selected worktree has satellites, mention them in the confirmation: "Delete worktree `<name>` and N satellite worktrees? This will remove branches and all unmerged changes."
+
+Otherwise: "Delete worktree `<name>`? This will remove the branch and all unmerged changes."
+
+Confirm via `AskUserQuestion`.
 
 If confirmed:
+
+**Delete primary worktree**:
 ```bash
 git worktree remove <worktreePath> --force
 git branch -D <worktreeBranch>
 ```
-Report: "Deleted worktree `<name>` and branch `<branch>`."
+
+**Delete each existing satellite worktree**:
+```bash
+git -C <satellite.repoPath> worktree remove <satellite.worktreePath> --force
+git -C <satellite.repoPath> branch -D <worktreeBranch>
+```
+
+Report: "Deleted worktree `<name>` and branch `<branch>`." (append "Also removed N satellite worktrees." if satellites were deleted)
 
 ## Rules
 

@@ -2,13 +2,21 @@
  * list-worktrees.ts — Lists all devorch worktrees with their plan and status info.
  * Usage: bun ~/.claude/devorch-scripts/list-worktrees.ts
  * Output: JSON {"worktrees": [...], "count": N, "mainBranch": "main"|"master"}
- * Each worktree entry: {name, path, branch, planTitle, status, lastPhase, totalPhases, valid}
+ * Each worktree entry: {name, path, branch, planTitle, status, lastPhase, totalPhases, valid, satellites}
  */
 import { existsSync, readdirSync, statSync } from "fs";
 import { join, resolve } from "path";
-import { extractPlanTitle } from "./lib/plan-parser";
+import { extractPlanTitle, extractSecondaryRepos } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 import { getMainBranch } from "./lib/git-utils";
+
+interface SatelliteInfo {
+  name: string;
+  repoPath: string;
+  worktreePath: string;
+  branch: string;
+  exists: boolean;
+}
 
 interface WorktreeInfo {
   name: string;
@@ -19,6 +27,7 @@ interface WorktreeInfo {
   lastPhase: number;
   totalPhases: number;
   valid: boolean;
+  satellites: SatelliteInfo[];
 }
 
 function countPhases(planContent: string): number {
@@ -51,6 +60,51 @@ function getBranch(worktreePath: string): string {
     // ignore
   }
   return "";
+}
+
+function getSatelliteWorktrees(repoPath: string): Set<string> {
+  const valid = new Set<string>();
+  try {
+    const proc = Bun.spawnSync(["git", "-C", repoPath, "worktree", "list", "--porcelain"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (proc.exitCode === 0) {
+      const output = proc.stdout.toString("utf-8");
+      const lines = output.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("worktree ")) {
+          valid.add(line.slice(9).trim().replaceAll("\\", "/"));
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return valid;
+}
+
+function getSatellites(planContent: string, worktreeName: string, branch: string, mainRepoRoot: string): SatelliteInfo[] {
+  const secondaryRepos = extractSecondaryRepos(planContent);
+  if (secondaryRepos.length === 0) return [];
+
+  const satellites: SatelliteInfo[] = [];
+  for (const repo of secondaryRepos) {
+    const repoPath = resolve(mainRepoRoot, repo.path);
+    const satWorktreePath = join(repoPath, ".worktrees", worktreeName);
+    const absPath = resolve(satWorktreePath).replaceAll("\\", "/");
+    const validInRepo = getSatelliteWorktrees(repoPath);
+    const exists = validInRepo.has(absPath);
+
+    satellites.push({
+      name: repo.name,
+      repoPath,
+      worktreePath: satWorktreePath,
+      branch,
+      exists,
+    });
+  }
+  return satellites;
 }
 
 function getValidWorktrees(): Set<string> {
@@ -110,6 +164,7 @@ for (const name of entries) {
   const branch = getBranch(wtPath);
   const absPath = resolve(wtPath).replaceAll("\\", "/");
   const valid = validPaths.has(absPath);
+  const satellites = planContent ? getSatellites(planContent, name, branch, cwd) : [];
 
   worktrees.push({
     name,
@@ -120,6 +175,7 @@ for (const name of entries) {
     lastPhase,
     totalPhases,
     valid,
+    satellites,
   });
 }
 
