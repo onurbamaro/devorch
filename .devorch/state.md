@@ -1,7 +1,7 @@
 # devorch State
-- Plan: Satellite Worktrees — Multi-Repo Support
-- Last completed phase: 2
-- Status: ready for phase 3
+- Plan: Optimize Build Scripts — Reduce Think Cycles
+- Last completed phase: 3
+- Status: completed
 
-## Phase 2 Summary
-Added satellites array and per-task repo field to init-phase.ts output, updated build-phase.md with multi-repo builder context and per-repo phase commits, documented multi-repo tasks in devorch-builder.md.
+## Phase 3 Summary
+Updated build-phase.md template to use consolidated scripts: phase-summary.ts replaces format-commit.ts + update-state.ts (2 calls to 1), check-project.ts --with-validation replaces separate check-project + run-validation calls (2 calls to 1). Net reduction: 3 fewer script calls per phase. All error handling, satellite support, and existing flow preserved.

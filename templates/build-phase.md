@@ -38,22 +38,23 @@ Execute one phase of the current devorch plan.
    - **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
    - **After 1 retry**: Stop and report the failure. Do not retry further.
 
-4. **Validate phase code (parallel with step 5)**: Launch BOTH of the following in a single message:
+4. **Validate phase code**: Run the following via Bash with `run_in_background=true`:
 
-   - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --no-test` via Bash with `run_in_background=true`
-   - `bun $CLAUDE_HOME/devorch-scripts/run-validation.ts --plan .devorch/plans/current.md --phase N` via Bash with `run_in_background=true`
+   ```
+   bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --no-test --with-validation --plan .devorch/plans/current.md --phase N
+   ```
 
-   Collect results after both complete. Evaluate combined results:
-   - If check-project.ts lint/typecheck fail on files modified in this phase: fix inline with Edit and retry check once.
-   - If check-project.ts fails on pre-existing issues: log as warning and proceed.
-   - If run-validation.ts fails: log warning and proceed (the final check in build.md will catch issues).
+   Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
+   - If lint/typecheck fail on files modified in this phase: fix inline with Edit and retry check once.
+   - If lint/typecheck fail on pre-existing issues: log as warning and proceed.
+   - If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
    - If everything passes: proceed.
 
-5. **Phase commit**: Commit in each repo that had tasks in this phase.
+5. **Phase summary and commit**: Generate commit message and update state in one call:
 
-   First, generate the commit message once:
-   - Run `bun $CLAUDE_HOME/devorch-scripts/format-commit.ts --goal "<goal text from init-phase>" --phase N`
+   - Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/current.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
    - Use the `message` field from the JSON output as the git commit message for all repos.
+   - The script also writes `state.md` automatically — no separate state update step needed.
 
    **Primary repo**: Run `git -C <projectRoot> status --porcelain`. If output has changes, commit with the generated message.
 
@@ -62,16 +63,13 @@ Execute one phase of the current devorch plan.
      - `git -C <satellite.worktreePath> add -A`
      - `git -C <satellite.worktreePath> commit -m "<phase commit message>"`
    - If no changes, skip that satellite.
+   - Pass satellite status to phase-summary via `--satellites '<json>'` (e.g., `[{"name":"sat1","status":"committed"}]`).
 
 6. **Invalidate and update cache**: Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
 
    If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache.md` before or after running manage-cache.
 
-7. **Update state**: Run `bun $CLAUDE_HOME/devorch-scripts/update-state.ts --plan .devorch/plans/current.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
-
-   This writes state.md with the latest phase summary.
-
-8. **Report**: What was done and any issues encountered.
+7. **Report**: What was done and any issues encountered.
 
 ## Rules
 
@@ -80,4 +78,4 @@ Execute one phase of the current devorch plan.
 - The orchestrator never reads source code files. Use Explore agents for codebase context. Only read devorch files (`.devorch/*`).
 - Deploy builders as **foreground parallel** Task calls — never use `run_in_background` for builders.
 - If a builder fails, report and stop.
-- Always update state.md (step 7), even on partial failure.
+- Always update state.md (step 5 via phase-summary.ts), even on partial failure.
