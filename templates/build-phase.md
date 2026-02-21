@@ -24,6 +24,14 @@ Execute one phase of the current devorch plan.
    - `commit with type(scope): description`
    - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
+   **Multi-repo tasks**: When init-phase output includes a `satellites` array (non-empty), check each task's `repo` field:
+   - If `repo` == `"primary"` (or absent): builder uses `<projectRoot>` as working directory (default behavior).
+   - If `repo` != `"primary"`: find the matching satellite in the `satellites` array by name. Add the following to the builder prompt:
+     - `Working directory: <satellite.worktreePath>`
+     - `All file operations and git commands must use this directory as root`
+     - `Use git -C <satellite.worktreePath> for all git commands`
+   - This allows builders to operate in the correct repo without cross-repo awareness.
+
    After all builders in a wave return, verify via `TaskList` that every task is marked completed.
 
    **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
@@ -41,9 +49,19 @@ Execute one phase of the current devorch plan.
    - If run-validation.ts fails: log warning and proceed (the final check in build.md will catch issues).
    - If everything passes: proceed.
 
-5. **Phase commit**: Run `git -C <projectRoot> status --porcelain`. If output is empty, skip commit. If output has changes:
+5. **Phase commit**: Commit in each repo that had tasks in this phase.
+
+   First, generate the commit message once:
    - Run `bun $CLAUDE_HOME/devorch-scripts/format-commit.ts --goal "<goal text from init-phase>" --phase N`
-   - Use the `message` field from the JSON output as the git commit message.
+   - Use the `message` field from the JSON output as the git commit message for all repos.
+
+   **Primary repo**: Run `git -C <projectRoot> status --porcelain`. If output has changes, commit with the generated message.
+
+   **Satellite repos** (when init-phase output includes non-empty `satellites` array): For each satellite that had tasks in this phase (tasks where `repo` matches the satellite name):
+   - Run `git -C <satellite.worktreePath> status --porcelain`. If output has changes:
+     - `git -C <satellite.worktreePath> add -A`
+     - `git -C <satellite.worktreePath> commit -m "<phase commit message>"`
+   - If no changes, skip that satellite.
 
 6. **Invalidate and update cache**: Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
 

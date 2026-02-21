@@ -140,6 +140,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 - **Integration** — Should this connect to existing feature X? Replace or extend current behavior?
 - **Naming / conventions** — When the codebase doesn't have a clear precedent for something, ask.
 - **Edge cases** — Anything the exploration revealed that has no obvious right answer.
+- **Multi-repo** — When the task involves or mentions multiple projects/repos, ask which secondary repos should be included as satellites. Present discovered repo paths as options. Each satellite gets its own worktree with the same branch name.
 
 **Ask in rounds.** Use up to 4 questions per `AskUserQuestion` call (tool limit). If more questions remain, make another call after the user answers. Continue until all ambiguity is resolved — there is no cap on rounds. The goal is **zero assumptions** in the plan.
 
@@ -176,7 +177,11 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 ### 7. Create plan
 
 1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" -> `courier-payroll-export`).
-2. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`. Parse the JSON output to get `worktreePath`.
+2. **Setup worktree** (with optional satellites):
+   - If the plan includes `<secondary-repos>`, parse it and build a JSON array: `[{"name": "<name>", "path": "<relative-path>"}, ...]`
+   - Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
+   - If no `<secondary-repos>`: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`
+   - Parse the JSON output to get `worktreePath`. If `satellites` is present in output, report each satellite worktree path and any warnings.
 3. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
 4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
 5. Do NOT copy `explore-cache.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
@@ -279,6 +284,11 @@ Risk: <risk>
 <new-files>
 - `path/to/new/file` — what it is
 </new-files>
+
+<!-- optional — only when plan involves multiple repos: -->
+<secondary-repos>
+- `name` — relative/path/to/repo
+</secondary-repos>
 </relevant-files>
 
 <phase1 name="Name">
@@ -288,6 +298,7 @@ Risk: <risk>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
+- **Repo**: <name> <!-- optional, default: primary. Use secondary repo name when task targets a satellite repo -->
 - <specific action>
 - <specific action>
 
@@ -335,9 +346,10 @@ Risk: <risk>
 
 ### Plan Format Rules
 
-- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files)
+- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
 - Inside phase: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<validation>`, `<test-contract>` (optional), `<handoff>` (except last phase)
+- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo)
 
 ## Rules
 
