@@ -1,7 +1,7 @@
 # devorch State
-- Plan: Optimize Build Scripts — Reduce Think Cycles
+- Plan: Robust Multi-Repo — Worktree Resilience + Build Validation
 - Last completed phase: 3
 - Status: completed
 
 ## Phase 3 Summary
-Updated build-phase.md template to use consolidated scripts: phase-summary.ts replaces format-commit.ts + update-state.ts (2 calls to 1), check-project.ts --with-validation replaces separate check-project + run-validation calls (2 calls to 1). Net reduction: 3 fewer script calls per phase. All error handling, satellite support, and existing flow preserved.
+Added repo field validation in init-phase.ts (exits 1 on satellite mismatch or missing worktree). Updated build-phase.md with satellite check-project loop, explicit task-by-repo scanning for commits, and satellite results in report.

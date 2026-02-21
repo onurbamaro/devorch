@@ -50,6 +50,19 @@ Execute one phase of the current devorch plan.
    - If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
    - If everything passes: proceed.
 
+   **Satellite validation** (when init-phase output includes non-empty `satellites` array): After validating the primary repo, determine which satellites had tasks in this phase by scanning the `tasks` map for entries where `repo` field != `"primary"`. Collect the unique repo names and match them to the `satellites` array by name.
+
+   For each satellite that had tasks in this phase, run:
+   ```
+   bun $CLAUDE_HOME/devorch-scripts/check-project.ts <satellite.worktreePath> --no-test
+   ```
+   Note: satellite checks do NOT use `--with-validation` — only lint, typecheck, and build.
+
+   Aggregate results across all satellites:
+   - If any satellite check fails, report which satellite failed and the failure details.
+   - If satellite lint/typecheck fail on files modified in this phase: fix inline with Edit and retry that satellite's check once.
+   - If satellite lint/typecheck fail on pre-existing issues: log as warning and proceed.
+
 5. **Phase summary and commit**: Generate commit message and update state in one call:
 
    - Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/current.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
@@ -58,18 +71,28 @@ Execute one phase of the current devorch plan.
 
    **Primary repo**: Run `git -C <projectRoot> status --porcelain`. If output has changes, commit with the generated message.
 
-   **Satellite repos** (when init-phase output includes non-empty `satellites` array): For each satellite that had tasks in this phase (tasks where `repo` matches the satellite name):
+   **Satellite repos** (when init-phase output includes non-empty `satellites` array): For each satellite in the `satellites` array from init-phase output, scan the `tasks` map to find tasks where the `repo` field matches the satellite name. Only process satellites that have matching tasks.
+
+   For each satellite with matching tasks:
    - Run `git -C <satellite.worktreePath> status --porcelain`. If output has changes:
      - `git -C <satellite.worktreePath> add -A`
      - `git -C <satellite.worktreePath> commit -m "<phase commit message>"`
-   - If no changes, skip that satellite.
-   - Pass satellite status to phase-summary via `--satellites '<json>'` (e.g., `[{"name":"sat1","status":"committed"}]`).
+     - Record status as `"committed"` for this satellite.
+   - If no changes, record status as `"no-changes"` and skip.
+
+   Build the satellites status JSON programmatically from the scan results:
+   ```
+   satellitesStatus = satellites
+     .filter(sat => tasks has entries with repo == sat.name)
+     .map(sat => ({ name: sat.name, status: hadChanges ? "committed" : "no-changes" }))
+   ```
+   Pass to phase-summary via `--satellites '<json>'` (e.g., `[{"name":"sat1","status":"committed"}]`).
 
 6. **Invalidate and update cache**: Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
 
    If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache.md` before or after running manage-cache.
 
-7. **Report**: What was done and any issues encountered.
+7. **Report**: What was done and any issues encountered. Include satellite validation results (pass/fail per satellite) in the report. If any satellite had check-project failures, list the satellite name and failure details.
 
 ## Rules
 

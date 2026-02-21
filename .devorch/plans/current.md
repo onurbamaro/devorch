@@ -1,214 +1,247 @@
-# Plan: Optimize Build Scripts — Reduce Think Cycles
+# Plan: Robust Multi-Repo — Worktree Resilience + Build Validation
 
 <description>
-Combinar scripts que sempre rodam em sequência no build-phase para reduzir o número de ida-e-volta com a API do Claude. Cada think cycle eliminado economiza 2-5 segundos de latência. O parsing redundante do plano (~2-4ms) não é o gargalo — o gargalo é Claude ter que: ler output → pensar → decidir → chamar próximo script.
+Tornar o fluxo multi-repo do devorch robusto de ponta a ponta: setup-worktree.ts ganha --recreate e --add-secondary, map-project.ts detecta repos irmãos automaticamente, e o build pipeline valida satellites corretamente.
 </description>
 
 <objective>
-Build de 3 fases executa com ~9 think cycles a menos (de ~20 para ~11 chamadas de script no build-phase), economizando ~20-30 segundos por build completo sem perda de qualidade ou funcionalidade.
+(1) setup-worktree.ts aceita --recreate (safe delete com branch -d) e --add-secondary em worktree existente.
+(2) map-project.ts detecta repos irmãos com .git próprio e reporta em seção dedicada.
+(3) talk.md usa a detecção de sibling repos para montar perguntas de --secondary automaticamente.
+(4) init-phase.ts valida campo repo dos tasks contra satellites. build-phase.md roda check-project em satellites. Coleta de status explícita.
 </objective>
 
 <classification>
-Type: refactor
+Type: enhancement
 Complexity: medium
 Risk: low
 </classification>
 
 <decisions>
-- Combinar format-commit + update-state → phase-summary.ts (script único) → Sim
-- Combinar check-project + run-validation → flag --with-validation no check-project.ts → Sim, via flag para manter compatibilidade com fix.md
-- Manter 3 adversarial reviewers paralelos → Sim (não economiza tempo, só tokens; manter robustez)
-- Manter cross-phase Explore → Sim (valor genuíno para verificação de handoff e integração entre fases)
-- Manter design stateless dos scripts → Sim (re-parsing é ~2-4ms, irrelevante; valor está na composabilidade)
+- --recreate: usar git branch -d (safe delete) em vez de -D → Sim, falhar se branch tem commits não-merged
+- --add-secondary: criar branch nova com mesmo nome (devorch/<name>) no repo secundário → Sim
+- Detecção de sibling repos: subir 1 nível do cwd, listar diretórios irmãos, checar .git → Sim
+- Output de sibling repos: nova seção "## Sibling Repos" no map-project.ts → Sim
+- Incluir fixes do build multi-repo no mesmo plano → Sim
 </decisions>
 
 <problem-statement>
-Num build de 3 fases, o build-phase.md chama ~7 scripts sequencialmente por fase. Cada chamada custa 2-5 segundos de latência Claude (pensar + executar + ler output + pensar de novo). Dois pares de scripts sempre rodam juntos e poderiam ser unificados: format-commit + update-state (ambos pós-fase), e check-project + run-validation (ambos validação em background).
+Quando um projeto usa múltiplos repos git no mesmo monorepo (ex: packages/web e packages/core com .git separados), o devorch falha em cascata: (1) setup-worktree.ts não permite recriar worktrees existentes nem adicionar satellites depois, (2) map-project.ts não detecta repos irmãos, forçando descoberta tardia, (3) o build pipeline não valida tasks com campo repo contra satellites existentes e não roda check-project em repos secundários.
 </problem-statement>
 
 <solution-approach>
-1. Criar phase-summary.ts que gera commit message E escreve state.md numa única chamada — elimina 2 think cycles por fase.
-2. Adicionar flag --with-validation ao check-project.ts existente — quando passada com --plan e --phase, também executa os comandos de validação do plano. Sem a flag, comportamento idêntico ao atual (fix.md não é afetado). Elimina 1 think cycle por fase.
-3. Atualizar build-phase.md para usar os scripts combinados.
+3 frentes paralelas que se complementam:
 
-Alternativa descartada: criar scripts wrapper que importam módulos — perde a economia do spawn único do Bun.
-Alternativa descartada: combinar adversarial reviewers — não economiza tempo (já são paralelos), só tokens.
+1. **setup-worktree.ts robusto**: --recreate faz worktree remove + branch -d + recria (falha se branch tem commits não-merged). --add-secondary aceita worktree existente e só cria satellites novos no repo secundário com a mesma branch.
+
+2. **map-project.ts com detecção**: Subir 1 nível do cwd, listar diretórios irmãos, checar quais têm .git próprio (via git rev-parse --git-dir). Reportar em seção "## Sibling Repos" no output Markdown. talk.md parseia essa seção para oferecer satellites na pergunta de --secondary.
+
+3. **Build pipeline validado**: init-phase.ts valida repo field dos tasks contra array de satellites (exit 1 se mismatch). build-phase.md roda check-project.ts uma vez por satellite com tasks naquela fase. Coleta de status usa scan explícito de tasks por repo field.
+
+Alternativa descartada: detecção recursiva até monorepo root — complexidade alta, pouco ganho sobre parent+siblings.
+Alternativa descartada: --recreate com branch -D (force delete) — pode destruir trabalho não-merged silenciosamente.
 </solution-approach>
 
 <relevant-files>
-- `scripts/format-commit.ts` — lógica de geração de commit message (será absorvida pelo phase-summary)
-- `scripts/update-state.ts` — lógica de escrita do state.md (será absorvida pelo phase-summary)
-- `scripts/check-project.ts` — validação de projeto (receberá flag --with-validation)
-- `scripts/run-validation.ts` — execução de comandos de validação do plano (lógica será absorvida pelo check-project)
-- `templates/build-phase.md` — template do agente de fase (será atualizado para usar scripts combinados)
-- `scripts/lib/plan-parser.ts` — utilidades compartilhadas de parsing (usado por ambos os scripts novos)
-- `scripts/lib/args.ts` — parsing de argumentos CLI
-- `scripts/lib/fs-utils.ts` — leitura segura de arquivos
+- `scripts/setup-worktree.ts` — receberá --recreate e --add-secondary
+- `scripts/map-project.ts` — receberá detecção de sibling repos
+- `scripts/lib/git-utils.ts` — funções git reutilizáveis (checkBranchExists, isGitRepo)
+- `scripts/lib/plan-parser.ts` — extractSecondaryRepos (usado por init-phase e list-worktrees)
+- `scripts/init-phase.ts` — receberá validação do campo repo vs satellites
+- `scripts/check-project.ts` — já aceita diretório como argumento posicional
+- `templates/build-phase.md` — receberá loop de check-project em satellites + coleta explícita de status
+- `commands/talk.md` — receberá integração com seção Sibling Repos do map-project
 
 <new-files>
-- `scripts/phase-summary.ts` — substitui format-commit + update-state numa única chamada
+- nenhum — todas as mudanças são em arquivos existentes
 </new-files>
 </relevant-files>
 
-<phase1 name="Create phase-summary.ts">
-<goal>Criar script que gera commit message e escreve state.md numa única chamada, substituindo format-commit.ts + update-state.ts</goal>
+<phase1 name="setup-worktree.ts: --recreate e --add-secondary">
+<goal>Adicionar flags --recreate e --add-secondary ao setup-worktree.ts para permitir recriação segura e adição incremental de satellites</goal>
 
 <tasks>
-#### 1. Create phase-summary.ts
-- **ID**: create-phase-summary
-- **Assigned To**: builder-scripts
-- Create `scripts/phase-summary.ts` combining logic from format-commit.ts and update-state.ts
-- CLI interface: `--plan <path> --phase <N> --status <text> --summary <text> [--satellites '<json>']`
-- JSON output: `{ message: string, phase: number, goal: string, stateFile: string, planTitle: string }`
-- Generate commit message in exact format: `phase(<N>): <goal>` (goal truncated to 50 chars with "...")
-- Write `.devorch/state.md` with same format as update-state.ts: plan title, phase number, status, summary, satellites section
-- Resolve projectRoot same way update-state does: go up from plan path to worktree root (plan is at `<root>/.devorch/plans/current.md`, so root is `../../` relative to plan dir)
-- Extract plan title using extractPlanTitle() pattern from update-state.ts (regex on `# Plan: <title>`)
-- Extract phase goal using parsePhaseBounds() + extractTagContent(phaseContent, "goal")
-- Satellite handling: when --satellites is passed, parse JSON array `[{name, status}]` and write satellites section to state.md
-- Import from `./lib/plan-parser.ts`: readPlan, parsePhaseBounds, extractTagContent
-- Import from `./lib/args.ts`: parseArgs
-- Follow conventions: Bun runtime, no third-party deps, semicolons, double quotes, JSON stdout, errors stderr
+#### 1. Implementar --recreate
+- **ID**: implement-recreate
+- **Assigned To**: builder-worktree
+- Adicionar flag `--recreate` (boolean) ao parseArgs do setup-worktree.ts
+- Quando --recreate é passado E a worktree já existe:
+  1. Executar `git worktree remove <worktreePath>` (sem --force)
+  2. Executar `git branch -d devorch/<name>` (safe delete — falha se não-merged)
+  3. Se branch -d falha: exit 1 com mensagem "Branch devorch/<name> has unmerged commits. Use git branch -D to force delete."
+  4. Se ambos ok: continuar com criação normal
+- Quando --recreate é passado mas worktree NÃO existe: ignorar (continuar criação normal)
+- Quando --recreate NÃO é passado: comportamento idêntico ao atual (exit 1 se worktree existe)
+- Mesma lógica para satellites: se satellite worktree existe com --recreate, remover worktree + branch -d antes de recriar
 
-#### 2. Validate phase-summary.ts
+#### 2. Implementar --add-secondary
+- **ID**: implement-add-secondary
+- **Assigned To**: builder-worktree
+- Adicionar flag `--add-secondary` (string, JSON) ao parseArgs do setup-worktree.ts
+- Quando --add-secondary é passado:
+  1. Worktree principal DEVE existir (exit 1 se não existe, com mensagem "Worktree <name> does not exist. Use --secondary for initial creation.")
+  2. Branch devorch/<name> DEVE existir (já foi criada com a worktree principal)
+  3. Para cada repo no JSON: criar satellite worktree com `git -C <repoPath> worktree add <satPath> -b devorch/<name>`
+  4. NÃO recriar worktree principal, NÃO copiar .devorch, NÃO mexer em .gitignore do main repo
+  5. Validação de cada satellite: isGitRepo, checkBranchExists (falha se branch já existe naquele repo), warn uncommitted
+  6. Ensure .gitignore no satellite repo
+- Output: JSON com satellites array (sem worktreePath do principal, já que não foi criado)
+- --add-secondary e --secondary são mutuamente exclusivos (exit 1 se ambos passados)
+
+#### 3. Validar setup-worktree.ts
 - **ID**: validate-phase-1
 - **Assigned To**: validator
-- Run phase-summary.ts with test inputs and verify JSON output has all 5 fields
-- Verify state.md written with correct format (plan title, phase, status, summary)
-- Verify commit message format: `phase(1): <truncated goal>`
-- Run with --satellites and verify satellites section appears in state.md
+- Testar --recreate: criar worktree, depois chamar com --recreate e verificar recriação sem erro
+- Testar --recreate com branch que tem commits: verificar que falha com mensagem clara
+- Testar --add-secondary: criar worktree sem satellite, depois adicionar via --add-secondary
+- Testar --add-secondary em worktree inexistente: verificar exit 1
+- Testar --secondary e --add-secondary juntos: verificar exit 1
+- Testar comportamento sem flags novas: verificar que nada mudou
 </tasks>
 
 <execution>
-**Wave 1** (build): create-phase-summary
+**Wave 1** (parallel): implement-recreate, implement-add-secondary
 **Wave 2** (validation): validate-phase-1
 </execution>
 
 <criteria>
-- [ ] phase-summary.ts accepts --plan, --phase, --status, --summary, --satellites flags
-- [ ] JSON output contains message, phase, goal, stateFile, planTitle fields
-- [ ] Commit message format: `phase(<N>): <goal>` with 50 char truncation
-- [ ] state.md written with plan title, phase, status, summary sections
-- [ ] Satellite handling: --satellites JSON parsed and written to state.md
-- [ ] Script exits 0 on success, 1 on error (missing required args)
+- [ ] --recreate remove worktree + branch -d e recria com sucesso
+- [ ] --recreate falha graciosamente se branch tem commits não-merged (exit 1 com mensagem)
+- [ ] --recreate em worktree inexistente não falha (no-op, continua criação normal)
+- [ ] --add-secondary cria satellites em worktree existente sem tocar no principal
+- [ ] --add-secondary falha se worktree principal não existe
+- [ ] --add-secondary e --secondary mutuamente exclusivos
+- [ ] Sem --recreate e sem --add-secondary: comportamento 100% idêntico ao atual
 </criteria>
 
 <validation>
-- `bun scripts/phase-summary.ts 2>&1 | grep -i "required\|usage\|error"` — shows usage when called without args
+- `bun scripts/setup-worktree.ts 2>&1 | head -5` — mostra erro de argumento obrigatório
 </validation>
 
 <handoff>
-phase-summary.ts criado e funcional. Próxima fase adiciona --with-validation ao check-project.ts.
+setup-worktree.ts robusto com --recreate e --add-secondary. Próxima fase: detecção de sibling repos no map-project.ts e integração no talk.md.
 </handoff>
 </phase1>
 
-<phase2 name="Add --with-validation to check-project.ts">
-<goal>Adicionar flag --with-validation ao check-project.ts que inclui execução dos comandos de validação do plano, mantendo compatibilidade total com fix.md</goal>
+<phase2 name="map-project.ts: detecção de sibling repos + talk.md">
+<goal>map-project.ts detecta repos irmãos automaticamente e talk.md usa essa informação para oferecer satellites</goal>
 
 <tasks>
-#### 1. Add validation flag to check-project.ts
-- **ID**: add-validation-flag
-- **Assigned To**: builder-scripts
-- Add optional flags to check-project.ts: `--with-validation`, `--plan <path>`, `--phase <N>`
-- When `--with-validation` is NOT passed: behavior is 100% identical to current (fix.md compatibility)
-- When `--with-validation` IS passed (requires --plan and --phase):
-  - Run existing lint/typecheck/build/test checks as before
-  - ALSO parse validation commands from the plan's `<validation>` section using regex `/^[-*]\s*`([^`]+)`\s*(?:—|--|-)\s*(.*)/`
-  - Execute each validation command via `/bin/bash -c "<command>"` with 30s timeout
-  - Resolve working directories from plan's `<tasks>` section (same logic as run-validation.ts)
-  - Add `validation` field to JSON output: `{ totalCommands: number, passed: number, failed: number, results: Array<{command, description, cwd, status: "pass"|"fail"|"timeout", output?}> }`
-- Output without flag: `{ lint, typecheck, build, test }` (unchanged)
-- Output with flag: `{ lint, typecheck, build, test, validation: {...} }`
-- Validation commands run in parallel with existing checks (add to the Promise.all that already runs lint/typecheck/build/test)
-- Import plan parsing utils: readPlan, parsePhaseBounds, extractTagContent from `./lib/plan-parser.ts`
-- Keep run-validation.ts untouched — do not delete it
+#### 1. Adicionar detecção de sibling repos ao map-project.ts
+- **ID**: detect-sibling-repos
+- **Assigned To**: builder-detection
+- Adicionar função `detectSiblingRepos(cwd: string): SiblingRepo[]` ao map-project.ts
+- Lógica:
+  1. Obter parent dir: `resolve(cwd, "..")`
+  2. Listar diretórios no parent (readdirSync)
+  3. Filtrar: ignorar o próprio cwd, ignorar node_modules/.git/hidden dirs
+  4. Para cada diretório irmão: checar se é git repo com `git -C <path> rev-parse --git-dir` (via Bun.spawnSync)
+  5. Se é git repo: coletar nome do diretório e path relativo ao cwd
+- Adicionar seção "## Sibling Repos" ao output Markdown:
+  ```
+  ## Sibling Repos
+  - `core` — ../core (branch: main)
+  - `shared` — ../shared (branch: main)
+  ```
+- Para cada sibling repo detectado: incluir branch atual via `git -C <path> branch --show-current`
+- Seção só aparece se há pelo menos 1 sibling repo (não mostrar seção vazia)
+- Posicionar seção depois de "## Recent Commits" e antes do final
 
-#### 2. Validate check-project.ts changes
+#### 2. Integrar detecção no talk.md
+- **ID**: integrate-talk-md
+- **Assigned To**: builder-docs
+- No Step 3 (Clarify) do commands/talk.md:
+  - Adicionar instrução: "Se o output do map-project.ts contém seção '## Sibling Repos', incluir uma pergunta sobre quais repos devem ser satellites"
+  - A pergunta deve listar os repos detectados como opções (nome + path relativo)
+  - Incluir opção "Nenhum — só o repo principal"
+- No Step 7 (Create plan):
+  - Quando o usuário seleciona repos irmãos como satellites, o orchestrator deve:
+    1. Incluir `<secondary-repos>` no plano com os repos selecionados
+    2. Passar `--secondary` ao setup-worktree.ts com o JSON correspondente
+
+#### 3. Validar detecção e integração
 - **ID**: validate-phase-2
 - **Assigned To**: validator
-- Run check-project.ts WITHOUT --with-validation — verify output shape is `{lint, typecheck, build, test}` only (no validation field)
-- Run check-project.ts WITH --with-validation --plan --phase — verify validation field appears
-- Verify backward compatibility: fix.md calls check-project without any new flags
+- Rodar map-project.ts no diretório do devorch e verificar output
+- Verificar que a seção Sibling Repos só aparece quando há repos irmãos
+- Verificar que talk.md tem as instruções de integração com detecção
 </tasks>
 
 <execution>
-**Wave 1** (build): add-validation-flag
+**Wave 1** (parallel): detect-sibling-repos, integrate-talk-md
 **Wave 2** (validation): validate-phase-2
 </execution>
 
 <criteria>
-- [ ] check-project.ts without --with-validation produces identical output to current version
-- [ ] check-project.ts with --with-validation adds validation field to JSON output
-- [ ] Validation commands parsed from plan's `<validation>` section with correct regex
-- [ ] Validation results array contains command, description, cwd, status, output fields
-- [ ] Validation commands execute with 30s timeout
-- [ ] Working directory resolution matches run-validation.ts logic
-- [ ] run-validation.ts file is unchanged
+- [ ] map-project.ts detecta repos irmãos com .git próprio
+- [ ] Seção "## Sibling Repos" aparece no output com nome e path relativo
+- [ ] Seção não aparece quando não há sibling repos
+- [ ] talk.md Step 3 inclui instrução para perguntar sobre satellites quando sibling repos detectados
+- [ ] talk.md Step 7 inclui instrução para montar --secondary a partir de repos selecionados
 </criteria>
 
 <validation>
-- `bun scripts/check-project.ts 2>/dev/null; echo $?` — exits cleanly
+- `bun scripts/map-project.ts 2>/dev/null | grep -c "Sibling"` — verifica presença/ausência da seção
 </validation>
 
 <handoff>
-Ambos os scripts combinados estão prontos. Próxima fase atualiza build-phase.md para usá-los.
+Detecção de sibling repos funcional e integrada ao talk.md. Próxima fase: fixes do build pipeline multi-repo.
 </handoff>
 </phase2>
 
-<phase3 name="Update build-phase.md template">
-<goal>Atualizar build-phase.md para usar phase-summary.ts e check-project --with-validation, eliminando chamadas separadas a format-commit, update-state, e run-validation</goal>
+<phase3 name="Build pipeline: validação multi-repo">
+<goal>init-phase.ts valida campo repo dos tasks, build-phase.md roda check-project em satellites e coleta status explicitamente</goal>
 
 <tasks>
-#### 1. Update build-phase template
-- **ID**: update-build-phase
-- **Assigned To**: builder-docs
-- In `templates/build-phase.md`:
-  - Replace separate calls to `format-commit.ts` and `update-state.ts` with single call to `phase-summary.ts`:
-    ```
-    bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/current.md --phase N --status "<status>" --summary "<summary>" [--satellites '<json>']
-    ```
-  - Use the `message` field from phase-summary output as git commit message
-  - Replace separate background calls to `check-project.ts` and `run-validation.ts` with single background call:
-    ```
-    bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --no-test --with-validation --plan .devorch/plans/current.md --phase N
-    ```
-  - Update instructions for reading validation results: check `validation.failed > 0` instead of reading separate run-validation output
-  - Update instructions for reading check results: same fields (lint, typecheck, build, test) plus validation
-  - Preserve all existing error handling logic: retry on lint/typecheck fail, warn on pre-existing issues, satellite commits
-  - Do NOT change: builder agent prompts, wave execution logic, explore/cache logic, commit flow structure
-  - Do NOT modify: build.md (outer orchestrator), devorch-builder.md, any scripts
+#### 1. Validar campo repo no init-phase.ts
+- **ID**: validate-repo-field
+- **Assigned To**: builder-pipeline
+- No init-phase.ts, após parsear todos os tasks (depois do loop de extração):
+  1. Coletar todos os valores únicos de `repo` dos tasks (exceto "primary" e undefined)
+  2. Validar cada valor contra o array `satellites` por nome
+  3. Se algum task referencia um repo que não está em satellites: exit 1 com mensagem "Task '<task-id>' references repo '<repo-name>' but no satellite with that name exists. Available satellites: <names>"
+- Também validar que cada satellite worktree path existe no filesystem:
+  1. Para cada satellite: checar se `existsSync(satellite.worktreePath)`
+  2. Se não existe: exit 1 com mensagem "Satellite worktree for '<name>' not found at <path>. Run setup-worktree.ts with --add-secondary to create it."
 
-#### 2. Validate template changes
+#### 2. Atualizar build-phase.md para multi-repo validation
+- **ID**: update-build-phase-multirepo
+- **Assigned To**: builder-docs
+- Na seção de validação pós-wave do build-phase.md:
+  1. Após rodar check-project no repo primário, adicionar loop para satellites:
+     - Determinar quais satellites tiveram tasks nesta fase (scan tasks, coletar repos únicos != primary)
+     - Para cada satellite com tasks: rodar `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <satellite.worktreePath>` (sem --with-validation, só lint/typecheck/build)
+     - Agregar resultados: se qualquer satellite falha, reportar qual falhou e por quê
+  2. Na seção de commit pós-fase:
+     - Substituir lógica implícita por scan explícito: "Para cada satellite no array satellites do init-phase output, verificar se tem mudanças com `git -C <satellite.worktreePath> status --porcelain`"
+     - Construir JSON de satellites status programaticamente em vez de manualmente
+  3. Na seção de status reporting:
+     - Incluir resultados de validação dos satellites no report ao usuário
+
+#### 3. Validar mudanças no pipeline
 - **ID**: validate-phase-3
 - **Assigned To**: validator
-- Verify build-phase.md references phase-summary.ts correctly
-- Verify build-phase.md references check-project.ts with --with-validation
-- Verify no remaining references to format-commit.ts, update-state.ts, or run-validation.ts
-- Verify error handling for lint/typecheck/validation failures is preserved
-- Verify satellite handling in phase-summary call is documented
+- Verificar que init-phase.ts falha quando task repo não bate com satellite
+- Verificar que init-phase.ts falha quando satellite worktree path não existe
+- Verificar que build-phase.md tem loop de check-project para satellites
+- Verificar que build-phase.md tem lógica explícita de scan por repo field
 </tasks>
 
 <execution>
-**Wave 1** (build): update-build-phase
+**Wave 1** (parallel): validate-repo-field, update-build-phase-multirepo
 **Wave 2** (validation): validate-phase-3
 </execution>
 
 <criteria>
-- [ ] build-phase.md calls phase-summary.ts instead of format-commit + update-state
-- [ ] build-phase.md calls check-project --with-validation instead of check-project + run-validation separately
-- [ ] Net reduction: 3 fewer script calls per phase (format-commit, update-state, run-validation → phase-summary + check-project --with-validation)
-- [ ] Error handling for lint/typecheck failures preserved
-- [ ] Satellite commit and state handling preserved
-- [ ] No references to format-commit.ts in build-phase.md
-- [ ] No references to update-state.ts in build-phase.md
-- [ ] No references to run-validation.ts in build-phase.md
-- [ ] build.md unchanged
+- [ ] init-phase.ts exit 1 quando task repo não existe em satellites array
+- [ ] init-phase.ts exit 1 quando satellite worktree path não existe no filesystem
+- [ ] Mensagens de erro incluem task ID, repo name, e satellites disponíveis
+- [ ] build-phase.md roda check-project para cada satellite que teve tasks na fase
+- [ ] build-phase.md coleta satellite status via scan explícito de tasks por repo field
+- [ ] build-phase.md agrega resultados de validação de satellites no report
 </criteria>
 
 <validation>
-- `grep -c "phase-summary" templates/build-phase.md` — at least 1 match
-- `grep -c "with-validation" templates/build-phase.md` — at least 1 match
-- `grep -c "format-commit" templates/build-phase.md` — 0 matches
-- `grep -c "update-state" templates/build-phase.md` — 0 matches
+- `bun scripts/init-phase.ts 2>&1 | head -5` — mostra erro de argumento obrigatório
 </validation>
 </phase3>
