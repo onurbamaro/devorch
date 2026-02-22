@@ -1,5 +1,43 @@
 # Explore Cache
-Generated: 2026-02-21T17:57:00Z
+Generated: 2026-02-22T14:45:00Z
+
+## Devorch File Lifecycle Analysis
+
+### File Inventory & Handling
+
+| Arquivo | Criado por | Commitado? | Cleanup? |
+|---|---|---|---|
+| `plans/current.md` | talk.md → worktree | Sim (worktree) | Nunca (fica após merge) |
+| `plans/archive/*` | archive-plan.ts | Sim (main) | Nunca |
+| `state.md` | phase-summary.ts | Sim (worktree) | talk.md Step 9 deleta ao iniciar novo plano |
+| `explore-cache.md` | talk.md Step 2 | Sim (main) | manage-cache.ts (trim/invalidate) |
+| `CONVENTIONS.md` | talk.md Step 1 | Sim (ambos) | Nunca |
+| `project-map.md` | map-project.ts --persist | Sim (main) | Nunca |
+| `.phase-context.md` | init-phase.ts | Não (temp) | Fim da phase |
+| `ARCHITECTURE.md` | talk.md (novos projetos) | Sim | Nunca |
+| `config.json` | Manual | Sim | Nunca |
+| `state-history.md` | Manual | Sim | Nunca |
+| `team-templates.md` | Manual | Sim | Nunca |
+
+### Commit Patterns
+
+**talk.md Step 10 — No main repo:**
+- Commita `explore-cache.md` e `CONVENTIONS.md` com msg `chore(devorch): add worktree for <name>`
+
+**talk.md Step 10 — Na worktree:**
+- Commita `plans/current.md` e `CONVENTIONS.md` com msg `chore(devorch): plan — <name>`
+
+**build.md — Na worktree:**
+- Cada phase commita work + `state.md` com msg `phase(N): <goal>`
+
+### Gaps Identificados
+
+1. **Nenhum comando limpa arquivos do main repo após merge** — `state.md`, `plans/current.md` que vêm da worktree ficam no main após merge
+2. **`project-map.md` fica stale** — talk.md roda com `--persist` mas nunca atualiza/remove depois
+3. **`explore-cache.md` só cresce** — `manage-cache.ts` faz trim (3000 linhas) e invalidate, mas nunca deleta seções antigas de planos já concluídos
+4. **`plans/archive/` acumula indefinidamente** — sem mecanismo de rotação
+5. **`.gitignore` não exclui `.devorch/`** — todos os arquivos são versionados, incluindo state temporário
+6. **Após merge de worktree, arquivos `.devorch/` da worktree entram no main** — `state.md` e `plans/current.md` de worktrees merged ficam no histórico do main
 
 ## Current Merge Section (Section 4 of build.md)
 The merge step runs in the **orchestrator context** (build.md), not delegated to builders. It:
