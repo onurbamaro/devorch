@@ -250,3 +250,4 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 - **Context discipline**: build is a thin supervisor. It does NOT launch builders, poll tasks, manage waves, or run validation directly. All of that is delegated to the per-phase Task agent which follows build-phase.md instructions.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
 - Auto-fix trivial findings without user interaction. Only escalate complex issues with `/devorch:fix` prompt.
+- **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.

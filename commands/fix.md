@@ -95,4 +95,4 @@ Concise summary: what changed, commit hash, check results.
 - Maximum parallelism in verification.
 - If check-project.ts fails and the fix is obvious: fix and re-run.
 - If check-project.ts fails and the fix is not obvious: report to the user.
-- All user-facing text in Portuguese must use correct pt-BR accentuation and grammar.
+- **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.

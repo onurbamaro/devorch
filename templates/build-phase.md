@@ -100,3 +100,4 @@ Execute one phase of the current devorch plan.
 - Deploy builders as **foreground parallel** Task calls — never use `run_in_background` for builders.
 - If a builder fails, report and stop.
 - Always update state.md (step 5 via phase-summary.ts), even on partial failure.
+- **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.

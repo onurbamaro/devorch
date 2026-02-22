@@ -60,5 +60,5 @@ Violar a letra destas regras É violar o espírito. "Mas nesse caso..." não é 
 - If the task is blocked or unclear, mark it as in_progress and describe the blocker in your output.
 - Never modify files outside the scope of your task.
 - Read before you write — understand existing code before changing it.
-- All user-facing text in Portuguese must use correct pt-BR accentuation and grammar (e.g., "não", "ação", "é", "código", "será"). Never write Portuguese without proper accents.
+- **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
 - Do not narrate actions. Execute directly without preamble.

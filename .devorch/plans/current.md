@@ -1,11 +1,11 @@
-# Plan: Devorch File Lifecycle Cleanup
+# Plan: Bilingual Language Rules
 
 <description>
-Adicionar gestão de ciclo de vida aos arquivos que o devorch gera (.devorch/), incluindo cleanup automático após merge, remoção de persistência desnecessária, exibição completa da estrutura do projeto, e política zero-tolerance para erros de lint/typecheck nos builders.
+Configure Claude Code to use Portuguese (pt-BR) for all user-facing screen output and English (en-US) for code, git commits, internal files, and instructions. Add a global rule to ~/CLAUDE.md and standardize language rules across all devorch command files, agent files, and templates.
 </description>
 
 <objective>
-Após merge de worktree: current.md é arquivado, state.md é deletado, explore-cache.md é wipado. O map-project.ts mostra estrutura completa sem truncação. O talk não persiste project-map.md em disco. Builders recebem o mapa do projeto no contexto do init-phase com indicação de que é up-to-date. Builders corrigem TODOS os erros de lint/typecheck (inclusive pré-existentes) — zero tolerance.
+All Claude Code user-facing output (questions, reports, summaries, progress messages) is in pt-BR. All code, git commits, internal files (plans, conventions, explore-cache), and Claude Code instructions are in en-US. Rules are consistent across all devorch files and globally enforced via ~/CLAUDE.md.
 </objective>
 
 <classification>
@@ -15,116 +15,81 @@ Risk: Low
 </classification>
 
 <decisions>
-- Pós-merge de worktree → arquivar plans/current.md em plans/archive/ e deletar state.md
-- explore-cache.md → wipe completo após merge (manter trim/invalidate durante build como está)
-- project-map.md → remover --persist do talk.md (arquivo não precisa existir)
-- map-project.ts → remover limites de 5 arquivos por diretório e profundidade máx 2
-- Builders recebem project map no contexto do init-phase.ts, gerado na hora (subprocesso), com header indicando que é up-to-date para evitar re-scan
-- Zero-tolerance para lint/typecheck → builder corrige TODOS os erros (inclusive pré-existentes). Se não conseguir, phase bloqueia e reporta ao usuário
+- Scope → Global rule in ~/CLAUDE.md affecting all projects
+- Git commits → Always English (type(scope): description in en-US)
+- Technical terms → Keep in English within Portuguese text (worktree, merge, branch, lint, build)
+- Internal files → All in English (plans, CONVENTIONS.md, explore-cache.md). Only screen output is Portuguese.
 </decisions>
 
 <relevant-files>
-- `commands/build.md` — step de merge precisa de lógica de cleanup pós-merge
-- `commands/talk.md` — remover --persist do map-project.ts call
-- `scripts/map-project.ts` — remover truncação de arquivos e limite de profundidade
-- `scripts/init-phase.ts` — adicionar execução do map-project.ts e incluir output no contexto dos builders
-- `scripts/archive-plan.ts` — já existe, será usado no pós-merge
-- `templates/build-phase.md` — remover escape clause de erros pré-existentes (lines 48-49, 63-64)
-- `agents/devorch-builder.md` — adicionar instrução zero-tolerance
+- `/home/bruno/CLAUDE.md` — global instructions file, needs new language rules section
+- `commands/talk.md` — has partial pt-BR rule (line 364), user-facing messages need pt-BR standardization
+- `commands/build.md` — has partial pt-BR rule (line 364), user-facing messages mostly English need pt-BR
+- `commands/fix.md` — has partial pt-BR rule (line 98), mostly correct already
+- `commands/worktrees.md` — missing language rule entirely, all user messages in English
+- `agents/devorch-builder.md` — has partial pt-BR rule (line 63), needs commit language clarification
+- `templates/build-phase.md` — missing language rule entirely
 
 <new-files>
-(nenhum)
+(none)
 </new-files>
 </relevant-files>
 
-<phase1 name="Cleanup, Map Completo e Zero-Tolerance">
-<goal>Adicionar cleanup pós-merge, remover truncação do map-project, incluir mapa no contexto dos builders e enforçar zero-tolerance para lint/typecheck</goal>
+<phase1 name="Global Rule and Devorch Standardization">
+<goal>Add comprehensive bilingual language rule to ~/CLAUDE.md and standardize all devorch files with consistent language rules.</goal>
 
 <tasks>
-#### 1. Adicionar cleanup pós-merge ao build.md
-- **ID**: post-merge-cleanup
-- **Assigned To**: builder-merge
-- No step de merge do `commands/build.md`, após merge bem-sucedido e antes de deletar a worktree:
-  - Rodar `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` para arquivar o plano no main repo
-  - Deletar `.devorch/state.md` do main repo se existir (veio do merge)
-  - Deletar `.devorch/explore-cache.md` do main repo (wipe completo)
-  - Deletar `.devorch/project-map.md` do main repo se existir
-  - Commitar as remoções com mensagem `chore(devorch): cleanup post-merge <plan-name>`
-- Manter a mesma estrutura de prose/formatação do build.md existente
+#### 1. Add Global Language Rules to ~/CLAUDE.md
+- **ID**: add-global-language-rules
+- **Assigned To**: builder-global
+- Read `/home/bruno/CLAUDE.md`
+- Add a new `## Language / Idioma` section after the existing content with these rules:
+  - User-facing output (questions, reports, summaries, progress, errors explained to user): Portuguese pt-BR with correct accentuation
+  - Code, variable names, comments, git commits, internal documentation: English en-US
+  - Git commit format: `type(scope): description` always in English
+  - Technical terms (worktree, merge, branch, lint, build, deploy) stay in English even within Portuguese sentences
+  - Never write Portuguese without proper accents (não, ação, é, código, será, exploração)
 
-#### 2. Remover --persist e truncação do map-project
-- **ID**: map-project-fullstructure
-- **Assigned To**: builder-map
-- Em `commands/talk.md` Step 1: trocar `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --persist` por `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` (sem --persist)
-- Em `scripts/map-project.ts`:
-  - Line 122-127: remover o `slice(0, 5)` e o bloco `if (files.length > 5)` — listar todos os arquivos
-  - Line 109: remover o `if (depth > 2) return;` — percorrer toda a profundidade
+#### 2. Standardize Language Rules in Devorch Command Files
+- **ID**: standardize-devorch-commands
+- **Assigned To**: builder-commands
+- Update `commands/talk.md` Rules section: replace the existing partial pt-BR rule with the comprehensive bilingual rule (user-facing = pt-BR, code/commits/internal = en-US)
+- Update `commands/build.md` Rules section: same replacement
+- Update `commands/fix.md` Rules section: same replacement
+- Add language rule to `commands/worktrees.md` Rules section (currently missing)
+- Add language rule to `templates/build-phase.md` Rules section (currently missing)
+- Update `agents/devorch-builder.md` Rules section: replace partial rule with comprehensive version including explicit commit language rule (en-US)
+- The standardized rule text for all files:
+  ```
+  - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
+  ```
 
-#### 3. Incluir project map no contexto dos builders
-- **ID**: init-phase-project-map
-- **Assigned To**: builder-init
-- Em `scripts/init-phase.ts`:
-  - Adicionar execução de `map-project.ts` como subprocesso via `Bun.spawn()`: `bun <scriptDir>/map-project.ts` rodando no `projectRoot`
-  - Capturar o stdout (output markdown)
-  - Inserir no array `parts` como nova seção, **após "Current State" e antes de "Explore Cache"**, com o seguinte formato:
-    ```
-    ## Project Structure
-    > Fresh snapshot — generated at phase init. Trust this as the current project layout.
-
-    <output do map-project.ts>
-    ```
-  - O header "Fresh snapshot" instrui explicitamente o builder a não gastar tokens re-listando a estrutura
-  - Se o subprocesso falhar (exit code != 0), ignorar silenciosamente — o map é contexto opcional
-
-#### 4. Enforçar zero-tolerance para lint/typecheck
-- **ID**: zero-tolerance-lint
-- **Assigned To**: builder-lint
-- Em `templates/build-phase.md`:
-  - Lines 48-49: substituir as 2 linhas que distinguem "files modified in this phase" vs "pre-existing issues" por uma única regra: `"If lint/typecheck fail: fix ALL errors (including pre-existing). If unable to fix after one retry, report the errors and block the phase — do not proceed."`
-  - Lines 63-64: mesma substituição para o bloco de satellites
-- Em `agents/devorch-builder.md`:
-  - Na seção de regras/instruções, adicionar: `"Zero-tolerance policy: you are responsible for leaving the project with zero lint, typecheck, and build errors. This includes pre-existing errors — fix them. If you cannot fix an error, block and report it. Never dismiss errors as 'pre-existing'."`
-- Em `commands/build.md`:
-  - Lines 48-51: substituir a lógica permissiva de avaliação por: `"If lint/typecheck fail: the builder must fix ALL errors. If validation.failed > 0: the builder must fix or the phase blocks."`
-
-#### 5. Validate Phase
+#### 3. Validate Phase
 - **ID**: validate-phase-1
 - **Assigned To**: validator
-- Verificar que build.md contém lógica de archive + delete state + wipe cache após merge
-- Verificar que map-project.ts não tem limites de truncação
-- Verificar que talk.md não usa --persist
-- Verificar que init-phase.ts roda map-project.ts e inclui output com header "Fresh snapshot"
-- Verificar que build-phase.md NÃO contém "pre-existing" ou "log as warning and proceed" para lint/typecheck
-- Verificar que devorch-builder.md contém instrução de zero-tolerance
-- Verificar que build.md não permite prosseguir com erros de lint/typecheck
-- Rodar `bun scripts/map-project.ts` e confirmar que estrutura completa aparece
+- Verify ~/CLAUDE.md has the new Language section
+- Verify all 4 command files have the standardized language rule
+- Verify agents/devorch-builder.md has the updated rule
+- Verify templates/build-phase.md has the language rule
+- Run `bun scripts/check-project.ts` to ensure no lint/typecheck errors
 </tasks>
 
 <execution>
-**Wave 1** (parallel): post-merge-cleanup, map-project-fullstructure, init-phase-project-map
-**Wave 2** (after wave 1): zero-tolerance-lint
-**Wave 3** (validation): validate-phase-1
+**Wave 1** (parallel): add-global-language-rules, standardize-devorch-commands
+**Wave 2** (validation): validate-phase-1
 </execution>
 
 <criteria>
-- [ ] build.md archiva current.md e deleta state.md + explore-cache.md após merge bem-sucedido
-- [ ] talk.md chama map-project.ts sem --persist
-- [ ] map-project.ts lista todos os arquivos sem truncação `+N files`
-- [ ] map-project.ts percorre todos os níveis de profundidade
-- [ ] init-phase.ts roda map-project.ts e inclui output no contexto dos builders com header "Fresh snapshot"
-- [ ] build-phase.md não tem escape clause para erros pré-existentes
-- [ ] devorch-builder.md contém instrução zero-tolerance
-- [ ] build.md não permite prosseguir com lint/typecheck falhando
+- [ ] ~/CLAUDE.md contains comprehensive bilingual language rules section
+- [ ] All 4 command files (talk, build, fix, worktrees) have standardized language rule in Rules section
+- [ ] agents/devorch-builder.md has updated language rule with commit language specification
+- [ ] templates/build-phase.md has language rule in Rules section
+- [ ] No lint or typecheck errors
 </criteria>
 
 <validation>
-- `bun scripts/map-project.ts` — deve mostrar estrutura completa sem `... +N files`
-- `grep -c "persist" commands/talk.md` — deve retornar 0
-- `grep -c "slice" scripts/map-project.ts` — deve retornar 0 (no contexto de file listing)
-- `grep -c "depth > 2" scripts/map-project.ts` — deve retornar 0
-- `grep -c "Project Structure" scripts/init-phase.ts` — deve retornar >= 1
-- `grep -c "map-project" scripts/init-phase.ts` — deve retornar >= 1
-- `grep -ic "pre-existing" templates/build-phase.md` — deve retornar 0
-- `grep -c "zero-tolerance" agents/devorch-builder.md` — deve retornar >= 1
+- `grep -l "Language policy" commands/*.md agents/*.md templates/*.md` — all devorch instruction files contain the rule
+- `grep "Language" /home/bruno/CLAUDE.md` — global file contains language section
+- `bun scripts/check-project.ts` — no lint/typecheck errors
 </validation>
 </phase1>
