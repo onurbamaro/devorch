@@ -137,3 +137,4 @@ Report: "Deleted worktree `<name>` and branch `<branch>`." (append "Also removed
 - Never force-merge or auto-resolve conflicts.
 - Deletion is destructive (branch -D) — always confirm via AskUserQuestion first.
 - After merge or delete, loop back to Step 1 to show updated list and offer another action.
+- **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.

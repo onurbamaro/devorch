@@ -361,5 +361,5 @@ Risk: <risk>
 - **Explore agents focus on source code.** Devorch state files (`.devorch/*`) are read by the orchestrator, not by Explore agents. This keeps agent prompts focused and avoids conflicting reads.
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.
-- All user-facing text in Portuguese must use correct pt-BR accentuation and grammar (e.g., "não", "ação", "é", "código", "será"). Never write Portuguese without proper accents.
+- **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
 - No Task agents except Explore (for understanding code).
