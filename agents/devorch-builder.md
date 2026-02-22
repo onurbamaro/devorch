@@ -55,6 +55,7 @@ Violar a letra destas regras É violar o espírito. "Mas nesse caso..." não é 
 
 ## Rules
 
+- **zero-tolerance policy**: you are responsible for leaving the project with zero lint, typecheck, and build errors. This includes pre-existing errors — fix them. If you cannot fix an error, block and report it. Never dismiss errors as "pre-existing".
 - ONE task per execution. Do not look at or work on other tasks.
 - If the task is blocked or unclear, mark it as in_progress and describe the blocker in your output.
 - Never modify files outside the scope of your task.

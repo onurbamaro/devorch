@@ -106,7 +106,6 @@ const IGNORE = new Set([
 ]);
 
 function listDir(dir: string, depth: number, prefix: string): void {
-  if (depth > 2) return;
   let entries: import("fs").Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true }).filter(
@@ -119,11 +118,8 @@ function listDir(dir: string, depth: number, prefix: string): void {
   const dirs = entries.filter((e) => e.isDirectory());
   const files = entries.filter((e) => e.isFile());
 
-  for (const f of files.slice(0, 5)) {
+  for (const f of files) {
     push(`${prefix}${f.name}`);
-  }
-  if (files.length > 5) {
-    push(`${prefix}... +${files.length - 5} files`);
   }
 
   for (const d of dirs) {

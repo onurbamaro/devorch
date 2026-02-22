@@ -45,8 +45,7 @@ Execute one phase of the current devorch plan.
    ```
 
    Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
-   - If lint/typecheck fail on files modified in this phase: fix inline with Edit and retry check once.
-   - If lint/typecheck fail on pre-existing issues: log as warning and proceed.
+   - If lint/typecheck fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase — do not proceed.
    - If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
    - If everything passes: proceed.
 
@@ -60,8 +59,7 @@ Execute one phase of the current devorch plan.
 
    Aggregate results across all satellites:
    - If any satellite check fails, report which satellite failed and the failure details.
-   - If satellite lint/typecheck fail on files modified in this phase: fix inline with Edit and retry that satellite's check once.
-   - If satellite lint/typecheck fail on pre-existing issues: log as warning and proceed.
+   - If satellite lint/typecheck fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase — do not proceed.
 
 5. **Phase summary and commit**: Generate commit message and update state in one call:
 

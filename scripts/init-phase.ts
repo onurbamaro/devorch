@@ -252,6 +252,21 @@ for (const sat of satellites) {
   }
 }
 
+// --- Run map-project.ts for project structure ---
+const scriptDir = import.meta.dirname;
+let projectMap = "";
+try {
+  const mapProc = Bun.spawnSync(
+    ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
+    { cwd: projectRoot, stderr: "pipe" }
+  );
+  if (mapProc.exitCode === 0) {
+    projectMap = mapProc.stdout.toString().trim();
+  }
+} catch {
+  // ignore — map is optional context
+}
+
 // --- Build output content ---
 const parts: string[] = [];
 
@@ -302,6 +317,14 @@ if (state) {
   parts.push("## Current State");
   parts.push("");
   parts.push(state);
+  parts.push("");
+}
+
+if (projectMap) {
+  parts.push("## Project Structure");
+  parts.push("> Fresh snapshot — generated at phase init. Trust this as the current project layout.");
+  parts.push("");
+  parts.push(projectMap);
   parts.push("");
 }
 

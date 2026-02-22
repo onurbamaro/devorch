@@ -1,4 +1,4 @@
-Generated: 2026-02-21T17:57:21.498Z
+Generated: 2026-02-22T14:45:16.496Z
 
 # Project Map
 
@@ -56,14 +56,22 @@ devorch/
 ## Recent Commits
 
 ```
+eeb48c9 Merge branch 'devorch/merge-stash-preflight'
+cf6a146 phase(1): Adicionar lógica de stash automático ao step 4 do build.md para lidar com working tree sujo
+809df21 phase(1): build.md adds pre-flight stash to merge workflow
+24dd5d0 chore(devorch): add worktree for Merge Stash Pre-flight
+0f1e071 chore(devorch): plan — Merge Stash Pre-flight
 b2a2953 Merge branch 'devorch/robust-multi-repo'
 e653125 chore: add .gitattributes to enforce LF line endings
 ab7e8f8 phase(3): init-phase.ts valida campo repo dos tasks, build-phase.md roda check-project em satellites e coleta status explicitamente
 79c4fc5 phase(2): map-project.ts detecta repos irmãos automaticamente e talk.md integra detecção
 7410994 phase(1): Adicionar flags --recreate e --add-secondary ao se...
-8caeba9 feat(setup-worktree): add --recreate and --add-secondary flags
-6aa5f56 chore(devorch): add worktree for robust-multi-repo
-8e932ae chore(devorch): plan — Robust Multi-Repo — Worktree Resilience + Build Validation
-dbdee83 Merge branch 'devorch/optimize-build-scripts'
-925faeb fix(check): sync local check-project.ts with global --with-validation changes
 ```
+
+## Sibling Repos
+
+- `salsago-print-server` — ../salsago-print-server (branch: master)
+- `cost-system` — ../cost-system (branch: master)
+- `salsago-courier` — ../salsago-courier (branch: master)
+- `rastreia-reports` — ../rastreia-reports (branch: master)
+- `ducoins` — ../ducoins (branch: master)

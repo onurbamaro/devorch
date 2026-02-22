@@ -181,7 +181,15 @@ If `stash pop` fails (exit code != 0): run `git -C <repoMainPath> status --porce
 
 If `stash pop` succeeds: the stash is auto-removed, continue to next repo.
 
-c. **Cleanup all repos** — For each repo (primary + satellites):
+c. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
+
+1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
+2. Delete `.devorch/state.md` from the main repo if it exists.
+3. Delete `.devorch/explore-cache.md` from the main repo if it exists.
+4. Delete `.devorch/project-map.md` from the main repo if it exists.
+5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
+
+d. **Cleanup all repos** — For each repo (primary + satellites):
 ```bash
 git -C <repoMainPath> worktree remove <worktreePath>
 git -C <repoMainPath> branch -d <worktreeBranch>
@@ -214,7 +222,15 @@ If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conf
 
 If `stash pop` succeeds: the stash is auto-removed, continue.
 
-c. **Cleanup**:
+c. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
+
+1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
+2. Delete `.devorch/state.md` from the main repo if it exists.
+3. Delete `.devorch/explore-cache.md` from the main repo if it exists.
+4. Delete `.devorch/project-map.md` from the main repo if it exists.
+5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
+
+d. **Cleanup**:
 ```bash
 git worktree remove <projectRoot>
 git branch -d <worktreeBranch>
