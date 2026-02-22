@@ -13,7 +13,7 @@ Conversation, exploration, and structured planning for devorch projects.
 
 ### 1. Load context
 
-**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --persist` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context — do not save it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
+**Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context — do not save it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
 **New project detection**: If map-project.ts output shows no source code files and no dependencies (empty or scaffold-only project), enter discovery mode:
 
