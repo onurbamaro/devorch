@@ -95,16 +95,22 @@ All checks launch in a single message. Bash calls run in background; Explore/rev
 
 Collect results from: check-project.ts, cross-phase Explore, 3 reviewers.
 
-For each finding:
-- **Trivial** (fix is self-evident, no ambiguity): fix directly with Edit tool. Examples: leftover TODO/FIXME, unused import, typo, formatting.
-- **Complex** (multiple files, design decision, potential regression): do NOT fix. Generate a ready-to-paste prompt:
+Classify each finding into one of three tiers:
+
+- **Trivial** (1-2 files, fix is self-evident, no ambiguity): fix directly with Edit tool. Examples: leftover TODO/FIXME, unused import, typo, formatting, missing semicolon.
+- **Fix-level** (well-defined fix, obvious approach, no design decisions, but touches 3+ files OR requires non-trivial logic): launch a devorch-builder Task agent (`subagent_type="devorch-builder"`) as a foreground call. The builder prompt includes: finding description with file:line evidence from reviewers, affected files list, CONVENTIONS.md content, specific instruction to fix and commit. Examples: rename type across files, add missing error handling to multiple endpoints, fix consistent pattern violation across modules.
+- **Talk-level** (requires design decisions, multiple valid approaches, architectural impact, or scope too large to fix without planning): do NOT fix. Generate a ready-to-paste prompt:
   ```
-  /devorch:fix <detailed description including: what's wrong, which files are affected, what the reviewers found, suggested approach>
+  /devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>
   ```
 
-After fixing trivials:
-- Commit: `fix(check): <concise description of fixes>`
-- Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` if any fixes were made
+**Fix execution and retry loop** (max 2 retries):
+
+1. Fix all trivial findings inline with Edit. Launch builder agents for all fix-level findings (parallel foreground Task calls in a single message).
+2. After all fixes complete, commit: `fix(check): <concise description of fixes>` (fix-level builders commit their own changes).
+3. Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>`.
+4. If new failures appear, classify them (trivial / fix-level / talk-level) and fix again. Repeat up to 2 total retry cycles.
+5. After 2 retries, escalate any remaining failures to `/devorch:talk` prompts.
 
 #### 3d. Report
 
@@ -123,10 +129,10 @@ Quality: <findings ou "✅ clean">
 Completeness: <findings ou "✅ clean">
 
 ### Correções Automáticas
-<N issues triviais corrigidos inline> (ou "Nenhum")
+<N issues corrigidos inline, M via builder agents> (ou "Nenhum")
 
 ### Issues Pendentes
-<prompts /devorch:fix gerados> (ou "Nenhum")
+<prompts /devorch:talk gerados> (ou "Nenhum")
 
 ### Verdict: PASS / PASS com N issues pendentes / FAIL
 ```
@@ -249,5 +255,5 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 - The orchestrator only reads `<projectRoot>/.devorch/state.md` and `<planPath>` between phases. Everything else is inside the per-phase agents.
 - **Context discipline**: build is a thin supervisor. It does NOT launch builders, poll tasks, manage waves, or run validation directly. All of that is delegated to the per-phase Task agent which follows build-phase.md instructions.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
-- Auto-fix trivial findings without user interaction. Only escalate complex issues with `/devorch:fix` prompt.
+- Auto-fix trivial and fix-level findings. Only escalate talk-level issues with `/devorch:talk` prompt.
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
