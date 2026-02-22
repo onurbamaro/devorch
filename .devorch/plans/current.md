@@ -1,101 +1,70 @@
-# Plan: Aggressive Review Fix Dispatch
+# Plan: No-Tests Flag for Builder
 
 <description>
-Modify the adversarial review dispatch logic in build.md so that fix-level issues (well-defined, actionable, no design decisions needed) are fixed immediately inline or via builder agents, instead of being deferred as `/devorch:fix` commands. Only issues requiring planning/discussion (talk-level) are left as `/devorch:talk` commands.
+Add a `--no-tests` flag to the `/devorch:build` command that propagates through the build pipeline to skip automated test execution at the final verification step (build.md step 3a). The flag passes `--no-test` to `check-project.ts` and updates the final report to show "Tests: ⏭ SKIPPED" instead of test results.
 </description>
 
 <objective>
-After a build completes, the adversarial review fixes all actionable issues immediately (trivial via Edit, fix-level via builder agents for 3+ files), only leaving `/devorch:talk` commands for issues requiring design decisions or architectural discussion.
+Running `/devorch:build --plan <name> --no-tests` completes the full build pipeline without executing the project's test suite, while lint/typecheck/build checks still run. The final report clearly indicates tests were skipped.
 </objective>
 
 <classification>
 Type: Enhancement
-Complexity: Medium
+Complexity: Simple
 Risk: Low
 </classification>
 
 <decisions>
-- Retry limit for fix→check→fix cycle → 2 retries before escalating to /devorch:talk
-- Multi-file fix execution → spawn devorch-builder via Task for fixes touching 3+ files; inline Edit for simpler fixes
-- Report format → unified "Correções Automáticas" section (no trivial vs fix-level split)
-- Command for pending issues → /devorch:talk (not /devorch:fix) since fix-level is already handled
+Scope → Skip tests everywhere (final verification + phase validation). Phases already skip tests by design, so effective change is at final verification.
+Interface → `--no-tests` CLI flag on `/devorch:build` command. Follows existing `--no-<feature>` Unix pattern.
+Report → Show "Tests: ⏭ SKIPPED" in final report when flag is active.
 </decisions>
 
-<problem-statement>
-The current adversarial review in build.md step 3c classifies findings as either "trivial" (fix inline) or "complex" (defer as /devorch:fix). This leaves many actionable, well-defined issues as deferred commands when they could be resolved immediately. The fix.md command already defines a FIX vs TALK classification that distinguishes between "obvious how, no design decisions" and "needs planning". This classification should be applied to the review dispatch so that only talk-level issues remain as commands.
-</problem-statement>
-
-<solution-approach>
-Adopt the fix.md FIX/TALK classification in build.md step 3c. The new dispatch logic:
-
-1. **Trivial** (1-2 files, self-evident fix): Edit inline directly — same as today
-2. **Fix-level** (well-defined fix, obvious approach, but 3+ files): Launch a devorch-builder Task agent with the finding details and affected files
-3. **Talk-level** (design decisions needed, multiple approaches, structural impact): Generate `/devorch:talk` command
-
-Add a bounded retry loop (max 2) for the fix→check→fix cycle. After fixes, re-run check-project.ts. If still failing after 2 retries, escalate remaining issues to /devorch:talk.
-
-Update the report template to show a unified "Correções Automáticas" section and change "Issues Pendentes" to reference /devorch:talk instead of /devorch:fix.
-
-Alternative considered: expanding inline Edit for all fix-level issues. Rejected because multi-file fixes can consume excessive context in build.md's inline execution. Builder agents run in isolated context.
-</solution-approach>
-
 <relevant-files>
-- `commands/build.md` — contains the adversarial review dispatch logic (step 3c) and report template (step 3d) that need modification
+- `commands/build.md` — build orchestrator that launches final verification with check-project.ts (line ~77) and generates the final report (line ~121)
+- `scripts/check-project.ts` — already supports `--no-test` flag, no changes needed
 
 <new-files>
 (none)
 </new-files>
 </relevant-files>
 
-<phase1 name="Update Review Dispatch Logic">
-<goal>Modify build.md step 3c to use FIX/TALK classification with builder agents for multi-file fixes, bounded retry loop, and updated report template.</goal>
+<phase1 name="Add --no-tests flag to build pipeline">
+<goal>Modify build.md to accept --no-tests flag and propagate it to check-project.ts at final verification, updating the report template accordingly.</goal>
 
 <tasks>
-#### 1. Rewrite Dispatch and Report in build.md
-- **ID**: rewrite-dispatch-and-report
-- **Assigned To**: builder-main
+#### 1. Add --no-tests flag to build.md
+- **ID**: add-no-tests-flag
+- **Assigned To**: builder-1
 - Read `commands/build.md` fully
-- Replace step 3c "Synthesize and dispatch" (lines 94-107) with the new three-tier classification:
-  - **Trivial** (1-2 files, self-evident): fix directly with Edit tool. Examples: leftover TODO/FIXME, unused import, typo, formatting, missing semicolon
-  - **Fix-level** (well-defined fix, obvious approach, no design decisions, but touches 3+ files OR requires non-trivial logic): launch a devorch-builder Task agent (`subagent_type="devorch-builder"`) as foreground call. The builder prompt includes: finding description with file:line evidence from reviewers, affected files list, CONVENTIONS.md, specific instruction to fix and commit. Examples: rename type across files, add missing error handling to multiple endpoints, fix consistent pattern violation across modules
-  - **Talk-level** (requires design decisions, multiple valid approaches, architectural impact, or scope too large to fix without planning): do NOT fix. Generate a ready-to-paste prompt: `/devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>`
-- Add bounded retry loop after all fixes: re-run `check-project.ts`, if failures remain classify new findings and fix (up to 2 total retry cycles). After 2 retries, escalate remaining failures to `/devorch:talk`
-- Commit with `fix(check): <description>` after each fix round (not after each individual fix)
-- Fix-level builder agents commit their own changes (standard builder behavior)
-- Update step 3d report template:
-  - "Correções Automáticas" section: unified, lists all fixed issues (trivial + fix-level) with count. Format: `<N issues corrigidos inline, M via builder agents> (ou "Nenhum")`
-  - "Issues Pendentes" section: change `/devorch:fix` references to `/devorch:talk`. Format: `<prompts /devorch:talk gerados> (ou "Nenhum")`
-  - Keep the rest of the report template unchanged
-- Update the Rules section (line 252) to reflect the new behavior: "Auto-fix trivial and fix-level findings. Only escalate talk-level issues with `/devorch:talk` prompt."
+- In the Input section (near `$ARGUMENTS` handling), add `--no-tests` as an optional boolean flag. Parse it early alongside `--plan` and store as a variable (e.g., `noTests = true/false`)
+- In step 3a (final verification), where `check-project.ts` is invoked via Bash (the call WITHOUT `--no-test`), conditionally append `--no-test` to the command when `noTests` is true
+- Update the final report template in step 3d: when tests result is "skip", render `Tests: ⏭ SKIPPED` instead of the ✅/❌ line
+- Ensure the retry loop in step 3c does not classify skipped tests as failures to fix
+- Update the `argument-hint` in frontmatter if it exists, to mention `--no-tests`
 
 #### 2. Validate Phase
 - **ID**: validate-phase-1
 - **Assigned To**: validator
-- Verify `commands/build.md` has the new three-tier classification (trivial, fix-level, talk-level)
-- Verify builder agent launch pattern for fix-level issues uses `subagent_type="devorch-builder"`
-- Verify retry loop is bounded at 2
-- Verify report template references `/devorch:talk` (not `/devorch:fix`)
-- Verify no references to `/devorch:fix` remain in step 3c or 3d
-- Run: `bun /home/bruno/.claude/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md`
+- Verify `build.md` parses `--no-tests` from `$ARGUMENTS`
+- Verify `check-project.ts` invocation includes `--no-test` when flag is set
+- Verify report template handles "skip" test result with ⏭ SKIPPED
+- Verify default behavior unchanged — without `--no-tests`, tests still run
 </tasks>
 
 <execution>
-**Wave 1** (sequential): rewrite-dispatch-and-report
+**Wave 1**: add-no-tests-flag
 **Wave 2** (validation): validate-phase-1
 </execution>
 
 <criteria>
-- [ ] Step 3c has three-tier classification: trivial (Edit inline), fix-level (builder agent), talk-level (/devorch:talk)
-- [ ] Fix-level builder launches use `subagent_type="devorch-builder"` as foreground Task
-- [ ] Retry loop bounded at 2 cycles with escalation to /devorch:talk
-- [ ] Report template shows unified "Correções Automáticas" and "/devorch:talk" for pending issues
-- [ ] No remaining references to `/devorch:fix` in steps 3c or 3d
-- [ ] Rules section updated to reflect new dispatch behavior
+- [ ] `build.md` accepts `--no-tests` flag alongside existing `--plan` flag
+- [ ] Final verification call to `check-project.ts` includes `--no-test` when `--no-tests` is passed
+- [ ] Final report shows "Tests: ⏭ SKIPPED" when tests are skipped
+- [ ] Default behavior unchanged — without `--no-tests`, tests run as before
 </criteria>
 
 <validation>
-- `grep -c "devorch:fix" commands/build.md` — should return 0 (no references in dispatch/report sections)
-- `grep -c "devorch:talk" commands/build.md` — should return at least 2 (dispatch + report)
-- `grep -c "devorch-builder" commands/build.md` — should return at least 1 (builder launch for fix-level)
+- `bun /home/bruno/.claude/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md` — validates plan structure
 </validation>
 </phase1>
