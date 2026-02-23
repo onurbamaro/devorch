@@ -55,6 +55,14 @@ That's it. devorch explores your codebase with parallel Agent Teams, clarifies a
 /devorch:talk "..."   # auto-generates CONVENTIONS.md on first run, plans and builds
 ```
 
+### Work across multiple repos
+
+```
+/devorch:talk "add real-time sync between salsago-core and salsago-web"
+```
+
+devorch detects sibling repositories automatically. During planning, it asks which repos to include as satellites. Each repo gets its own worktree with the same branch name. Validation runs per-repo, and merge is coordinated across all of them.
+
 ### Ship a quick fix
 
 ```
@@ -107,8 +115,9 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 | `setup-worktree.ts` | Creates a git worktree for isolated plan execution. |
 | `list-worktrees.ts` | Lists active devorch worktrees with status. |
 | `archive-plan.ts` | Archives completed plans. |
+| `phase-summary.ts` | Generates phase commit message and writes state.md in one call. |
 
-Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils).
+Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils, git-utils).
 
 ### Key Concepts
 
@@ -118,6 +127,7 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 - **Explore cache** -- Summaries from Explore agents, reused across phases to avoid redundant exploration.
 - **State tracking** -- `state.md` tracks the last completed phase and handoff summary.
 - **Worktrees** -- Each plan executes in an isolated git worktree. Merged back on success.
+- **Satellite repos** -- Plans can span multiple repositories. Secondary repos get their own worktrees with the same branch name, and merge is coordinated across all repos.
 
 ---
 
@@ -127,7 +137,7 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 |---------|-------------|-------------|
 | `/devorch:talk` | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore (Agent Teams) |
 | `/devorch:fix` | Targeted fix with investigation. Classifies, investigates, implements, validates. | Explore |
-| `/devorch:build` | Executes all remaining phases + adversarial final verification. | Explore, Builder |
+| `/devorch:build` | Executes all remaining phases + adversarial final verification. Supports `--no-tests` to skip test suite. | Explore, Builder |
 | `/devorch:worktrees` | List, merge, or delete devorch worktrees. | -- |
 
 ---
@@ -178,6 +188,7 @@ capabilities:
   - Codebase exploration via parallel Agent Teams
   - Convention-aware code generation
   - Git worktree isolation per plan
+  - Multi-repo orchestration with satellite worktrees
 
 commands:
   - name: talk
@@ -187,7 +198,7 @@ commands:
     signature: /devorch:fix "<description>"
     purpose: Targeted fix with investigation, direct execution, and verification
   - name: build
-    signature: /devorch:build [--plan <name>]
+    signature: /devorch:build [--plan <name>] [--no-tests]
     purpose: Execute all remaining phases then verify with adversarial review
   - name: worktrees
     signature: /devorch:worktrees
@@ -212,10 +223,12 @@ architecture:
     - setup-worktree.ts (worktree creation)
     - list-worktrees.ts (worktree listing)
     - archive-plan.ts (plan archival)
+    - phase-summary.ts (phase commit message and state generation)
   shared_lib:
     - scripts/lib/plan-parser.ts (plan file parsing utilities)
     - scripts/lib/args.ts (CLI argument parsing)
     - scripts/lib/fs-utils.ts (file system utilities)
+    - scripts/lib/git-utils.ts (git utilities: branch detection, status checks)
 
 key_concepts:
   - phase: Sequential milestone, max 5 tasks, handoff summary to next phase
@@ -224,6 +237,7 @@ key_concepts:
   - explore_cache: Reusable Explore agent summaries (.devorch/explore-cache.md)
   - state: Last completed phase tracked in .devorch/state.md
   - worktree: Isolated git worktree per plan, merged on success
+  - satellite_repo: Secondary repo included in a multi-repo plan, gets its own worktree
 
 state_files:
   - path: .devorch/ARCHITECTURE.md
@@ -243,7 +257,7 @@ file_structure:
   source:
     - commands/ (4 .md slash command definitions)
     - agents/ (1 .md agent type definition)
-    - scripts/ (12 .ts utility scripts + lib/)
+    - scripts/ (13 .ts utility scripts + lib/)
     - templates/ (1 .md build-phase template)
     - hooks/ (post-edit lint + statusline)
     - install.ts (installer)
