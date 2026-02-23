@@ -1,6 +1,6 @@
 ---
 description: Executes all remaining phases of the current devorch plan
-argument-hint: [--plan <name>]
+argument-hint: [--plan <name>] [--no-tests]
 model: opus
 ---
 
@@ -8,16 +8,18 @@ Execute all remaining phases of the plan automatically, then verify the full imp
 
 **Continues from last checkpoint.** Picks up from where the last session left off via `state.md`.
 
-**Input**: `$ARGUMENTS` may contain `--plan <name>` to specify which plan to build. The value can be:
-- A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
-- A **full path** (contains `/` or ends in `.md`) → used as-is
-- Omitted → auto-detects from active worktrees
+**Input**: `$ARGUMENTS` may contain:
+- `--plan <name>` to specify which plan to build. The value can be:
+  - A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
+  - A **full path** (contains `/` or ends in `.md`) → used as-is
+  - Omitted → auto-detects from active worktrees
+- `--no-tests` (optional boolean flag) → skip the test suite during final verification. When set, `check-project.ts` receives `--no-test` and the final report shows tests as skipped. Parse this flag early alongside `--plan` and store as `noTests = true/false`.
 
 ## Workflow
 
 ### 0. Resolve plan path
 
-Parse `$ARGUMENTS` for `--plan <value>`.
+Parse `$ARGUMENTS` for `--plan <value>` and `--no-tests` (boolean, defaults to false).
 
 **Resolution logic:**
 1. If `--plan <value>` provided:
@@ -74,7 +76,7 @@ Run `git -C <projectRoot> diff --name-only` against the baseline:
 
 Launch ALL of the following in a single parallel batch:
 
-1. **Automated checks** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` via Bash with `run_in_background=true` (full check, WITH tests).
+1. **Automated checks** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` via Bash with `run_in_background=true`. If `noTests` is true, append `--no-test` to the command (skipping the test suite). Otherwise run the full check WITH tests.
 
 2. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
    - Prompt includes: changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
@@ -108,7 +110,7 @@ Classify each finding into one of three tiers:
 
 1. Fix all trivial findings inline with Edit. Launch builder agents for all fix-level findings (parallel foreground Task calls in a single message).
 2. After all fixes complete, commit: `fix(check): <concise description of fixes>` (fix-level builders commit their own changes).
-3. Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>`.
+3. Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` (include `--no-test` if `noTests` is true).
 4. If new failures appear, classify them (trivial / fix-level / talk-level) and fix again. Repeat up to 2 total retry cycles.
 5. After 2 retries, escalate any remaining failures to `/devorch:talk` prompts.
 
@@ -118,7 +120,7 @@ Classify each finding into one of three tiers:
 ## Verificação Final: <plan name>
 
 ### Checks Automatizados
-Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M)
+Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M) OR ⏭ SKIPPED (if `noTests`)
 
 ### Integração Cross-phase
 <findings do Explore agent ou "✅ OK">
