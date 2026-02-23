@@ -56,7 +56,7 @@ Read `$CLAUDE_HOME/devorch-templates/build-phase.md` once — this is the build 
 
 For each remaining phase N (sequentially):
 
-1. **Launch phase agent**: Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt is the full content of build-phase.md followed by: `\n\nExecute phase ${N} of the plan at <planPath>\n\nMain repo root for cache: <mainRoot>`
+1. **Launch phase agent**: Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt is the full content of build-phase.md followed by: `\n\nWorking directory: <projectRoot>\nExecute phase ${N} of the plan at <planPath>\nMain repo root for cache: <mainRoot>`
 2. **Verify completion**: After the Task agent returns, read `<projectRoot>/.devorch/state.md`. Check that `Last completed phase:` shows N.
    - If verified → report "Phase N/Y complete." and continue to next phase.
    - If NOT verified → the phase agent handles retries internally (up to 1 retry per failed builder). If the phase still fails after retries, stop and report: "Phase N did not complete successfully. Check agent output."
@@ -79,13 +79,15 @@ Launch ALL of the following in a single parallel batch:
 1. **Automated checks** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` via Bash with `run_in_background=true`. If `noTests` is true, append `--no-test` to the command (skipping the test suite). Otherwise run the full check WITH tests.
 
 2. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
-   - Prompt includes: changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
+   - Prompt includes: `Working directory: <projectRoot>`, changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
+   - **All file reads and git commands must use `<projectRoot>` as the base path** (e.g., `git -C <projectRoot> ...`, absolute paths for file reads)
    - Focus ONLY on files listed in the git diff
    - Verify: imports resolve, no orphan exports, no leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders, type consistency across module boundaries, no dead code, handoff contracts honored
    - Report each finding with file:line evidence
 
 3. **3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
-   - Each agent receives: plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
+   - Each agent receives: `Working directory: <projectRoot>`, plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
+   - **All file reads and git commands must use `<projectRoot>` as the base path**
    - Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
    - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
    - **quality-reviewer**: edge cases, error handling, correctness, maintainability
@@ -100,7 +102,7 @@ Collect results from: check-project.ts, cross-phase Explore, 3 reviewers.
 Classify each finding into one of three tiers:
 
 - **Trivial** (1-2 files, fix is self-evident, no ambiguity): fix directly with Edit tool. Examples: leftover TODO/FIXME, unused import, typo, formatting, missing semicolon.
-- **Fix-level** (well-defined fix, obvious approach, no design decisions, but touches 3+ files OR requires non-trivial logic): launch a devorch-builder Task agent (`subagent_type="devorch-builder"`) as a foreground call. The builder prompt includes: finding description with file:line evidence from reviewers, affected files list, CONVENTIONS.md content, specific instruction to fix and commit. Examples: rename type across files, add missing error handling to multiple endpoints, fix consistent pattern violation across modules.
+- **Fix-level** (well-defined fix, obvious approach, no design decisions, but touches 3+ files OR requires non-trivial logic): launch a devorch-builder Task agent (`subagent_type="devorch-builder"`) as a foreground call. The builder prompt includes: `Working directory: <projectRoot>`, finding description with file:line evidence from reviewers, affected files list, CONVENTIONS.md content, specific instruction to fix and commit. Examples: rename type across files, add missing error handling to multiple endpoints, fix consistent pattern violation across modules.
 - **Talk-level** (requires design decisions, multiple valid approaches, architectural impact, or scope too large to fix without planning): do NOT fix. Generate a ready-to-paste prompt:
   ```
   /devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>
