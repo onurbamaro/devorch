@@ -72,20 +72,18 @@ Run `git -C <projectRoot> diff --name-only` against the baseline:
 - If partial: diff up to the last completed phase.
 - Fallback: diff against the plan commit (`chore(devorch): plan`).
 
-#### 3b. Launch everything parallel (single message)
+#### 3b. Launch review agents (single message)
 
-Launch ALL of the following in a single parallel batch:
+Launch ALL of the following review agents in a single parallel batch (no automated checks here — those run in step 3d):
 
-1. **Automated checks** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` via Bash with `run_in_background=true`. If `noTests` is true, append `--no-test` to the command (skipping the test suite). Otherwise run the full check WITH tests.
-
-2. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
+1. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
    - Prompt includes: `Working directory: <projectRoot>`, changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
    - **All file reads and git commands must use `<projectRoot>` as the base path** (e.g., `git -C <projectRoot> ...`, absolute paths for file reads)
    - Focus ONLY on files listed in the git diff
    - Verify: imports resolve, no orphan exports, no leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders, type consistency across module boundaries, no dead code, handoff contracts honored
    - Report each finding with file:line evidence
 
-3. **3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
+2. **3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
    - Each agent receives: `Working directory: <projectRoot>`, plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
    - **All file reads and git commands must use `<projectRoot>` as the base path**
    - Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
@@ -93,11 +91,11 @@ Launch ALL of the following in a single parallel batch:
    - **quality-reviewer**: edge cases, error handling, correctness, maintainability
    - **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
 
-All checks launch in a single message. Bash calls run in background; Explore/review agents block as foreground Task calls. After agents return, collect background Bash results.
+All agents block as foreground Task calls.
 
-#### 3c. Synthesize and dispatch
+#### 3c. Code review fixes
 
-Collect results from: check-project.ts, cross-phase Explore, 3 reviewers.
+Collect results from: cross-phase Explore agent, 3 adversarial reviewers.
 
 Classify each finding into one of three tiers:
 
@@ -108,21 +106,34 @@ Classify each finding into one of three tiers:
   /devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>
   ```
 
-**Fix execution and retry loop** (max 2 retries):
+**Fix execution** (single pass — no retry loop here; automated checks run separately in 3d):
 
 1. Fix all trivial findings inline with Edit. Launch builder agents for all fix-level findings (parallel foreground Task calls in a single message).
-2. After all fixes complete, commit: `fix(check): <concise description of fixes>` (fix-level builders commit their own changes).
-3. Re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` (include `--no-test` if `noTests` is true).
-4. If new failures appear, classify them (trivial / fix-level / talk-level) and fix again. Repeat up to 2 total retry cycles.
-5. After 2 retries, escalate any remaining failures to `/devorch:talk` prompts.
+2. After all fixes complete, commit: `fix(review): <concise description of fixes>` (fix-level builders commit their own changes).
+3. Escalate any talk-level findings to `/devorch:talk` prompts.
 
-#### 3d. Report
+#### 3d. Check conformance
+
+After review fixes are committed (3c), launch a dedicated Task agent (`subagent_type="devorch-builder"`) as a **foreground** call to run automated checks and fix any failures.
+
+Agent prompt includes:
+- `Working directory: <projectRoot>`
+- Command: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` (append `--no-test` if `noTests` is true)
+- Instruction to fix ALL failures found (lint, typecheck, build, test)
+
+**Fix loop inside the agent** (max 3 retry cycles):
+
+1. Run `check-project.ts` and parse JSON output.
+2. If failures exist: fix with Edit tool, commit `fix(check): <concise description>`, re-run check.
+3. Repeat until all checks pass or 3 retry cycles are exhausted.
+4. After 3 retries with remaining failures, the agent returns the failure list to the orchestrator.
+
+The orchestrator escalates any remaining failures as `/devorch:talk` prompts.
+
+#### 3e. Report
 
 ```
 ## Verificação Final: <plan name>
-
-### Checks Automatizados
-Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M) OR ⏭ SKIPPED (if `noTests`)
 
 ### Integração Cross-phase
 <findings do Explore agent ou "✅ OK">
@@ -132,8 +143,12 @@ Security: <findings ou "✅ clean">
 Quality: <findings ou "✅ clean">
 Completeness: <findings ou "✅ clean">
 
-### Correções Automáticas
+### Correções de Review
 <N issues corrigidos inline, M via builder agents> (ou "Nenhum")
+
+### Check Conformance
+Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M) OR ⏭ SKIPPED (if `noTests`)
+Retries: <passou na 1ª tentativa / passou após N retries / falhou após 3 retries>
 
 ### Issues Pendentes
 <prompts /devorch:talk gerados> (ou "Nenhum")
