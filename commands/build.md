@@ -108,13 +108,17 @@ Classify each finding into one of three tiers:
 
 **Fix execution** (single pass — no retry loop here; automated checks run separately in 3d):
 
+If all reviewers report clean with zero findings, skip directly to 3d — no fixes or commits needed.
+
+Otherwise:
+
 1. Fix all trivial findings inline with Edit. Launch builder agents for all fix-level findings (parallel foreground Task calls in a single message).
-2. After all fixes complete, commit: `fix(review): <concise description of fixes>` (fix-level builders commit their own changes).
+2. After trivial fixes are applied, commit them: `fix(review): <concise description of fixes>`. Fix-level builders commit their own changes separately.
 3. Escalate any talk-level findings to `/devorch:talk` prompts.
 
 #### 3d. Check conformance
 
-After review fixes are committed (3c), launch a dedicated Task agent (`subagent_type="devorch-builder"`) as a **foreground** call to run automated checks and fix any failures.
+After review fixes are committed (3c), or immediately if no review fixes were needed, launch a dedicated Task agent (`subagent_type="devorch-builder"`) as a **foreground** call to run automated checks and fix any failures.
 
 Agent prompt includes:
 - `Working directory: <projectRoot>`
