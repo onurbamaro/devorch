@@ -13,7 +13,7 @@ Execute all remaining phases of the plan automatically, then verify the full imp
   - A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
   - A **full path** (contains `/` or ends in `.md`) → used as-is
   - Omitted → auto-detects from active worktrees
-- `--no-tests` (optional boolean flag) → skip the test suite during final verification. When set, `check-project.ts` receives `--no-test` and the final report shows tests as skipped. Parse this flag early alongside `--plan` and store as `noTests = true/false`.
+- `--no-tests` (optional boolean flag) → skip tests in the post-review check (3c). When set, the post-review `check-project.ts` receives `--no-test` and the report shows tests as skipped. Per-phase tests always run regardless of this flag. Parse this flag early alongside `--plan` and store as `noTests = true/false`.
 
 ## Workflow
 
@@ -74,7 +74,7 @@ Run `git -C <projectRoot> diff --name-only` against the baseline:
 
 #### 3b. Launch review agents (single message)
 
-Launch ALL of the following review agents in a single parallel batch (no automated checks here — those run in step 3d):
+Launch ALL of the following review agents in a single parallel batch (automated checks run after fixes in 3c):
 
 1. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
    - Prompt includes: `Working directory: <projectRoot>`, changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
@@ -106,9 +106,9 @@ Classify each finding into one of three tiers:
   /devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>
   ```
 
-**Fix execution** (single pass — no retry loop here; automated checks run separately in 3d):
+**Fix execution** (single pass):
 
-If all reviewers report clean with zero findings, skip directly to 3d — no fixes or commits needed.
+If all reviewers report clean with zero findings, skip directly to the post-review check below — no fixes or commits needed.
 
 Otherwise:
 
@@ -116,25 +116,17 @@ Otherwise:
 2. After trivial fixes are applied, commit them: `fix(review): <concise description of fixes>`. Fix-level builders commit their own changes separately.
 3. Escalate any talk-level findings to `/devorch:talk` prompts.
 
-#### 3d. Check conformance
+**Post-review check** (single run, no retry):
 
-After review fixes are committed (3c), or immediately if no review fixes were needed, launch a dedicated Task agent (`subagent_type="devorch-builder"`) as a **foreground** call to run automated checks and fix any failures.
+After review fixes are committed, or immediately if no review fixes were needed, run automated checks inline:
 
-Agent prompt includes:
-- `Working directory: <projectRoot>`
-- Command: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` (append `--no-test` if `noTests` is true)
-- Instruction to fix ALL failures found (lint, typecheck, build, test)
+```bash
+bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>
+```
 
-**Fix loop inside the agent** (max 3 retry cycles):
+Append `--no-test` only if `noTests` is true. Parse the JSON output. If any check fails (lint, typecheck, build, test), report the failures in the verdict as FAIL with specific details. Do NOT launch a fix agent or retry.
 
-1. Run `check-project.ts` and parse JSON output.
-2. If failures exist: fix with Edit tool, commit `fix(check): <concise description>`, re-run check.
-3. Repeat until all checks pass or 3 retry cycles are exhausted.
-4. After 3 retries with remaining failures, the agent returns the failure list to the orchestrator.
-
-The orchestrator escalates any remaining failures as `/devorch:talk` prompts.
-
-#### 3e. Report
+#### 3d. Report
 
 ```
 ## Verificação Final: <plan name>
@@ -150,9 +142,8 @@ Completeness: <findings ou "✅ clean">
 ### Correções de Review
 <N issues corrigidos inline, M via builder agents> (ou "Nenhum")
 
-### Check Conformance
+### Post-Review Check
 Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M) OR ⏭ SKIPPED (if `noTests`)
-Retries: <passou na 1ª tentativa / passou após N retries / falhou após 3 retries>
 
 ### Issues Pendentes
 <prompts /devorch:talk gerados> (ou "Nenhum")
