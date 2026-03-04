@@ -1,7 +1,7 @@
 # devorch State
 - Plan: Per-Phase Test Execution
-- Last completed phase: 1
-- Status: ready for phase 2
+- Last completed phase: 2
+- Status: all phases complete
 
-## Phase 1 Summary
-Removed --no-test from build-phase.md validation command and added test failures to the fix loop alongside lint/typecheck/build
+## Phase 2 Summary
+Removed check-conformance step (3d) from build.md and replaced with lightweight post-review check in step 3c. Renumbered report to 3d. Updated noTests flag to only affect post-review check.
