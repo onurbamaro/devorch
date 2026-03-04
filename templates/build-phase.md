@@ -41,11 +41,11 @@ Execute one phase of the current devorch plan.
 4. **Validate phase code**: Run the following via Bash with `run_in_background=true`:
 
    ```
-   bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --no-test --with-validation --plan .devorch/plans/current.md --phase N
+   bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --with-validation --plan .devorch/plans/current.md --phase N
    ```
 
    Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
-   - If lint/typecheck fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase — do not proceed.
+   - If lint/typecheck/test fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase — do not proceed.
    - If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
    - If everything passes: proceed.
 
