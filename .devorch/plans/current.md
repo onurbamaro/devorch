@@ -1,92 +1,126 @@
-# Plan: Split Final Verification into Review Fixes and Check Conformance
+# Plan: Per-Phase Test Execution
 
 <description>
-Restructure the final verification step (section 3) of build.md to separate code review fixes from check conformance fixes. Currently both are mixed in a single classify-and-fix loop (3c), which the model sometimes skips or executes incorrectly due to context exhaustion. The new design runs review fixes first (inline), then delegates check conformance to a dedicated Task agent with clean context and a 3-retry loop.
+Remove the hardcoded --no-test from build-phase.md so each phase runs tests with full builder context, remove the check-conformance step (3d) from build.md since per-phase validation makes it redundant, and add a quick post-review check to catch regressions from review fixes.
 </description>
 
 <objective>
-After this change, build.md section 3 has two distinct stages: (1) code review fixes from explorer/reviewer findings, committed before any check runs, and (2) a dedicated Task agent that runs check-project.ts, fixes lint/typecheck/build/test failures in a loop (max 3 retries), and reports pass/fail. The check-project.ts invocation moves OUT of the parallel 3b launch.
+Every build phase runs lint, typecheck, build, AND tests — with the builder fixing failures in-context. The check-conformance step is removed. A single quick check runs after review-fixes as a lightweight safety net.
 </objective>
 
 <classification>
 Type: Enhancement
-Complexity: Simple
-Risk: Low
+Complexity: Medium
+Risk: Medium
 </classification>
 
 <decisions>
-- Review fixes and check fixes are separate stages -> review first, then check
-- Check-project.ts runs AFTER review fixes are committed (runs only once, captures both pre-existing and regression issues)
-- Check conformance stage runs as a dedicated Task agent with clean context
-- Check fix loop allows 3 retries (up from 2)
-- Review fixes remain inline in the orchestrator
+- Tests per phase → Always run tests per phase (remove hardcoded --no-test)
+- Check-conformance → Remove step 3d entirely; per-phase validation is sufficient
+- Post-review check → Add quick check-project.ts run (no retry loop) after review-fixes (3c)
+- Test fix loop → Include test failures in the existing per-phase fix loop alongside lint/typecheck/build
 </decisions>
 
+<problem-statement>
+The check-conformance step (3d) in build.md takes 41 minutes with only 40 tool uses because: (1) tests are skipped per-phase via hardcoded --no-test, so failures accumulate across phases; (2) the conformance agent starts with zero context about what changed, spending most time investigating rather than fixing. A phase builder that just made the changes could fix test failures in ~1 minute.
+</problem-statement>
+
+<solution-approach>
+Remove the --no-test flag from the per-phase validation template so builders run tests immediately after their changes, while they still have full context. This eliminates the need for a separate conformance agent. Add tests to the existing fix loop so builders auto-fix test failures. Remove check-conformance (3d) from build.md entirely. Add a lightweight single-run check after review-fixes (3c) to catch regressions introduced by review corrections. Renumber 3e (report) to 3d.
+
+Alternative considered: passing context (changed files + phase summaries) to the conformance agent — rejected because per-phase testing is fundamentally better (builder has full context, fixes in seconds vs minutes).
+</solution-approach>
+
 <relevant-files>
-- `commands/build.md` — the main file being modified (sections 3b, 3c, 3d, report)
-- `templates/build-phase.md` — read-only reference for per-phase check behavior (not modified)
-- `scripts/check-project.ts` — read-only reference for check-project interface (not modified)
+- `templates/build-phase.md` — per-phase validation template; line 44 has hardcoded --no-test
+- `commands/build.md` — build orchestration; steps 3c (review-fixes), 3d (check-conformance), 3e (report)
+- `scripts/check-project.ts` — validation script; handles --no-test flag, test execution with 120s timeout
 
 <new-files>
-- (none)
+(none)
 </new-files>
 </relevant-files>
 
-<phase1 name="Restructure Final Verification">
-<goal>Modify build.md sections 3b through 3d to separate review fixes from check conformance, and add the dedicated check agent stage.</goal>
+<phase1 name="Enable Per-Phase Tests">
+<goal>Remove hardcoded --no-test from build-phase.md and include tests in the builder fix loop</goal>
 
 <tasks>
-#### 1. Restructure build.md final verification
-- **ID**: restructure-final-verification
+#### 1. Remove --no-test and Add Tests to Fix Loop
+- **ID**: enable-phase-tests
 - **Assigned To**: builder-1
-- In `commands/build.md`, modify **section 3b** ("Launch everything parallel"):
-  - REMOVE the check-project.ts Bash call (item 1) from the parallel batch. Only launch: cross-phase Explore agent + 3 adversarial review agents.
-  - Update the description to say reviewers only — no automated checks here.
-  - Remove the sentence "Bash calls run in background; Explore/review agents block as foreground Task calls. After agents return, collect background Bash results." and replace with "All agents block as foreground Task calls."
-- Modify **section 3c** ("Synthesize and dispatch"):
-  - Rename to "3c. Code review fixes".
-  - This section ONLY processes findings from the cross-phase explorer and 3 review agents. Remove all references to check-project.ts results.
-  - Keep the classify (trivial/fix-level/talk-level) logic and fix dispatch as-is for review findings.
-  - After fixes, commit with prefix `fix(review):` instead of `fix(check):`.
-  - REMOVE the "Re-run check-project.ts" retry loop entirely from this section. No recheck here — check runs later.
-  - Keep the talk-level escalation to `/devorch:talk`.
-- Add new **section 3d** ("Check conformance"):
-  - Launch a dedicated Task agent (`subagent_type="devorch-builder"`) as a foreground call.
-  - Agent prompt includes: `Working directory: <projectRoot>`, the command to run (`bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>`, with `--no-test` appended if `noTests` is true), instruction to fix all failures found (lint, typecheck, build, test).
-  - Fix loop inside the agent: run check -> if failures -> fix with Edit tool -> commit `fix(check): <description>` -> re-run check -> repeat. Max 3 retry cycles.
-  - After 3 retries with remaining failures, the agent returns the failure list to the orchestrator.
-  - The orchestrator escalates remaining failures as `/devorch:talk` prompts.
-- Renumber existing **section 3d** ("Report") to **3e**.
-  - Update the report template to show two separate subsections: "Correções de Review" (from 3c) and "Check Conformance" (from 3d).
-  - Show retry count for check conformance (e.g., "passou após 2 retries" or "falhou após 3 retries").
+- In `templates/build-phase.md`, remove `--no-test` from the check-project.ts invocation in step 4 (validation)
+- In the same file, ensure the fix loop that handles lint/typecheck/build failures also handles test failures
+- The fix loop should treat test failures the same as lint/typecheck failures: attempt fix with Edit tool, commit, re-run check
+- Verify the check-project.ts command still includes `--with-validation` and phase-specific flags
 
 #### 2. Validate Phase
 - **ID**: validate-phase-1
 - **Assigned To**: validator
-- Verify the modified build.md has correct section numbering (3a, 3b, 3c, 3d, 3e, then 4)
-- Verify check-project.ts is NOT referenced in section 3b
-- Verify check-project.ts IS referenced in section 3d with the correct command format
-- Verify the retry count is 3 in section 3d
-- Verify section 3c only references review/explorer findings, no check-project
-- Verify section 3e report template has separate subsections for review fixes and check conformance
-- Verify `--no-test` flag handling is present in section 3d
+- Verify `--no-test` no longer appears in templates/build-phase.md validation command
+- Verify the fix loop instructions mention test failures alongside lint/typecheck/build
+- Verify --with-validation flag is preserved
 </tasks>
 
 <execution>
-**Wave 1** (build): restructure-final-verification
+**Wave 1** (single): enable-phase-tests
 **Wave 2** (validation): validate-phase-1
 </execution>
 
 <criteria>
-- [ ] Section 3b launches only review agents (no check-project.ts)
-- [ ] Section 3c handles only review findings, commits with `fix(review):` prefix, no retry loop
-- [ ] Section 3d is a dedicated Task agent running check-project.ts with 3-retry fix loop
-- [ ] Section 3e report shows both stages separately with retry count
-- [ ] Section numbering is consistent (3a through 3e, then 4)
-- [ ] `--no-test` flag is properly handled in section 3d
+- [ ] templates/build-phase.md step 4 validation command does NOT include --no-test
+- [ ] Fix loop in build-phase.md handles test failures (not just lint/typecheck/build)
+- [ ] --with-validation flag preserved in check-project.ts invocation
 </criteria>
 
 <validation>
-- `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/current.md` — validates plan structure
+- `grep -c "no-test" templates/build-phase.md` — should return 0
 </validation>
+
+<handoff>
+build-phase.md now runs tests per-phase. Phase 2 will update build.md to remove check-conformance and add post-review check.
+</handoff>
 </phase1>
+
+<phase2 name="Restructure Final Verification">
+<goal>Remove check-conformance (3d) from build.md, add quick post-review check to 3c, renumber report to 3d</goal>
+
+<tasks>
+#### 1. Update Build Orchestration
+- **ID**: restructure-verification
+- **Assigned To**: builder-1
+- In `commands/build.md`, remove the entire check-conformance step (3d) — the dedicated builder agent with retry loop
+- In step 3c (review-fixes), after review corrections are applied and committed, add a single inline run of `check-project.ts <projectRoot>` (append `--no-test` only if `noTests` is true). No retry loop, no agent — just run the command and capture results.
+- If the post-review check finds failures, report them in the verdict as FAIL with the specific failures listed. Do NOT launch a fix agent.
+- Renumber the report step from 3e to 3d
+- Update the report format: replace "Check Conformance" subsection with "Post-Review Check" showing pass/fail per check (lint, typecheck, build, test). Remove retry count display since there are no retries.
+- Remove any references to check-conformance agent, its retry loop, or the dedicated Task agent launch
+- Clean up the `noTests` flag: it now only affects the post-review check in 3c (per-phase tests always run via the template, regardless of this flag)
+
+#### 2. Validate Phase
+- **ID**: validate-phase-2
+- **Assigned To**: validator
+- Verify check-conformance step is fully removed from build.md
+- Verify post-review check exists in step 3c (single run, no retry)
+- Verify report step is now 3d (not 3e)
+- Verify no dangling references to check-conformance agent or retry loop
+- Verify noTests flag documentation is updated
+</tasks>
+
+<execution>
+**Wave 1** (single): restructure-verification
+**Wave 2** (validation): validate-phase-2
+</execution>
+
+<criteria>
+- [ ] No check-conformance step (3d with retry loop) exists in build.md
+- [ ] Step 3c includes a single check-project.ts run after review fixes
+- [ ] Report is now step 3d (renumbered from 3e)
+- [ ] Report format includes Post-Review Check section instead of Check Conformance
+- [ ] noTests flag only affects post-review check in 3c
+- [ ] No orphan references to check-conformance or its builder agent
+</criteria>
+
+<validation>
+- `grep -ci "check.conformance" commands/build.md` — should return 0
+</validation>
+</phase2>
