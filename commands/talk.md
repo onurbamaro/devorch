@@ -108,6 +108,8 @@ Crie 2-4 agentes onde:
 - Cada agente sabe o que os outros estão cobrindo
 ```
 
+**Effort guidance**: Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth.
+
 **Execution**: Launch all explorers as parallel Task calls with `subagent_type="Explore"` in a single message. Each prompt includes: role, specific focus, $ARGUMENTS, CONVENTIONS.md (if it exists). Do NOT use TeamCreate for exploration — parallel Task agents are faster and exploration does not need inter-agent coordination.
 
 After all return: write combined findings to `.devorch/explore-cache.md` with format:
@@ -172,6 +174,8 @@ If option 3: summarize findings and end.
 If option 1: continue to Step 6.
 
 ### 6. Design solution (medium/complex only)
+
+**Effort guidance**: Think deeply. Consider alternatives, edge cases, and long-term implications. This is where reasoning depth matters most.
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
@@ -240,9 +244,10 @@ Quality guardrails:
 
 ## Sizing Rules
 
-- Max **5 tasks** per phase. Each completable by one builder.
+- Max **5 tasks** per phase. Tasks can span multiple related files when the changes are cohesive. Each completable by one builder.
 - Each phase MUST fit in 1 phase execution without context compaction.
-- Prefer more smaller phases over fewer large ones.
+- Prefer fewer phases with well-scoped tasks. Each builder now has ample context (1M tokens) — use it by including more relevant explore-cache and conventions per task.
+- Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused.
 
 ## Plan Format
 
