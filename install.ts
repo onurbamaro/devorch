@@ -110,6 +110,39 @@ if (process.argv.includes("--force-statusline")) {
   console.log("  statusline: forced install");
 }
 
+// Register PostCompact hook for devorch state refresh
+const postCompactHookPath = join(CLAUDE_HOME, "hooks", "post-compact-state-refresh.ts");
+const postCompactCmd = `bun ${postCompactHookPath}`;
+
+if (!settings.hooks) {
+  settings.hooks = {};
+}
+if (!settings.hooks.PostCompact) {
+  settings.hooks.PostCompact = [];
+}
+
+// Check if devorch PostCompact hook is already registered
+const hasPostCompact = settings.hooks.PostCompact.some(
+  (h: any) => h.command?.includes("post-compact-state-refresh")
+);
+
+if (!hasPostCompact) {
+  settings.hooks.PostCompact.push({
+    type: "command",
+    command: postCompactCmd,
+  });
+  console.log("\n  PostCompact hook: configured");
+} else {
+  // Update existing entry
+  const idx = settings.hooks.PostCompact.findIndex(
+    (h: any) => h.command?.includes("post-compact-state-refresh")
+  );
+  if (idx >= 0) {
+    settings.hooks.PostCompact[idx].command = postCompactCmd;
+  }
+  console.log("\n  PostCompact hook: updated");
+}
+
 writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
 console.log(`\nInstalled ${totalFiles} files.`);
