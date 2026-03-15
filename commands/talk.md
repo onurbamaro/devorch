@@ -182,12 +182,15 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 ### 7. Create plan
 
 1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" -> `courier-payroll-export`).
-2. **Setup worktree** (with optional satellites):
+2. **Setup worktree** (with optional satellites and sparse-checkout):
    - If the user selected sibling repos as satellites during Step 3, include them in the plan as `<secondary-repos>` entries (name + relative path from the "## Sibling Repos" section of map-project.ts output).
    - If the plan includes `<secondary-repos>`, parse it and build a JSON array: `[{"name": "<name>", "path": "<relative-path>"}, ...]`
-   - Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
-   - If no `<secondary-repos>`: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`
-   - Parse the JSON output to get `worktreePath`. If `satellites` is present in output, report each satellite worktree path and any warnings.
+   - **Derive sparse paths** (optional optimization): Extract unique top-level directories from `<relevant-files>` and `<new-files>` entries (e.g., `src/components/Foo.tsx` → `src`, `hooks/bar.ts` → `hooks`). Join as comma-separated string. Sparse-checkout is an optional optimization. If the plan references more than 10 top-level directories, skip `--sparse-paths` to use full checkout.
+   - With satellites and sparse paths: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>' --sparse-paths '<dirs>'`
+   - With satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
+   - With sparse paths, no satellites: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --sparse-paths '<dirs>'`
+   - No satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`
+   - Parse the JSON output to get `worktreePath`. If `sparsePaths` is present, log the sparse-checkout paths. If `satellites` is present in output, report each satellite worktree path and any warnings.
 3. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
 4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
 5. Do NOT copy `explore-cache.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
