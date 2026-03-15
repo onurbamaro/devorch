@@ -108,6 +108,8 @@ Crie 2-4 agentes onde:
 - Cada agente sabe o que os outros estão cobrindo
 ```
 
+**Effort guidance**: Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth.
+
 **Execution**: Launch all explorers as parallel Task calls with `subagent_type="Explore"` in a single message. Each prompt includes: role, specific focus, $ARGUMENTS, CONVENTIONS.md (if it exists). Do NOT use TeamCreate for exploration — parallel Task agents are faster and exploration does not need inter-agent coordination.
 
 After all return: write combined findings to `.devorch/explore-cache.md` with format:
@@ -173,17 +175,22 @@ If option 1: continue to Step 6.
 
 ### 6. Design solution (medium/complex only)
 
+**Effort guidance**: Think deeply. Consider alternatives, edge cases, and long-term implications. This is where reasoning depth matters most.
+
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
 ### 7. Create plan
 
 1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" -> `courier-payroll-export`).
-2. **Setup worktree** (with optional satellites):
+2. **Setup worktree** (with optional satellites and sparse-checkout):
    - If the user selected sibling repos as satellites during Step 3, include them in the plan as `<secondary-repos>` entries (name + relative path from the "## Sibling Repos" section of map-project.ts output).
    - If the plan includes `<secondary-repos>`, parse it and build a JSON array: `[{"name": "<name>", "path": "<relative-path>"}, ...]`
-   - Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
-   - If no `<secondary-repos>`: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`
-   - Parse the JSON output to get `worktreePath`. If `satellites` is present in output, report each satellite worktree path and any warnings.
+   - **Derive sparse paths** (optional optimization): Extract unique top-level directories from `<relevant-files>` and `<new-files>` entries (e.g., `src/components/Foo.tsx` → `src`, `hooks/bar.ts` → `hooks`). Join as comma-separated string. Sparse-checkout is an optional optimization. If the plan references more than 10 top-level directories, skip `--sparse-paths` to use full checkout.
+   - With satellites and sparse paths: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>' --sparse-paths '<dirs>'`
+   - With satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
+   - With sparse paths, no satellites: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --sparse-paths '<dirs>'`
+   - No satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`
+   - Parse the JSON output to get `worktreePath`. If `sparsePaths` is present, log the sparse-checkout paths. If `satellites` is present in output, report each satellite worktree path and any warnings.
 3. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
 4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
 5. Do NOT copy `explore-cache.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
@@ -240,9 +247,10 @@ Quality guardrails:
 
 ## Sizing Rules
 
-- Max **5 tasks** per phase. Each completable by one builder.
+- Max **5 tasks** per phase. Tasks can span multiple related files when the changes are cohesive. Each completable by one builder.
 - Each phase MUST fit in 1 phase execution without context compaction.
-- Prefer more smaller phases over fewer large ones.
+- Prefer fewer phases with well-scoped tasks. Each builder now has ample context (1M tokens) — use it by including more relevant explore-cache and conventions per task.
+- Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused.
 
 ## Plan Format
 

@@ -1,6 +1,6 @@
 /**
  * setup-worktree.ts — Creates a git worktree for parallel plan execution.
- * Usage: bun ~/.claude/devorch-scripts/setup-worktree.ts --name <kebab-case-name> [--secondary '<json>'] [--recreate] [--add-secondary '<json>']
+ * Usage: bun ~/.claude/devorch-scripts/setup-worktree.ts --name <kebab-case-name> [--secondary '<json>'] [--recreate] [--add-secondary '<json>'] [--sparse-paths '<dirs>']
  * Output: JSON {"worktreePath", "branch", "devorch": true|false, "satellites"?: [...]}
  * Creates .worktrees/<name> with branch devorch/<name>. Copies uncommitted .devorch/ files.
  * With --secondary, also creates worktrees in secondary repos.
@@ -12,11 +12,12 @@ import { join, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { isGitRepo, checkBranchExists, getUncommittedFiles } from "./lib/git-utils";
 
-const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string }>([
+const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string; "sparse-paths": string }>([
   { name: "name", type: "string", required: true },
   { name: "secondary", type: "string", required: false },
   { name: "recreate", type: "boolean", required: false },
   { name: "add-secondary", type: "string", required: false },
+  { name: "sparse-paths", type: "string", required: false },
 ]);
 
 // Mutual exclusion: --secondary and --add-secondary
@@ -55,6 +56,60 @@ function removeWorktreeAndBranch(wtPath: string, branchName: string, repoCwd: st
   if (branchProc.exitCode !== 0) {
     console.error(`Branch ${branchName} has unmerged commits. Use git branch -D to force delete.`);
     process.exit(1);
+  }
+}
+
+/**
+ * Applies sparse-checkout to a worktree if --sparse-paths is provided.
+ * Always includes .devorch and root config files as base paths.
+ * Non-blocking — logs warning on failure and continues.
+ */
+const BASE_SPARSE_PATHS = [".devorch"];
+const ROOT_CONFIG_FILES = ["package.json", "tsconfig.json", "bun.lock", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
+
+function applySparseCheckout(wtPath: string, sparsePaths: string, repoCwd: string): string[] | null {
+  try {
+    // Init sparse-checkout in cone mode
+    const initProc = Bun.spawnSync(
+      ["git", "-C", wtPath, "sparse-checkout", "init", "--cone"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    if (initProc.exitCode !== 0) {
+      const stderr = initProc.stderr.toString("utf-8").trim();
+      console.error(`Warning: sparse-checkout init failed: ${stderr}`);
+      return null;
+    }
+
+    // Parse comma-separated paths
+    const userPaths = sparsePaths.split(",").map((p) => p.trim()).filter(Boolean);
+
+    // Prepend base paths and root config files that exist in the repo
+    const allPaths = [...BASE_SPARSE_PATHS];
+    for (const cfg of ROOT_CONFIG_FILES) {
+      if (existsSync(join(repoCwd, cfg))) {
+        allPaths.push(cfg);
+      }
+    }
+    allPaths.push(...userPaths);
+
+    // Deduplicate
+    const uniquePaths = [...new Set(allPaths)];
+
+    // Set sparse-checkout paths
+    const setProc = Bun.spawnSync(
+      ["git", "-C", wtPath, "sparse-checkout", "set", ...uniquePaths],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    if (setProc.exitCode !== 0) {
+      const stderr = setProc.stderr.toString("utf-8").trim();
+      console.error(`Warning: sparse-checkout set failed: ${stderr}`);
+      return null;
+    }
+
+    return uniquePaths;
+  } catch (e) {
+    console.error(`Warning: sparse-checkout failed: ${e}`);
+    return null;
   }
 }
 
@@ -160,6 +215,14 @@ function createSatellites(jsonStr: string, recreate: boolean): SatelliteResult[]
       process.exit(1);
     }
 
+    // Apply sparse-checkout to satellite if --sparse-paths provided
+    if (args["sparse-paths"]) {
+      const sparseResult = applySparseCheckout(satWorktreePath, args["sparse-paths"], repoPath);
+      if (!sparseResult) {
+        satWarnings.push("sparse-checkout failed — using full checkout");
+      }
+    }
+
     results.push({
       name: repo.name,
       repoPath,
@@ -246,6 +309,15 @@ if (worktreeProc.exitCode !== 0) {
   process.exit(1);
 }
 
+// Apply sparse-checkout if --sparse-paths provided
+let sparsePaths: string[] | null = null;
+if (args["sparse-paths"]) {
+  sparsePaths = applySparseCheckout(worktreePath, args["sparse-paths"], cwd);
+  if (!sparsePaths) {
+    console.error("Warning: sparse-checkout failed — using full checkout");
+  }
+}
+
 // Copy uncommitted .devorch/ files to worktree
 const devorchSrc = join(cwd, ".devorch");
 const devorchDst = join(worktreePath, ".devorch");
@@ -296,6 +368,10 @@ const output: Record<string, unknown> = {
   branch,
   devorch: devorchCopied,
 };
+
+if (sparsePaths) {
+  output.sparsePaths = sparsePaths;
+}
 
 if (satellites.length > 0) {
   output.satellites = satellites;
