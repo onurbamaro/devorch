@@ -21,6 +21,7 @@ Execute one phase of the current devorch plan.
    - Full task details inline from the `tasks` map (builders skip TaskGet)
    - Convention sections matched by **file extension** — include ALL sections matching extensions in the task (e.g., `.tsx` → React + TypeScript + style conventions; `.ts` → TypeScript conventions; `.css`/`.scss` → style conventions). Never filter by perceived "relevance" — inclua toda seção cujas extensões aparecem no task.
    - ALL explore-cache sections relevant to this phase (not just task-specific ones). This reduces the need for builders to launch their own Explore agents.
+   - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
    - `commit with type(scope): description`
    - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
@@ -45,7 +46,7 @@ Execute one phase of the current devorch plan.
    ```
 
    Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
-   - If lint/typecheck/test fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase — do not proceed.
+   - If lint/typecheck/test fail: fix ALL errors regardless of origin. **Effort guidance for fix loop**: When fixing errors, reason deeply about root cause. Don't just patch symptoms — understand why the error occurred and fix the underlying issue. If unable to fix after one retry, report the errors and block the phase — do not proceed.
    - If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
    - If everything passes: proceed.
 
