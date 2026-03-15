@@ -90,7 +90,7 @@ if (existsSync(settingsPath)) {
 }
 
 const hookPath = join(CLAUDE_HOME, "hooks", "devorch-statusline.cjs");
-const statuslineCmd = `node ${hookPath}`;
+const statuslineCmd = `node "${hookPath}"`;
 const isDevorch = settings.statusLine?.command?.includes("devorch-statusline");
 
 if (!settings.statusLine) {
@@ -112,7 +112,7 @@ if (process.argv.includes("--force-statusline")) {
 
 // Register PostCompact hook for devorch state refresh
 const postCompactHookPath = join(CLAUDE_HOME, "hooks", "post-compact-state-refresh.ts");
-const postCompactCmd = `bun ${postCompactHookPath}`;
+const postCompactCmd = `bun "${postCompactHookPath}"`;
 
 if (!settings.hooks) {
   settings.hooks = {};

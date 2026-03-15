@@ -69,8 +69,9 @@ try {
   const summaryMatch = stateContent.match(/## Phase \d+ Summary\n([\s\S]*?)(?:\n##|$)/);
   const summary = summaryMatch ? summaryMatch[1].trim().split("\n")[0] : "";
 
-  // Read plan title from current.md
+  // Read plan title and count phases from current.md (single read)
   let planTitle = "unknown";
+  let totalPhases = "?";
   const planPath = join(projectRoot, ".devorch", "plans", "current.md");
   if (existsSync(planPath)) {
     try {
@@ -79,22 +80,12 @@ try {
       if (titleMatch) {
         planTitle = titleMatch[1].trim();
       }
-    } catch {
-      // ignore — can't read plan
-    }
-  }
-
-  // Count total phases from plan
-  let totalPhases = "?";
-  if (existsSync(planPath)) {
-    try {
-      const planContent = readFileSync(planPath, "utf-8");
       const phaseMatches = planContent.match(/<phase\d+\s/g);
       if (phaseMatches) {
         totalPhases = String(phaseMatches.length);
       }
     } catch {
-      // ignore
+      // ignore — can't read plan
     }
   }
 
