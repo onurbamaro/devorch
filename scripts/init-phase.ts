@@ -11,7 +11,7 @@ import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 
-const CONTENT_THRESHOLD = 25000;
+const CONTENT_THRESHOLD = 50000;
 const CONTEXT_FILE = ".devorch/.phase-context.md";
 
 interface WaveInfo {

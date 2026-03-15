@@ -20,7 +20,7 @@ const args = parseArgs<{ action: string; "max-lines": number; root: string }>([
 ]);
 
 const action = args.action;
-const maxLines = args["max-lines"] || 3000;
+const maxLines = args["max-lines"] || 5000;
 const root = args.root;
 const actions = action.split(",").map((a) => a.trim().toLowerCase());
 const baseDir = root || process.cwd();
