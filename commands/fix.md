@@ -42,6 +42,8 @@ If **FIX**: continue.
 
 ### 3. Investigate with Agent Teams
 
+**Effort guidance for investigators**: Investigate systematically. Test your hypothesis against the code — don't speculate. Report concrete evidence.
+
 Launch 2-3 parallel Explore agents (Task with `subagent_type="Explore"`), each with a distinct focus:
 
 - If bug: each agent tests a different hypothesis about the root cause. Hypotheses must be specific and falsifiable.
@@ -66,7 +68,7 @@ Implement the fix directly using Edit/Write tools. Do NOT spawn builder agents �
 Launch everything in parallel in a single message:
 
 - `bun $CLAUDE_HOME/devorch-scripts/check-project.ts` — Bash with `run_in_background=true` (full, with tests)
-- 1-2 review agents (conditional — launch if: security area, shared code, or complex logic) — Task with `subagent_type="Explore"`, foreground, parallel. Each review agent receives: modified files (git diff), fix description, CONVENTIONS.md. Focus: did the fix introduce regressions? Untreated edge cases? Pattern violations?
+- 1-2 review agents (conditional — launch if: security area, shared code, or complex logic) — Task with `subagent_type="Explore"`, foreground, parallel. **Effort guidance for reviewers**: Review thoroughly. This is a targeted fix — verify it doesn't introduce regressions or miss related issues. Check edge cases. Each review agent receives: modified files (git diff), fix description, CONVENTIONS.md. Focus: did the fix introduce regressions? Untreated edge cases? Pattern violations?
 
 Collect all results after they complete.
 
