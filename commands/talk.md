@@ -179,6 +179,25 @@ If option 1: continue to Step 6.
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
+#### Phase consolidation guidance
+
+Prefer **fewer, denser phases** over many thin ones. With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate when safe.
+
+**When to merge adjacent phases** (both conditions must hold):
+- Both phases have ≤3 tasks each
+- No cross-phase file conflicts (no file modified in both phases)
+- No mandatory handoff context needed (phase B doesn't depend on phase A's runtime output)
+
+**When NOT to merge**:
+- Tasks in phase B depend on phase A's committed outputs (e.g., generated files, schema changes)
+- Shared file modifications across phases — two builders in the same wave cannot edit the same file
+- Phase A's validation must pass before phase B's work begins (e.g., migrations must succeed before seeding)
+
+**Examples**:
+- Two phases of 2 tasks each, no shared files → merge into one phase of 4 tasks in 2 waves
+- Phase 1 creates a new module, Phase 2 imports it → keep separate (producer/consumer dependency)
+- Phase 1 has 5 tasks, Phase 2 has 1 task → keep separate (Phase 1 already at max)
+
 ### 7. Create plan
 
 1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" -> `courier-payroll-export`).
@@ -239,6 +258,7 @@ Maximize parallel execution without losing quality:
 - **Only create sequential waves when truly necessary**: task B reads output of task A, or both modify the same file.
 - **Validation is always the last wave**, after all build tasks complete.
 - **Aim for wide waves**: 3 parallel tasks in 1 wave is better than 3 sequential waves of 1 task.
+- **Wider waves in fewer phases > narrow waves across many phases**: A single phase with a 4-task wave completes faster than two phases with 2-task waves each, due to per-phase overhead (init, check, summary). Consolidate when tasks are independent.
 
 Quality guardrails:
 - Two tasks in the same wave must NOT modify the same file.
@@ -251,6 +271,7 @@ Quality guardrails:
 - Each phase MUST fit in 1 phase execution without context compaction.
 - Prefer fewer phases with well-scoped tasks. Each builder now has ample context (1M tokens) — use it by including more relevant explore-cache and conventions per task.
 - Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused.
+- **Minimize phase count**: With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate adjacent phases when safe (see Phase consolidation guidance in Step 6). A 2-phase plan that takes 10 min is better than a 4-phase plan that takes 18 min for the same work.
 
 ## Plan Format
 
