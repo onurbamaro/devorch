@@ -156,6 +156,8 @@ Read `<projectRoot>/.devorch/state.md`. Check that `Last completed phase:` shows
 
 After all phases complete successfully, execute the full implementation verification **inline in this context** (not as Task — so that agents are first-level Task calls).
 
+> **Source-read rule relaxation**: The orchestrator reads source files directly in this step only (review phase). During phase execution (step 2), source reads remain delegated to builders and Explore agents.
+
 #### 3a. Determine changed files
 
 Run `git -C <projectRoot> diff --name-only` against the baseline:
@@ -163,31 +165,36 @@ Run `git -C <projectRoot> diff --name-only` against the baseline:
 - If partial: diff up to the last completed phase.
 - Fallback: diff against the plan commit (`chore(devorch): plan`).
 
-#### 3b. Launch review agents (single message)
+#### 3b. Inline cross-phase verification + launch review agents
 
-Launch ALL of the following review agents in a single parallel batch (automated checks run after fixes in 3c):
+Perform the cross-phase verification **inline** (no Explore agent) and launch adversarial reviewers **in parallel in the same message**:
 
-1. **Cross-phase Explore agent** — Task foreground (`subagent_type="Explore"`):
-   - Prompt includes: `Working directory: <projectRoot>`, changed files list, new-files list from the plan, phase goals + handoffs from each completed phase, CONVENTIONS.md content
-   - **All file reads and git commands must use `<projectRoot>` as the base path** (e.g., `git -C <projectRoot> ...`, absolute paths for file reads)
-   - Focus ONLY on files listed in the git diff
-   - Verify: imports resolve, no orphan exports, no leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders, type consistency across module boundaries, no dead code, handoff contracts honored
-   - Report each finding with file:line evidence
+**Inline cross-phase check** (orchestrator reads diff files directly):
 
-2. **3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
-   - **Effort guidance for reviewers**: Analyze deeply. Look for subtle bugs, security issues, and edge cases that builders might miss. Thoroughness matters more than speed here.
-   - Each agent receives: `Working directory: <projectRoot>`, plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
-   - **All file reads and git commands must use `<projectRoot>` as the base path**
-   - Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
-   - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
-   - **quality-reviewer**: edge cases, error handling, correctness, maintainability
-   - **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
+Using the changed files list from 3a, read each changed file with the Read tool and verify:
+- Imports resolve — no references to moved/renamed/deleted modules
+- No orphan exports — exported symbols are imported somewhere
+- No leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders
+- Type consistency across module boundaries
+- No dead code introduced
+- Handoff contracts honored between phases
 
-All agents block as foreground Task calls.
+Record findings with file:line evidence. This runs inline while the adversarial reviewers execute in parallel.
+
+**3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
+- **Effort guidance for reviewers**: Analyze deeply. Look for subtle bugs, security issues, and edge cases that builders might miss. Thoroughness matters more than speed here.
+- Each agent receives: `Working directory: <projectRoot>`, plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
+- **All file reads and git commands must use `<projectRoot>` as the base path**
+- Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
+- **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
+- **quality-reviewer**: edge cases, error handling, correctness, maintainability
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
+
+All 3 adversarial agents block as foreground Task calls.
 
 #### 3c. Code review fixes
 
-Collect results from: cross-phase Explore agent, 3 adversarial reviewers.
+Collect results from: inline cross-phase check, 3 adversarial reviewers.
 
 Classify each finding into one of three tiers:
 
@@ -198,25 +205,31 @@ Classify each finding into one of three tiers:
   /devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>
   ```
 
-**Fix execution** (single pass):
+**Fix execution** (batch by file):
 
-If all reviewers report clean with zero findings, skip directly to the post-review check below — no fixes or commits needed.
+**Skip-on-zero-findings**: If all 3 adversarial reviewers AND the inline cross-phase check report zero findings, skip the fix execution AND the post-review check entirely. The last phase's `check-project.ts` already validated everything — no need to re-run.
 
 Otherwise:
 
-1. Fix all trivial findings inline with Edit. Launch builder agents for all fix-level findings (parallel foreground Task calls in a single message).
-2. After trivial fixes are applied, commit them: `fix(review): <concise description of fixes>`. Fix-level builders commit their own changes separately.
-3. Escalate any talk-level findings to `/devorch:talk` prompts.
+1. **Batch trivial fixes by file**: Group all trivial findings by file path. For each file, apply ALL fixes in a single Edit call sequence before moving to the next file. Do not interleave edits across files.
+2. Launch builder agents for all fix-level findings (parallel foreground Task calls in a single message).
+3. After trivial fixes are applied, commit them: `fix(review): <concise description of fixes>`. Fix-level builders commit their own changes separately.
+4. Escalate any talk-level findings to `/devorch:talk` prompts.
 
-**Post-review check** (single run, no retry):
+**Post-review check** (with 1 retry for fix-level builders):
 
-After review fixes are committed, or immediately if no review fixes were needed, run automated checks inline:
+After review fixes are committed, run automated checks inline:
 
 ```bash
 bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>
 ```
 
-Append `--no-test` only if `noTests` is true. Parse the JSON output. If any check fails (lint, typecheck, build, test), report the failures in the verdict as FAIL with specific details. Do NOT launch a fix agent or retry.
+Append `--no-test` only if `noTests` is true. Parse the JSON output.
+
+- If all checks pass: proceed to verdict.
+- If any check fails (lint, typecheck, build, test): diagnose which fix-level builder's changes caused the failure. Re-launch that specific builder with error context (1 retry max, `subagent_type="devorch-builder"`). After retry, run `check-project.ts` once more.
+  - If retry passes: proceed to verdict.
+  - If retry fails or no fix-level builder is responsible: report failures in the verdict as FAIL with specific details.
 
 #### 3d. Report
 
