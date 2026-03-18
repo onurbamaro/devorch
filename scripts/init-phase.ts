@@ -1,7 +1,7 @@
 /**
  * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache + waves/tasks.
  * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>]
- * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >25000 chars).
+ * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >50000 chars).
  * Compound init: returns phase context, conventions, state, filtered explore-cache, and structured waves/tasks as JSON.
  * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/explore-cache.md instead of from the plan's directory.
  */
