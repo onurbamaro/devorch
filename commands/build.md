@@ -52,15 +52,105 @@ All `git` and `bun` commands in phase agents must run with `cwd` set to `<projec
 
 ### 2. Phase loop
 
-Read `$CLAUDE_HOME/devorch-templates/build-phase.md` once — this is the build instructions template.
+**Effort guidance**: Coordinate efficiently. Focus on dispatching tasks and monitoring completion. Avoid deep analysis — that's the builders' job.
 
 For each remaining phase N (sequentially):
 
-1. **Launch phase agent**: Use the **Task tool call** with `subagent_type="general-purpose"`. The prompt is the full content of build-phase.md followed by: `\n\nWorking directory: <projectRoot>\nExecute phase ${N} of the plan at <planPath>\nMain repo root for cache: <mainRoot>`
-   **Effort guidance for phase agent**: Coordinate efficiently. Focus on dispatching tasks and monitoring completion. Avoid deep analysis — that's the builders' job.
-2. **Verify completion**: After the Task agent returns, read `<projectRoot>/.devorch/state.md`. Check that `Last completed phase:` shows N.
-   - If verified → report "Phase N/Y complete." and continue to next phase.
-   - If NOT verified → the phase agent handles retries internally (up to 1 retry per failed builder). If the phase still fails after retries, stop and report: "Phase N did not complete successfully. Check agent output."
+#### 2a. Init phase
+
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot>`
+
+Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, and structured waves and tasks.
+
+#### 2b. Explore
+
+Check the explore cache (included in init-phase output) for areas relevant to this phase's tasks. If the explore-cache contains sections that cover ALL files in `<relevant-files>` for this phase, do NOT launch Explore agents — the cache already provides sufficient context. Only launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) for areas with partial or missing coverage in cache. Append new summaries to explore-cache.
+
+#### 2c. Deploy builders
+
+For each wave from init-phase output, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders using the **Task tool call** (never Bash/CLI) with `subagent_type="devorch-builder"` as **foreground parallel** calls following the wave structure.
+
+- For `"parallel"` and `"sequential"` type waves: launch all taskIds as parallel Task calls **in a single message** (do NOT use `run_in_background`). The Task calls block until all builders in the wave return — no polling needed.
+
+Each builder prompt includes:
+- Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
+- Full task details inline from the `tasks` map (builders skip TaskGet)
+- Convention sections from `conventionsByTask[taskId]` — pre-filtered by init-phase.ts based on file extensions in the task
+- Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
+- **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
+- `commit with type(scope): description`
+- `CRITICAL: call TaskUpdate with status "completed" as your very last action`
+
+**Multi-repo tasks**: When init-phase output includes a `satellites` array (non-empty), check each task's `repo` field:
+- If `repo` == `"primary"` (or absent): builder uses `<projectRoot>` as working directory (default behavior).
+- If `repo` != `"primary"`: find the matching satellite in the `satellites` array by name. Add the following to the builder prompt:
+  - `Working directory: <satellite.worktreePath>`
+  - `All file operations and git commands must use this directory as root`
+  - `Use git -C <satellite.worktreePath> for all git commands`
+
+After all builders in a wave return, verify via `TaskList` that every task is marked completed.
+
+**On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
+- **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
+- **After 1 retry**: Stop and report the failure. Do not retry further.
+
+#### 2d. Validate phase code
+
+Run the following via Bash with `run_in_background=true`:
+
+```
+bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --with-validation --plan <planPath> --phase N
+```
+
+Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
+- If lint/typecheck/test fail: fix ALL errors regardless of origin. **Effort guidance for fix loop**: When fixing errors, reason deeply about root cause. Don't just patch symptoms — understand why the error occurred and fix the underlying issue. If unable to fix after one retry, report the errors and block the phase — do not proceed.
+- If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
+- If everything passes: proceed.
+
+**Satellite validation** (when init-phase output includes non-empty `satellites` array): After validating the primary repo, determine which satellites had tasks in this phase by scanning the `tasks` map for entries where `repo` field != `"primary"`. Collect the unique repo names and match them to the `satellites` array by name.
+
+For each satellite that had tasks in this phase, run:
+```
+bun $CLAUDE_HOME/devorch-scripts/check-project.ts <satellite.worktreePath> --no-test
+```
+Note: satellite checks do NOT use `--with-validation` — only lint, typecheck, and build.
+
+If any satellite lint/typecheck fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase.
+
+**Check-project overlap with next phase**: After dispatching builders and they return, start `check-project.ts` in background (`run_in_background=true`) AND start `init-phase.ts` for the next phase in parallel. If check-project fails, stop before dispatching next phase builders. If check passes and next phase init is ready, proceed immediately — no waiting.
+
+#### 2e. Phase summary and commit
+
+Generate commit message and update state in one call:
+
+- Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
+- Use the `message` field from the JSON output as the git commit message for all repos.
+- The script also writes `state.md` automatically — no separate state update step needed.
+
+**Primary repo**: Run `git -C <projectRoot> status --porcelain`. If output has changes, commit with the generated message.
+
+**Satellite repos** (when init-phase output includes non-empty `satellites` array): For each satellite in the `satellites` array from init-phase output, scan the `tasks` map to find tasks where the `repo` field matches the satellite name. Only process satellites that have matching tasks.
+
+For each satellite with matching tasks:
+- Run `git -C <satellite.worktreePath> status --porcelain`. If output has changes:
+  - `git -C <satellite.worktreePath> add -A`
+  - `git -C <satellite.worktreePath> commit -m "<phase commit message>"`
+  - Record status as `"committed"` for this satellite.
+- If no changes, record status as `"no-changes"` and skip.
+
+Pass satellite status to phase-summary via `--satellites '<json>'` (e.g., `[{"name":"sat1","status":"committed"}]`).
+
+#### 2f. Invalidate and update cache
+
+Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
+
+If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache.md` before or after running manage-cache.
+
+#### 2g. Verify completion
+
+Read `<projectRoot>/.devorch/state.md`. Check that `Last completed phase:` shows N.
+- If verified → report "Phase N/Y complete." and continue to next phase.
+- If NOT verified → stop and report: "Phase N did not complete successfully."
 
 ### 3. Final verification
 
@@ -266,10 +356,10 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- Phases run sequentially — each in its own Task agent with clean context.
+- Phases run sequentially — phase logic executes inline (no phase agent delegation).
 - Stop on first failure. Report which phase failed.
-- The orchestrator only reads `<projectRoot>/.devorch/state.md` and `<planPath>` between phases. Everything else is inside the per-phase agents.
-- **Context discipline**: build is a thin supervisor. It does NOT launch builders, poll tasks, manage waves, or run validation directly. All of that is delegated to the per-phase Task agent which follows build-phase.md instructions.
+- The orchestrator reads devorch files (`.devorch/*`, plan, state) but never reads source code files during phase execution. Source code reads are allowed only during review (step 3).
+- **Context discipline**: builders run in isolated Task contexts with only task-specific conventions and cache (from `conventionsByTask` and `cacheByTask`). The orchestrator coordinates via scripts that return JSON — not by reading code.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
 - Auto-fix trivial and fix-level findings. Only escalate talk-level issues with `/devorch:talk` prompt.
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
