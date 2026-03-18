@@ -1,3 +1,5 @@
+<!-- ARCHIVED: This was the phase agent template before inline execution was adopted in the 1M context era. Kept as reference for potential restoration. See commands/build.md step 2 for current implementation. -->
+
 Execute one phase of the current devorch plan.
 
 **Input**: $ARGUMENTS (phase number). If not provided, read `.devorch/state.md` and suggest the next phase. If no state exists, start with Phase 1. If state exists but its `Plan:` field doesn't match the current plan title (first `# Plan:` heading in `.devorch/plans/current.md`), **ignore the stale state** and start with Phase 1.

@@ -150,13 +150,13 @@ devorch/
   agents/            # agent type definitions (.md)
   scripts/           # TypeScript utilities (Bun)
     lib/             # shared modules (plan-parser, args, fs-utils)
-  templates/         # build-phase template
+  docs/              # philosophy, archived references
   hooks/             # post-edit lint + statusline
   install.ts         # installer
   uninstall.ts       # uninstaller
 ```
 
-Installed to `~/.claude/` (commands, agents, scripts, templates, hooks). Per-project state lives in `.devorch/`.
+Installed to `~/.claude/` (commands, agents, scripts, hooks). Per-project state lives in `.devorch/`.
 
 ---
 
@@ -258,7 +258,7 @@ file_structure:
     - commands/ (4 .md slash command definitions)
     - agents/ (1 .md agent type definition)
     - scripts/ (13 .ts utility scripts + lib/)
-    - templates/ (1 .md build-phase template)
+    - docs/ (philosophy, archived references)
     - hooks/ (post-edit lint + statusline)
     - install.ts (installer)
     - uninstall.ts (uninstaller)
