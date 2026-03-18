@@ -1,234 +1,190 @@
-# Plan: devorch Evolution v3 — Effort Guidance, Sizing, PostCompact Hook, Sparse Worktrees
+# Plan: Build Performance Optimization for 1M Context Era
 
 <description>
-Implement 4 improvements to devorch that leverage new Claude Code capabilities while
-respecting the core philosophy (docs/PHILOSOPHY.md). Changes span command prompts,
-scripts, and hooks.
+Optimize devorch build pipeline to reduce total build time from ~26-30 min to ~14-18 min by eliminating the phase agent indirection layer, adding per-task context filtering, optimizing the review phase, and updating planning guidance — all leveraging the 1M token context window now available without additional cost.
 </description>
 
 <objective>
-All 4 improvements are implemented and validated:
-1. Effort guidance in all command/template prompts
-2. Moderate sizing increases for 1M context era
-3. PostCompact hook for state refresh
-4. Sparse worktree support (manual + automatic)
+Total build time for a typical 2-phase plan reduced by ~40-50% while maintaining all quality guarantees (per-phase validation, adversarial review, isolated builders with fresh context).
 </objective>
 
 <classification>
-Type: Enhancement
-Complexity: Medium
-Risk: Low
+Type: refactor
+Complexity: complex
+Risk: medium
 </classification>
 
 <decisions>
-Effort implementation approach → Prompt-based guidance instructions (not model tiers). Keep opus everywhere, add behavioral instructions per stage.
-Task sizing increase → Moderate: CONTENT_THRESHOLD 25K→50K, max-lines 3000→5000, keep max 5 tasks/phase, allow larger tasks, change sizing rule from "prefer smaller phases" to "prefer fewer phases".
-Sparse worktrees → Both manual (--sparse-paths flag) and automatic (derive from plan's relevant-files/new-files). Always include .devorch/, package.json, tsconfig.json, lock files as base paths.
-Agent Teams → Deferred to next cycle (research preview, not stable enough).
+- build-phase.md fate → Always inline, keep as docs/build-phase-reference.md for restoration reference
+- Source code reads → Orchestrator can read source files only during review phase (step 3), not during phase execution
+- Phase consolidation → Guidance in talk.md prompt (no algorithmic logic), rely on LLM judgment
+- Per-task filtering → Both cache + conventions filtered per-task in init-phase.ts output
+- Fallback mechanism → No fallback to phase agent; 100% inline. Restore from docs reference if ever needed
+- Review retry → Add 1 retry for fix-level builders (same pattern as build phases)
 </decisions>
 
 <problem-statement>
-devorch was designed for a 200K context world. With 1M context now available per builder,
-the sizing rules are overly conservative, effort is uniform across stages with different
-reasoning needs, there's no recovery from context compaction, and worktree setup checks
-out entire repos unnecessarily.
+The devorch build pipeline takes 13-15 minutes per phase (~26-30 min total with review). The main bottlenecks are: (1) the phase agent indirection layer adds a full LLM inference cycle + Task spawn overhead per phase, (2) explore-cache and conventions are filtered per-phase not per-task causing builders to receive excessive context, (3) the review phase runs a redundant post-review check even when zero findings, and (4) check-project validation blocks the next phase instead of overlapping.
+
+With 1M tokens now available per session without cost increase, the orchestrator can absorb phase coordination inline, eliminating a full layer of indirection. Per-task filtering reduces builder context size by ~30%, improving both speed and quality.
 </problem-statement>
 
 <solution-approach>
-Phase 1 addresses prompt-level changes (effort guidance + sizing rules) across all command
-files and scripts. Phase 2 addresses infrastructure (PostCompact hook + sparse worktrees)
-which requires new files and script modifications. talk.md is touched in both phases —
-phase 1 for effort/sizing, phase 2 for sparse path derivation — so phases must be sequential.
+**Approach**: Flatten the build orchestration from 3 layers (orchestrator → phase agent → builders) to 2 layers (orchestrator → builders) by having build.md execute phase logic inline.
+
+**Key changes**:
+1. build.md step 2 absorbs build-phase.md logic: calls init-phase.ts, dispatches builders directly, runs check-project with overlap
+2. init-phase.ts outputs conventionsByTask and cacheByTask instead of flat content
+3. Review phase reads diff files inline (relaxed source-read rule), skips post-review check on zero findings, adds retry for fix-level builders
+4. talk.md gets consolidation guidance to prefer fewer, denser phases
+
+**Alternatives considered**:
+- Hybrid fallback (inline for small phases, delegate for large): rejected as premature complexity (YAGNI)
+- Algorithmic phase consolidation in validate-plan.ts: rejected in favor of prompt guidance (simpler, uses model judgment)
+- Full source-read relaxation: rejected to keep orchestrator light during phase execution
+
+**Risks**:
+- build.md becomes significantly larger (~400+ lines vs current 276). Mitigated by clear section separation.
+- Orchestrator context grows with inline phase execution. Mitigated by 1M window and scripts returning only JSON results.
+- Per-task filtering in init-phase.ts adds complexity. Mitigated by keeping it in the same deterministic script.
 </solution-approach>
 
 <relevant-files>
-- `commands/talk.md` — add effort guidance for exploration/planning, update sizing rules, add sparse path derivation
-- `commands/build.md` — add effort guidance for coordination/review
-- `commands/fix.md` — add effort guidance for investigation/review
-- `templates/build-phase.md` — add effort guidance for builder deployment
-- `agents/devorch-builder.md` — add effort guidance for implementation/fix-loop
-- `scripts/init-phase.ts` — increase CONTENT_THRESHOLD from 25K to 50K
-- `scripts/manage-cache.ts` — increase default max-lines from 3000 to 5000
-- `scripts/setup-worktree.ts` — add --sparse-paths support
-- `hooks/post-edit-lint.ts` — reference for hook pattern
-- `install.ts` — register PostCompact hook
+- `commands/build.md` — main orchestration file, absorbs phase loop inline + review optimizations
+- `templates/build-phase.md` — current phase agent template, to be archived as documentation
+- `scripts/init-phase.ts` — context compiler, gets per-task filtering + map-project caching
+- `docs/PHILOSOPHY.md` — Principle 1 update for 1M context era
+- `commands/talk.md` — planning guidance for phase consolidation
+- `scripts/lib/plan-parser.ts` — shared plan parsing utilities used by init-phase.ts
 
 <new-files>
-- `hooks/post-compact-state-refresh.ts` — PostCompact hook that re-reads state.md + plan title
+- `docs/build-phase-reference.md` — archived copy of build-phase.md for restoration reference
 </new-files>
 </relevant-files>
 
-<phase1 name="Effort Guidance and Sizing Updates">
-<goal>Add reasoning depth guidance to all command/template prompts and increase context sizing limits for the 1M era.</goal>
+<phase1 name="Inline Phase Execution and Per-Task Context">
+<goal>Eliminate the phase agent layer by having build.md execute phase logic inline, and add per-task context filtering to init-phase.ts</goal>
 
 <tasks>
-#### 1. Add effort guidance to talk.md and update sizing rules
-- **ID**: effort-sizing-talk
-- **Assigned To**: builder-talk
-- In `commands/talk.md`, add effort guidance instructions:
-  - Step 2 (Explore agents): add instruction "Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth."
-  - Step 6 (Design solution): add instruction "Think deeply. Consider alternatives, edge cases, and long-term implications. This is where reasoning depth matters most."
-- Update sizing rules section (currently lines 240-245):
-  - Change "Max **5 tasks** per phase" to "Max **5 tasks** per phase. Tasks can span multiple related files when the changes are cohesive."
-  - Change "Prefer more smaller phases over fewer large ones" to "Prefer fewer phases with well-scoped tasks. Each builder now has ample context (1M tokens) — use it by including more relevant explore-cache and conventions per task."
-  - Add: "Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused."
+#### 1. Restructure build.md Phase Loop
+- **ID**: inline-phase-loop
+- **Assigned To**: orchestration-builder
+- Rewrite step 2 (Phase loop) in `commands/build.md` to execute phase logic inline instead of delegating to a general-purpose Task agent
+- The orchestrator now directly: (a) calls `init-phase.ts` via Bash, (b) launches Explore agents if cache coverage is insufficient, (c) dispatches builders as first-level Task calls following wave structure from init-phase output, (d) runs `check-project.ts` in background (`run_in_background=true`), (e) overlaps by calling `init-phase.ts` for next phase while check runs, (f) calls `phase-summary.ts` and `manage-cache.ts` inline
+- Preserve all existing behavior: wave-based parallel dispatch, builder retry (1 retry on failure), satellite repo support, validation commands
+- Use the new `conventionsByTask` and `cacheByTask` fields from init-phase output when constructing builder prompts (each builder gets only its task-specific conventions and cache, not the full phase content)
+- Remove the `Read $CLAUDE_HOME/devorch-templates/build-phase.md once` instruction since template is no longer used as Task prompt
+- Keep effort guidance for builders: "Execute focused implementation. Prioritize writing correct code over exploration."
+- Add effort guidance for orchestrator inline: "Coordinate efficiently. Focus on dispatching tasks and monitoring completion."
+- Handle the check-project overlap: after dispatching builders and they return, start `check-project.ts` in background AND start `init-phase.ts` for next phase. If check-project fails, stop before dispatching next phase builders. If check passes, next phase is ready immediately.
 
-#### 2. Add effort guidance to build.md
-- **ID**: effort-build
-- **Assigned To**: builder-build
-- In `commands/build.md`, add effort guidance:
-  - Step 2 (phase dispatch): add instruction to the phase Task prompt: "Coordinate efficiently. Focus on dispatching tasks and monitoring completion. Avoid deep analysis — that's the builders' job."
-  - Step 3b (review agents): add instruction to reviewer prompts: "Analyze deeply. Look for subtle bugs, security issues, and edge cases that builders might miss. Thoroughness matters more than speed here."
-  - Step 3c (fix-level builders): add instruction: "Debug thoroughly. Understand root cause before fixing. These are issues that reviewers caught — reason carefully about why they were missed."
+#### 2. Add Per-Task Filtering to init-phase.ts
+- **ID**: per-task-filtering
+- **Assigned To**: scripts-builder
+- Modify `scripts/init-phase.ts` to add two new fields to JSON output: `conventionsByTask` and `cacheByTask`
+- `conventionsByTask`: Parse CONVENTIONS.md into sections by `## ` headers. For each task, extract file extensions from its backtick-quoted paths. Match convention sections that mention those extensions (e.g., `.tsx` matches React, TypeScript, style sections). Output: `{ "task-id": "filtered conventions string" }`
+- `cacheByTask`: Apply the existing `filterCache()` logic but scoped to each task's file refs instead of the entire `<tasks>` block. Output: `{ "task-id": "filtered cache string" }`
+- Cache `map-project.ts` result: before calling the subprocess, check if `.devorch/project-map.md` exists and was written in the current build (check file mtime vs build start or existence of file). If fresh, read it instead of running subprocess. If not, run subprocess and write result to `.devorch/project-map.md`
+- Keep existing per-phase `content`/`contentFile` output for backward compatibility (the phase agent reference doc may be restored)
+- Maintain the `CONTENT_THRESHOLD = 50000` logic unchanged
 
-#### 3. Add effort guidance to build-phase.md and devorch-builder.md
-- **ID**: effort-builders
-- **Assigned To**: builder-phase
-- In `templates/build-phase.md`, add to builder prompt construction (around line 19-23):
-  - Add to each builder's prompt: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
-  - For the fix loop section: "When fixing errors, reason deeply about root cause. Don't just patch symptoms — understand why the error occurred and fix the underlying issue."
-- In `agents/devorch-builder.md`, add to workflow section:
-  - After line 19 (Explore guidance): "Implementation focus: write code efficiently with the spec provided. Save deep reasoning for debugging and error fixing."
+#### 3. Archive build-phase.md and Update Documentation
+- **ID**: docs-update
+- **Assigned To**: docs-builder
+- Copy `templates/build-phase.md` to `docs/build-phase-reference.md` with a header: `<!-- ARCHIVED: This was the phase agent template before inline execution was adopted in the 1M context era. Kept as reference for potential restoration. See commands/build.md step 2 for current implementation. -->`
+- Delete `templates/build-phase.md` (the original)
+- Update `docs/PHILOSOPHY.md` Principle 1: change "The 1M context window is a safety net, not a strategy" to reflect that the orchestrator can use more context for coordination (not implementation). Keep the core message that focused context beats diluted context. Update the threshold language.
+- Update the anti-principle "Just use a bigger context window" to acknowledge that larger context enables reduced orchestration overhead while maintaining that implementation context should stay focused
 
-#### 4. Add effort guidance to fix.md
-- **ID**: effort-fix
-- **Assigned To**: builder-fix
-- In `commands/fix.md`, add effort guidance:
-  - Step 3 (investigation): add to Explore agent prompts: "Investigate systematically. Test your hypothesis against the code — don't speculate. Report concrete evidence."
-  - Step 6 (verification): add to review agent prompts: "Review thoroughly. This is a targeted fix — verify it doesn't introduce regressions or miss related issues. Check edge cases."
-
-#### 5. Increase context sizing limits
-- **ID**: increase-limits
-- **Assigned To**: builder-limits
-- In `scripts/init-phase.ts`: change `const CONTENT_THRESHOLD = 25000;` to `const CONTENT_THRESHOLD = 50000;`
-- In `scripts/manage-cache.ts`: change `const maxLines = args["max-lines"] || 3000;` to `const maxLines = args["max-lines"] || 5000;`
-
-#### 6. Validate Phase
+#### 4. Validate Phase
 - **ID**: validate-phase-1
 - **Assigned To**: validator
-- Verify all effort guidance additions are consistent across files
-- Verify CONTENT_THRESHOLD and max-lines values are updated
-- Run validation commands
+- Verify `commands/build.md` step 2 contains inline phase logic (no Task delegation for phases)
+- Verify `scripts/init-phase.ts` outputs `conventionsByTask` and `cacheByTask` fields
+- Verify `templates/build-phase.md` no longer exists
+- Verify `docs/build-phase-reference.md` exists with archive header
+- Verify `docs/PHILOSOPHY.md` Principle 1 is updated
+- Run `bun scripts/init-phase.ts --help` or similar to verify script still runs
 </tasks>
 
 <execution>
-**Wave 1** (parallel): effort-sizing-talk, effort-build, effort-builders, effort-fix, increase-limits
+**Wave 1** (parallel): inline-phase-loop, per-task-filtering, docs-update
 **Wave 2** (validation): validate-phase-1
 </execution>
 
 <criteria>
-- [ ] talk.md has effort guidance for exploration and planning stages
-- [ ] talk.md sizing rules updated for 1M context era
-- [ ] build.md has effort guidance for coordination, review, and fix-level stages
-- [ ] build-phase.md and devorch-builder.md have effort guidance for implementation and fix-loop
-- [ ] fix.md has effort guidance for investigation and review stages
-- [ ] CONTENT_THRESHOLD is 50000 in init-phase.ts
-- [ ] Default max-lines is 5000 in manage-cache.ts
+- [ ] build.md step 2 executes phase logic inline (no general-purpose Task agent for phases)
+- [ ] build.md dispatches builders as first-level Task calls using init-phase output
+- [ ] build.md overlaps check-project with next phase init-phase call
+- [ ] init-phase.ts JSON output includes conventionsByTask and cacheByTask fields
+- [ ] init-phase.ts caches map-project.ts result in .devorch/project-map.md
+- [ ] templates/build-phase.md removed, docs/build-phase-reference.md created
+- [ ] PHILOSOPHY.md Principle 1 updated for 1M context era
 </criteria>
 
 <validation>
-- `bun scripts/init-phase.ts --help 2>&1 || true` — script loads without error
-- `bun scripts/manage-cache.ts --help 2>&1 || true` — script loads without error
+- `test -f docs/build-phase-reference.md && echo pass || echo fail` — archived reference exists
+- `test ! -f templates/build-phase.md && echo pass || echo fail` — original template removed
+- `bun --eval "import './scripts/init-phase.ts'" 2>&1 | head -5` — script syntax valid
 </validation>
 
+<test-contract>
+- init-phase.ts should produce valid JSON with conventionsByTask and cacheByTask when given a plan with multiple tasks
+</test-contract>
+
 <handoff>
-All command prompts now include stage-appropriate effort guidance. Sizing limits increased
-(CONTENT_THRESHOLD 50K, cache 5000 lines). talk.md will be modified again in phase 2
-for sparse path derivation — changes are in different sections (sizing rules vs worktree setup).
+build.md step 2 now runs phases inline. Phase agents are eliminated. init-phase.ts returns per-task filtered context. build-phase.md archived as docs reference. Step 3 (review) is unchanged and ready for optimization in Phase 2.
 </handoff>
 </phase1>
 
-<phase2 name="PostCompact Hook and Sparse Worktrees">
-<goal>Add PostCompact state recovery hook and sparse-checkout support to worktree setup with automatic path derivation in planning.</goal>
+<phase2 name="Review Optimization and Planning Guidance">
+<goal>Optimize the review phase for speed and add planning guidance to prefer fewer phases</goal>
 
 <tasks>
-#### 1. Create PostCompact state refresh hook
-- **ID**: postcompact-hook
-- **Assigned To**: builder-hook
-- Create `hooks/post-compact-state-refresh.ts` following the pattern from `hooks/post-edit-lint.ts`:
-  - Read stdin JSON (PostCompact event provides `compact_summary`)
-  - Find active devorch state: walk up from cwd looking for `.devorch/state.md`
-  - If not found, check `.worktrees/*/` subdirectories for `.devorch/state.md`
-  - Read `state.md` content (phase progress, handoff summary)
-  - Read plan title from `.devorch/plans/current.md` using regex (don't import — keep hook self-contained)
-  - Output to stdout a structured reminder:
-    ```
-    [devorch state refresh] Plan: <title> | Phase <N>/<total> complete | Last handoff: <summary>
-    ```
-  - Exit 0 always (never block on state refresh failure — wrap everything in try-catch)
+#### 1. Optimize build.md Review Phase
+- **ID**: review-optimization
+- **Assigned To**: review-builder
+- Modify `commands/build.md` step 3 (Final verification) with these optimizations:
+- **Cross-phase explore inline**: Instead of launching a cross-phase Explore agent (Task call), the orchestrator reads the diff files directly using Read tool and performs the cross-phase verification inline (imports resolve, no orphan exports, no leftover TODO/FIXME, type consistency). This is allowed because the "no source reads" rule is relaxed for step 3 only. Remove the cross-phase Explore agent from step 3b — keep only the 3 adversarial reviewers as parallel Task calls
+- **Skip post-review check on zero findings**: If all 3 adversarial reviewers AND the inline cross-phase check report zero findings, skip the post-review `check-project.ts` run entirely. The last phase's check already validated everything.
+- **Add 1 retry for fix-level builders**: After fix-level builders complete and post-review check runs, if check fails: diagnose which fix-level builder's changes caused the failure, relaunch that builder with error context (1 retry max). If retry fails, verdict FAIL.
+- **Batch trivial fixes**: Group trivial findings by file. Apply all fixes for the same file in a single Edit call sequence instead of interleaving files.
+- Add a note in step 3 documenting the relaxed source-read rule: "The orchestrator reads source files directly in this step only (review phase). During phase execution (step 2), source reads remain delegated to builders and Explore agents."
 
-#### 2. Register PostCompact hook in install.ts
-- **ID**: register-hook
-- **Assigned To**: builder-install
-- In `install.ts`:
-  - Add `post-compact-state-refresh.ts` to the list of hook files to copy to ~/.claude/hooks/
-  - Register in settings.json hooks section as a global PostCompact hook:
-    ```json
-    {
-      "hooks": {
-        "PostCompact": [{
-          "type": "command",
-          "command": "bun <CLAUDE_HOME>/hooks/post-compact-state-refresh.ts"
-        }]
-      }
-    }
-    ```
-  - Ensure existing hooks (statusLine, post-edit-lint, etc.) are preserved during settings merge
+#### 2. Add Phase Consolidation Guidance to talk.md
+- **ID**: planning-guidance
+- **Assigned To**: planning-builder
+- Add guidance in `commands/talk.md` Step 6 (Design solution) to prefer fewer, denser phases
+- Add a new subsection or bullet points covering: when to merge adjacent phases (both have ≤3 tasks, no cross-phase file conflicts, no mandatory handoff context needed), when NOT to merge (tasks in phase B depend on phase A outputs, shared file modifications across phases), examples
+- Update the Sizing Rules section to strengthen the "prefer fewer phases" guidance: "With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate when safe."
+- Update the Parallelization Rules to note that wider waves within fewer phases is more efficient than narrow waves across many phases
+- Do NOT add algorithmic logic to validate-plan.ts — this is prompt guidance only
 
-#### 3. Add sparse-checkout support to setup-worktree.ts
-- **ID**: sparse-worktree
-- **Assigned To**: builder-sparse
-- In `scripts/setup-worktree.ts`:
-  - Add `--sparse-paths` argument (optional string, comma-separated directory list)
-  - After worktree creation (after `git worktree add`), if --sparse-paths is provided:
-    1. Run `git -C <worktreePath> sparse-checkout init --cone`
-    2. Parse comma-separated paths into array
-    3. Always prepend base paths: `.devorch` plus any root config files that exist (package.json, tsconfig.json, lock files)
-    4. Run `git -C <worktreePath> sparse-checkout set <all-paths-space-separated>`
-  - Add `sparsePaths: string[]` to the JSON output when sparse-checkout is used
-  - For satellites: apply same sparse-checkout if --sparse-paths is provided
-  - If sparse-checkout commands fail, log warning to stderr and continue (non-blocking)
-
-#### 4. Add automatic sparse path derivation to talk.md
-- **ID**: auto-sparse-talk
-- **Assigned To**: builder-auto-sparse
-- In `commands/talk.md`, Step 7 (Create plan), point 2 (Setup worktree):
-  - Before calling setup-worktree.ts, add logic to derive sparse paths from the plan:
-    1. Extract unique top-level directories from `<relevant-files>` and `<new-files>` entries
-    2. Join as comma-separated string
-  - Pass `--sparse-paths <derived-paths>` to the setup-worktree.ts call
-  - Add note: "Sparse-checkout is an optional optimization. If the plan references more than 10 top-level directories, skip --sparse-paths to use full checkout."
-  - Update both setup-worktree.ts call examples (with and without --secondary) to show --sparse-paths usage
-
-#### 5. Validate Phase
+#### 3. Validate Phase
 - **ID**: validate-phase-2
 - **Assigned To**: validator
-- Verify PostCompact hook script runs without error on empty input
-- Verify setup-worktree.ts accepts --sparse-paths
-- Verify install.ts registers the new hook
-- Run validation commands
+- Verify build.md step 3 no longer launches cross-phase Explore agent (only 3 adversarial reviewers)
+- Verify build.md step 3 has skip-check-on-zero-findings logic
+- Verify build.md step 3 has retry logic for fix-level builders
+- Verify talk.md has consolidation guidance in Step 6 and updated Sizing Rules
 </tasks>
 
 <execution>
-**Wave 1** (parallel): postcompact-hook, sparse-worktree
-**Wave 2** (after wave 1): register-hook, auto-sparse-talk
-**Wave 3** (validation): validate-phase-2
+**Wave 1** (parallel): review-optimization, planning-guidance
+**Wave 2** (validation): validate-phase-2
 </execution>
 
 <criteria>
-- [ ] PostCompact hook exists at hooks/post-compact-state-refresh.ts
-- [ ] PostCompact hook reads state.md and plan title, outputs structured reminder
-- [ ] PostCompact hook never exits with error (always exit 0)
-- [ ] install.ts copies PostCompact hook and registers in settings.json
-- [ ] setup-worktree.ts accepts --sparse-paths argument
-- [ ] Sparse-checkout includes .devorch and root config files as base paths
-- [ ] JSON output includes sparsePaths when sparse-checkout is used
-- [ ] talk.md derives sparse paths from plan and passes to setup-worktree.ts
-- [ ] Sparse path derivation has fallback (skip if >10 dirs or derivation fails)
+- [ ] build.md step 3 performs cross-phase verification inline (no Explore agent)
+- [ ] build.md step 3 skips post-review check when all reviewers report zero findings
+- [ ] build.md step 3 has 1 retry for fix-level builders on post-review check failure
+- [ ] build.md step 3 batches trivial fixes by file
+- [ ] talk.md Step 6 has phase consolidation guidance
+- [ ] talk.md Sizing Rules updated with 1M context overhead note
 </criteria>
 
 <validation>
-- `echo '{}' | bun hooks/post-compact-state-refresh.ts; echo "exit: $?"` — exits 0 on empty input
-- `bun scripts/setup-worktree.ts --help 2>&1 || true` — script loads without error
+- `grep -c "cross-phase" commands/build.md` — verify cross-phase logic exists but as inline, not as Explore agent launch
+- `grep -c "consolidat" commands/talk.md` — verify consolidation guidance added
 </validation>
 </phase2>
