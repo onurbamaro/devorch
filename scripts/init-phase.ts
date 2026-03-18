@@ -5,7 +5,7 @@
  * Compound init: returns phase context, conventions, state, filtered explore-cache, and structured waves/tasks as JSON.
  * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/explore-cache.md instead of from the plan's directory.
  */
-import { existsSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos } from "./lib/plan-parser";
@@ -152,6 +152,130 @@ function filterCache(cache: string, phaseText: string): string {
 
 const filteredCache = filterCache(cacheRaw, phaseContent);
 
+// --- Extract file refs from arbitrary text (for per-task filtering) ---
+function extractFileRefs(text: string): Set<string> {
+  const refs = new Set<string>();
+  const patterns = [...text.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)];
+  for (const match of patterns) {
+    const ref = match[1];
+    if (/\.\w{1,5}$/.test(ref) || ref.includes("/")) {
+      refs.add(ref);
+    }
+  }
+  return refs;
+}
+
+// --- Filter cache sections by file refs (reusable for per-task) ---
+function filterCacheByRefs(cache: string, fileRefs: Set<string>): string {
+  if (!cache || fileRefs.size === 0) return cache;
+
+  const sections = cache.split(/(?=^## )/m);
+  const matched: string[] = [];
+
+  for (const section of sections) {
+    if (!section.startsWith("## ")) {
+      matched.push(section);
+      continue;
+    }
+    let sectionMatches = false;
+    for (const ref of fileRefs) {
+      if (section.includes(ref)) {
+        sectionMatches = true;
+        break;
+      }
+    }
+    if (!sectionMatches) {
+      for (const ref of fileRefs) {
+        const dir = ref.split("/")[0];
+        if (dir && section.toLowerCase().includes(dir.toLowerCase())) {
+          sectionMatches = true;
+          break;
+        }
+      }
+    }
+    if (sectionMatches) {
+      matched.push(section);
+    }
+  }
+
+  return matched.join("").trim();
+}
+
+// --- Extract file extensions from task content ---
+function extractExtensions(text: string): Set<string> {
+  const exts = new Set<string>();
+  const refs = extractFileRefs(text);
+  for (const ref of refs) {
+    const extMatch = ref.match(/\.(\w{1,5})$/);
+    if (extMatch) {
+      exts.add(`.${extMatch[1]}`);
+    }
+  }
+  return exts;
+}
+
+// --- Parse conventions into sections by ## headers ---
+function parseConventionSections(conventionsText: string): Array<{ header: string; content: string }> {
+  if (!conventionsText) return [];
+  const sections: Array<{ header: string; content: string }> = [];
+  const parts = conventionsText.split(/(?=^## )/m);
+  for (const part of parts) {
+    const headerMatch = part.match(/^## (.+)$/m);
+    if (headerMatch) {
+      sections.push({ header: headerMatch[1], content: part });
+    } else if (part.trim()) {
+      sections.push({ header: "", content: part });
+    }
+  }
+  return sections;
+}
+
+// --- Extension-to-convention matching map ---
+const EXT_KEYWORDS: Record<string, string[]> = {
+  ".ts": ["typescript", "ts", "script", "naming", "export", "import", "style", "error", "pattern", "async", "bun", "testing", "gotcha", "workaround"],
+  ".tsx": ["typescript", "ts", "tsx", "react", "component", "style", "jsx", "naming", "export", "import", "pattern"],
+  ".js": ["javascript", "js", "script", "naming", "export", "import", "style", "pattern"],
+  ".jsx": ["javascript", "js", "jsx", "react", "component", "style"],
+  ".md": ["markdown", "md", "command", "documentation", "template"],
+  ".css": ["style", "css"],
+  ".scss": ["style", "scss", "css"],
+  ".json": ["json", "package", "config"],
+};
+
+function filterConventionsForTask(conventionsText: string, taskExts: Set<string>): string {
+  if (!conventionsText || taskExts.size === 0) return conventionsText;
+
+  const sections = parseConventionSections(conventionsText);
+  const matched: string[] = [];
+
+  for (const section of sections) {
+    if (!section.header) {
+      matched.push(section.content);
+      continue;
+    }
+    // Always include top-level header (# Code Conventions) and sections without extension specificity
+    const headerLower = section.header.toLowerCase();
+    const contentLower = section.content.toLowerCase();
+
+    let sectionMatches = false;
+    for (const ext of taskExts) {
+      const keywords = EXT_KEYWORDS[ext] || [ext.slice(1)];
+      for (const kw of keywords) {
+        if (headerLower.includes(kw) || contentLower.includes(kw)) {
+          sectionMatches = true;
+          break;
+        }
+      }
+      if (sectionMatches) break;
+    }
+    if (sectionMatches) {
+      matched.push(section.content);
+    }
+  }
+
+  return matched.join("").trim();
+}
+
 // --- Parse waves from <execution> block ---
 function parseWaves(phaseText: string): WaveInfo[] {
   const executionContent = extractTagContent(phaseText, "execution");
@@ -252,19 +376,54 @@ for (const sat of satellites) {
   }
 }
 
-// --- Run map-project.ts for project structure ---
+// --- Run map-project.ts for project structure (cached) ---
 const scriptDir = import.meta.dirname;
+const projectMapPath = resolve(projectRoot, ".devorch/project-map.md");
 let projectMap = "";
-try {
-  const mapProc = Bun.spawnSync(
-    ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
-    { cwd: projectRoot, stderr: "pipe" }
-  );
-  if (mapProc.exitCode === 0) {
-    projectMap = mapProc.stdout.toString().trim();
+
+function isProjectMapFresh(): boolean {
+  try {
+    if (!existsSync(projectMapPath)) return false;
+    const mtime = statSync(projectMapPath).mtimeMs;
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    return mtime > fiveMinAgo;
+  } catch {
+    return false;
   }
-} catch {
-  // ignore — map is optional context
+}
+
+if (isProjectMapFresh()) {
+  projectMap = safeReadFile(projectMapPath);
+} else {
+  try {
+    const mapProc = Bun.spawnSync(
+      ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
+      { cwd: projectRoot, stderr: "pipe" }
+    );
+    if (mapProc.exitCode === 0) {
+      projectMap = mapProc.stdout.toString().trim();
+      try {
+        mkdirSync(dirname(projectMapPath), { recursive: true });
+        writeFileSync(projectMapPath, projectMap, "utf-8");
+      } catch {
+        // ignore — caching is best-effort
+      }
+    }
+  } catch {
+    // ignore — map is optional context
+  }
+}
+
+// --- Build per-task filtered context ---
+const conventionsByTask: Record<string, string> = {};
+const cacheByTask: Record<string, string> = {};
+
+for (const [taskId, task] of Object.entries(tasks)) {
+  const taskExts = extractExtensions(task.content);
+  conventionsByTask[taskId] = filterConventionsForTask(conventions, taskExts);
+
+  const taskRefs = extractFileRefs(task.content);
+  cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
 }
 
 // --- Build output content ---
@@ -346,6 +505,8 @@ const result: {
   satellites: SatelliteInfo[];
   waves: WaveInfo[];
   tasks: Record<string, TaskInfo>;
+  conventionsByTask: Record<string, string>;
+  cacheByTask: Record<string, string>;
   content?: string;
   contentFile?: string;
 } = {
@@ -356,6 +517,8 @@ const result: {
   satellites,
   waves,
   tasks,
+  conventionsByTask,
+  cacheByTask,
 };
 
 if (fullContent.length > CONTENT_THRESHOLD) {
