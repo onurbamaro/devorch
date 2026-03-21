@@ -1,6 +1,6 @@
 /**
  * phase-summary.ts — Generates phase commit message AND writes state.md in one call.
- * Combines logic from format-commit.ts and update-state.ts.
+ * Generates phase commit message and writes state.md in one call.
  * Usage: bun ~/.claude/devorch-scripts/phase-summary.ts --plan <path> --phase <N> --status <text> --summary <text> [--satellites '<json>']
  * Output: JSON {"message", "phase", "goal", "stateFile", "planTitle"}
  */

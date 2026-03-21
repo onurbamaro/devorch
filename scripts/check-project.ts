@@ -166,7 +166,7 @@ async function runCheck(name: string, command: string, timeoutMs: number): Promi
   }
 }
 
-// --- Validation helpers (mirrors run-validation.ts logic) ---
+// --- Validation helpers ---
 function parseValidationCommands(text: string): { command: string; description: string }[] {
   const commands: { command: string; description: string }[] = [];
   const lines = text.split("\n").filter((l) => l.trim());

@@ -104,10 +104,7 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 | Script | Purpose |
 |--------|---------|
 | `init-phase.ts` | Loads phase context: objective, decisions, conventions, explore cache. Returns JSON. |
-| `check-project.ts` | Runs lint + typecheck in parallel, then build, then test. Returns JSON. |
-| `run-validation.ts` | Runs validation commands for a phase. Returns pass/fail per command. |
-| `format-commit.ts` | Generates conventional commit messages from phase content. |
-| `update-state.ts` | Writes state.md with phase summary. |
+| `check-project.ts` | Runs lint + typecheck + build + test in parallel. With `--with-validation`, also runs phase validation commands. Returns JSON. |
 | `map-project.ts` | Collects tech stack, folder structure, dependencies, scripts, git history. |
 | `map-conventions.ts` | Analyzes code patterns to generate CONVENTIONS.md. |
 | `validate-plan.ts` | Validates plan structure (sections, phase numbering, task metadata, wave consistency). |
@@ -212,10 +209,7 @@ architecture:
       mode: read-write
   scripts:
     - init-phase.ts (phase context loading)
-    - check-project.ts (lint + typecheck + build + test)
-    - run-validation.ts (validation command execution)
-    - format-commit.ts (commit message generation)
-    - update-state.ts (state tracking)
+    - check-project.ts (lint + typecheck + build + test + validation)
     - map-project.ts (tech stack and structure collection)
     - map-conventions.ts (code pattern analysis)
     - validate-plan.ts (plan structure validation)
@@ -257,7 +251,7 @@ file_structure:
   source:
     - commands/ (4 .md slash command definitions)
     - agents/ (1 .md agent type definition)
-    - scripts/ (13 .ts utility scripts + lib/)
+    - scripts/ (10 .ts utility scripts + lib/)
     - docs/ (philosophy, archived references)
     - hooks/ (post-edit lint + statusline)
     - install.ts (installer)
@@ -266,6 +260,5 @@ file_structure:
     - ~/.claude/commands/devorch/ (commands)
     - ~/.claude/agents/ (agent definitions)
     - ~/.claude/devorch-scripts/ (utility scripts)
-    - ~/.claude/devorch-templates/ (templates)
     - ~/.claude/hooks/ (hooks)
 ```

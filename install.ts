@@ -22,11 +22,6 @@ const targets = [
     label: "scripts",
   },
   {
-    src: join(ROOT, "templates"),
-    dest: join(CLAUDE_HOME, "devorch-templates"),
-    label: "templates",
-  },
-  {
     src: join(ROOT, "hooks"),
     dest: join(CLAUDE_HOME, "hooks"),
     label: "hooks",
