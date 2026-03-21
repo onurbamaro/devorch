@@ -7,7 +7,7 @@
 - **Functions**: camelCase (`detectPkgScript()`, `runCheck()`, `findRoot()`)
 - **Types/Interfaces**: PascalCase (`CheckResult`, `CheckDef`, `StackFile`, `PhaseBounds`)
 - **Files**: kebab-case (`check-project.ts`, `extract-phase.ts`, `post-edit-lint.ts`)
-- **Task IDs (in plans)**: kebab-case (`validate-phase-1`, `update-router`)
+- **Task IDs (in plans)**: kebab-case (`update-router`, `add-auth-middleware`)
 
 ## Exports & Imports
 

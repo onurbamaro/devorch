@@ -256,7 +256,6 @@ Maximize parallel execution without losing quality:
 - **Break work into independent units.** If a large task can be split into two tasks that touch different files, split it.
 - **Group independent tasks into the same wave.** All tasks in a wave run as parallel agents.
 - **Only create sequential waves when truly necessary**: task B reads output of task A, or both modify the same file.
-- **Validation is always the last wave**, after all build tasks complete.
 - **Aim for wide waves**: 3 parallel tasks in 1 wave is better than 3 sequential waves of 1 task.
 - **Wider waves in fewer phases > narrow waves across many phases**: A single phase with a 4-task wave completes faster than two phases with 2-task waves each, due to per-phase overhead (init, check, summary). Consolidate when tasks are independent.
 
@@ -338,17 +337,11 @@ Risk: <risk>
 - **Assigned To**: <builder-name>
 - <specific action>
 
-#### N. Validate Phase
-- **ID**: validate-phase-1
-- **Assigned To**: validator
-- Verify acceptance criteria
-- Run validation commands
 </tasks>
 
 <execution>
 **Wave 1** (parallel): <task-id-a>, <task-id-b>
 **Wave 2** (after wave 1): <task-id-c>
-**Wave 3** (validation): validate-phase-1
 </execution>
 
 <criteria>

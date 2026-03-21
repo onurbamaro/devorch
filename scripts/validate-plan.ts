@@ -185,7 +185,6 @@ if (phases.length === 0) {
         .filter(Boolean);
 
       for (const tid of taskIds) {
-        if (tid.startsWith("validate")) continue;
         if (!tasks.some((t) => t.id === tid)) {
           warnings.push(
             `Phase ${phase.num}: Wave ${waveNum} references unknown task ID "${tid}"`

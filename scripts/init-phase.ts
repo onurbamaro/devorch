@@ -17,7 +17,7 @@ const CONTEXT_FILE = ".devorch/.phase-context.md";
 interface WaveInfo {
   wave: number;
   taskIds: string[];
-  type: "parallel" | "sequential" | "validation";
+  type: "parallel" | "sequential";
 }
 
 interface TaskInfo {
@@ -290,10 +290,8 @@ function parseWaves(phaseText: string): WaveInfo[] {
     const annotation = (waveMatch[2] || "").trim().toLowerCase();
     const taskIdStr = waveMatch[3];
 
-    let type: "parallel" | "sequential" | "validation" = "parallel";
-    if (annotation === "validation") {
-      type = "validation";
-    } else if (annotation === "sequential" || annotation.startsWith("after wave")) {
+    let type: "parallel" | "sequential" = "parallel";
+    if (annotation === "sequential" || annotation.startsWith("after wave")) {
       type = "sequential";
     }
 
