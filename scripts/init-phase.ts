@@ -1,9 +1,10 @@
 /**
  * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache + waves/tasks.
- * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>]
+ * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>] [--cache-name <name>]
  * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >50000 chars).
  * Compound init: returns phase context, conventions, state, filtered explore-cache, and structured waves/tasks as JSON.
- * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/explore-cache.md instead of from the plan's directory.
+ * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/ instead of from the plan's directory.
+ * --cache-name: when provided, reads explore-cache-<name>.md instead of explore-cache.md. Enables per-plan cache isolation.
  */
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
@@ -34,15 +35,17 @@ interface SatelliteInfo {
   worktreePath: string;
 }
 
-const args = parseArgs<{ plan: string; phase: number; "cache-root": string }>([
+const args = parseArgs<{ plan: string; phase: number; "cache-root": string; "cache-name": string }>([
   { name: "plan", type: "string", required: true },
   { name: "phase", type: "number", required: true },
   { name: "cache-root", type: "string" },
+  { name: "cache-name", type: "string" },
 ]);
 
 const planPath = args.plan;
 const phaseNum = args.phase;
 const cacheRoot = args["cache-root"];
+const cacheName = args["cache-name"];
 
 const content = readPlan(planPath);
 const phases = parsePhaseBounds(content);
@@ -99,7 +102,9 @@ const satellites: SatelliteInfo[] = secondaryRepos.map((repo) => {
 // --- Read optional files ---
 const conventions = safeReadFile(resolve(projectRoot, ".devorch/CONVENTIONS.md"));
 const state = safeReadFile(resolve(projectRoot, ".devorch/state.md"));
-const cacheSource = cacheRoot ? resolve(cacheRoot, ".devorch/explore-cache.md") : resolve(projectRoot, ".devorch/explore-cache.md");
+const cacheRootDir = cacheRoot || projectRoot;
+const cacheFileName = cacheName ? `explore-cache-${cacheName}.md` : "explore-cache.md";
+const cacheSource = resolve(cacheRootDir, ".devorch", cacheFileName);
 const cacheRaw = safeReadFile(cacheSource);
 
 // --- Filter explore-cache by phase file paths ---

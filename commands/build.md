@@ -35,6 +35,13 @@ Verify the plan file exists. If not, report error and stop.
 
 Set `mainRoot` to the current working directory (the main repo root where `.worktrees/` lives). Plans always live in worktrees, so `isWorktree` is always true.
 
+**Derive `cacheName`** for per-plan cache isolation:
+1. If `planPath` contains `.worktrees/<name>/`, extract `<name>` as `cacheName`.
+2. Else if `planPath` matches `.devorch/plans/<filename>.md`, use `<filename>` (without `.md` extension) as `cacheName`.
+3. Fallback: derive from the plan title by converting to kebab-case (lowercase, spaces to hyphens, strip non-alphanumeric except hyphens).
+
+Store `cacheName` for use in subsequent steps.
+
 All `state.md` references in subsequent steps use `<projectRoot>/.devorch/`. All scripts receive `--plan <planPath>`.
 
 All `git` and `bun` commands in phase agents must run with `cwd` set to `<projectRoot>`.
@@ -58,7 +65,7 @@ For each remaining phase N (sequentially):
 
 #### 2a. Init phase
 
-Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot>`
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <cacheName>`
 
 Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, and structured waves and tasks.
 
@@ -142,9 +149,9 @@ Pass satellite status to phase-summary via `--satellites '<json>'` (e.g., `[{"na
 
 #### 2f. Invalidate and update cache
 
-Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot>`
+Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot> --cache-name <cacheName>`
 
-If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache.md` before or after running manage-cache.
+If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache-<cacheName>.md` before or after running manage-cache.
 
 #### 2g. Verify completion
 
@@ -310,7 +317,7 @@ c. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
 2. Delete `.devorch/state.md` from the main repo if it exists.
-3. Delete `.devorch/explore-cache.md` from the main repo if it exists.
+3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
 5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
@@ -351,7 +358,7 @@ c. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
 2. Delete `.devorch/state.md` from the main repo if it exists.
-3. Delete `.devorch/explore-cache.md` from the main repo if it exists.
+3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
 5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
