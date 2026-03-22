@@ -104,10 +104,24 @@ const checks: CheckDef[] = [
   {
     name: "test",
     detect: () => {
+      // Prefer non-interactive CI script variants
+      const ciScript =
+        detectPkgScript("test:ci") || detectPkgScript("test:run");
+      if (ciScript) return `${pm} ${ciScript}`;
+
       const script = detectPkgScript("test");
       if (!script) return null;
       const cmd = pkg?.scripts?.test || "";
       if (cmd === 'echo "Error: no test specified" && exit 1') return null;
+
+      // Strip interactive/watch flags that cause the process to hang
+      const watchFlags = /\s*--(watchAll|watch)\b/g;
+      if (watchFlags.test(cmd)) {
+        const sanitized = cmd.replace(watchFlags, "").trim();
+        // Run the sanitized command directly instead of via package script
+        return sanitized || null;
+      }
+
       return `${pm} ${script}`;
     },
   },
@@ -119,11 +133,17 @@ async function runCheck(name: string, command: string, timeoutMs: number): Promi
   try {
     const proc = Bun.spawn([cmd, ...cmdArgs], {
       cwd,
+      stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      env: { ...process.env, CI: "true" },
     });
 
-    const timeout = setTimeout(() => proc.kill(), timeoutMs);
+    const timeout = setTimeout(() => {
+      proc.kill();
+      // Force-kill after 5s grace period if SIGTERM was ignored (e.g. jest watch mode)
+      setTimeout(() => proc.kill(9), 5_000);
+    }, timeoutMs);
 
     const exitCode = await proc.exited;
     clearTimeout(timeout);
