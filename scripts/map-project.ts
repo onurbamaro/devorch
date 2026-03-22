@@ -162,9 +162,12 @@ if (pkg) {
   heading("Scripts");
   const scripts = pkg.scripts || {};
   const keys = Object.keys(scripts);
+  const INTERACTIVE_FLAGS = /\b--(watchAll|watch|interactive)\b/;
   if (keys.length > 0) {
     for (const k of keys.slice(0, 15)) {
-      push(`- \`${k}\`: ${scripts[k]}`);
+      const val = scripts[k];
+      const warn = INTERACTIVE_FLAGS.test(val) ? " ⚠️ interactive" : "";
+      push(`- \`${k}\`: ${val}${warn}`);
     }
     if (keys.length > 15) push(`- ... +${keys.length - 15} more`);
   } else {
