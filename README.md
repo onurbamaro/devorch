@@ -16,7 +16,7 @@ Stop feeding Claude Code one prompt at a time. devorch breaks your work into pha
 
 **Parallel execution** -- Builder agents run simultaneously in waves. A 5-task phase finishes in the time it takes to run the slowest task, not all five sequentially.
 
-**Automatic validation** -- Every phase runs lint, typecheck, and validation commands in parallel. The final build step adds adversarial review with specialized agents (security, quality, completeness). Bugs surface immediately.
+**Automatic validation** -- Every phase runs a quick build + typecheck check (10s). The final build step runs the complete suite (lint, typecheck, build, tests) plus adversarial review with specialized agents (security, quality, completeness). Bugs surface immediately.
 
 **State-aware resumption** -- Interrupted? Run `/devorch:build` again and pick up exactly where you left off. Phase handoffs carry just enough context for continuity without bloating the window.
 
@@ -85,7 +85,7 @@ Conversation mode: devorch explores the codebase with Agent Teams and presents f
 
 devorch has three commands, each focused on a specific workflow:
 
-1. **`/devorch:talk`** -- Conversation, exploration, and planning. Launches parallel Explore agents with specialized roles (architecture, risk, patterns), clarifies ambiguities with you, then produces a structured plan in a git worktree.
+1. **`/devorch:talk`** -- Conversation, exploration, and planning. Launches parallel Explore agents to investigate the codebase, clarifies ambiguities with you, then produces a structured plan in a git worktree.
 
 2. **`/devorch:fix`** -- Targeted fixes. Classifies the task (fix vs needs planning), investigates with parallel agents testing distinct hypotheses, implements directly, validates in parallel, and auto-fixes trivial issues.
 
@@ -104,7 +104,7 @@ Builders get a post-edit lint hook that catches errors immediately after every w
 | Script | Purpose |
 |--------|---------|
 | `init-phase.ts` | Loads phase context: objective, decisions, conventions, explore cache. Returns JSON. |
-| `check-project.ts` | Runs lint + typecheck + build + test in parallel. With `--with-validation`, also runs phase validation commands. Returns JSON. |
+| `check-project.ts` | Runs lint + typecheck + build + test in parallel. With `--quick`, runs only build + typecheck (10s). Returns JSON. |
 | `map-project.ts` | Collects tech stack, folder structure, dependencies, scripts, git history. |
 | `map-conventions.ts` | Analyzes code patterns to generate CONVENTIONS.md. |
 | `validate-plan.ts` | Validates plan structure (sections, phase numbering, task metadata, wave consistency). |
@@ -132,7 +132,7 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 
 | Command | What it does | Uses agents |
 |---------|-------------|-------------|
-| `/devorch:talk` | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore (Agent Teams) |
+| `/devorch:talk` | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore |
 | `/devorch:fix` | Targeted fix with investigation. Classifies, investigates, implements, validates. | Explore |
 | `/devorch:build` | Executes all remaining phases + adversarial final verification. Supports `--no-tests` to skip test suite. | Explore, Builder |
 | `/devorch:worktrees` | List, merge, or delete devorch worktrees. | -- |
@@ -179,10 +179,10 @@ project:
 capabilities:
   - Phased plan creation from natural language descriptions
   - Parallel builder agent deployment in waves
-  - Automatic phase validation (lint, typecheck, build, tests)
+  - Quick per-phase checks (build, typecheck) with full validation at end
   - Adversarial final verification (security, quality, completeness reviewers)
   - State tracking with cross-session resumption
-  - Codebase exploration via parallel Agent Teams
+  - Codebase exploration via parallel Explore agents
   - Convention-aware code generation
   - Git worktree isolation per plan
   - Multi-repo orchestration with satellite worktrees
@@ -190,7 +190,7 @@ capabilities:
 commands:
   - name: talk
     signature: /devorch:talk "<description>"
-    purpose: Conversation, exploration, and planning with Agent Teams
+    purpose: Conversation, exploration, and planning with Explore agents
   - name: fix
     signature: /devorch:fix "<description>"
     purpose: Targeted fix with investigation, direct execution, and verification
@@ -209,7 +209,7 @@ architecture:
       mode: read-write
   scripts:
     - init-phase.ts (phase context loading)
-    - check-project.ts (lint + typecheck + build + test + validation)
+    - check-project.ts (lint + typecheck + build + test; --quick for per-phase)
     - map-project.ts (tech stack and structure collection)
     - map-conventions.ts (code pattern analysis)
     - validate-plan.ts (plan structure validation)
