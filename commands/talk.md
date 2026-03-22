@@ -1,5 +1,5 @@
 ---
-description: "Conversa + exploração com Agent Teams + plano estruturado"
+description: "Conversa + exploração + plano estruturado"
 argument-hint: "<o que quer fazer, explorar ou discutir>"
 model: opus
 disallowed-tools: EnterPlanMode
@@ -52,7 +52,7 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
 **Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
-- **If missing**: Generate it now. Launch 1-2 Explore agents (use the **Task tool call** with `subagent_type="Explore"`) to investigate:
+- **If missing**: Generate it now. Launch 1-2 Explore agents (Agent tool with `subagent_type="Explore"`, thoroughness "very thorough") to investigate:
   - **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management, error handling patterns
   - **Active workarounds** — patterns builders must preserve and why (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER")
   - **Gotchas** — things a builder needs to know to avoid mistakes
@@ -79,38 +79,13 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
 **Legacy plan migration**: If `.devorch/plans/current.md` exists in the main repo, archive it silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. Report: "Migrated legacy plan to archive." Plans now always live in worktrees — this path only triggers once during migration.
 
-### 2. Explore with Agent Teams
+### 2. Explore
 
-Analyze $ARGUMENTS and determine the exploration team composition:
+Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
 
-**Template teams** (use when the task type is clear):
-
-| Tipo | Roles |
-|---|---|
-| Feature/Enhancement | architecture-explorer (como encaixa na arquitetura), risk-assessor (o que pode dar errado, edge cases), pattern-analyst (padrões existentes a seguir) |
-| Refactor | structure-analyst (estrutura atual + dependências), impact-assessor (blast radius), pattern-proposer (padrões alvo baseados nas convenções) |
-| Bug complexo | 2-3 investigadores, cada um com hipótese distinta sobre a causa raiz |
-| New project | skip (não há código para explorar; usar discovery mode do Step 1) |
-
-**Dynamic team** (when no template applies):
-
-Think through the following before composing the team:
-```
-Analise a tarefa e responda mentalmente:
-1. Que dimensões esta tarefa tem? (UI, dados, performance, segurança, UX, infraestrutura...)
-2. Que perspectivas distintas encontrariam problemas diferentes?
-3. Que tensões existem? (performance vs legibilidade, flexibilidade vs simplicidade...)
-
-Crie 2-4 agentes onde:
-- Cada agente tem foco DISTINTO dos outros
-- Nenhum agente repete o trabalho de outro
-- Juntos cobrem >=90% dos riscos e áreas da tarefa
-- Cada agente sabe o que os outros estão cobrindo
-```
+Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`) in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.
 
 **Effort guidance**: Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth.
-
-**Execution**: Launch all explorers as parallel Task calls with `subagent_type="Explore"` in a single message. Each prompt includes: role, specific focus, $ARGUMENTS, CONVENTIONS.md (if it exists). Do NOT use TeamCreate for exploration — parallel Task agents are faster and exploration does not need inter-agent coordination.
 
 After all return: write combined findings to `.devorch/explore-cache.md` with format:
 ```markdown
@@ -158,7 +133,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 
 If user answers revealed new areas to explore, launch additional Explore agents targeted by the user's choices. Append findings to `.devorch/explore-cache.md`.
 
-Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
+Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
@@ -191,7 +166,7 @@ Prefer **fewer, denser phases** over many thin ones. With 1M context, the orches
 **When NOT to merge**:
 - Tasks in phase B depend on phase A's committed outputs (e.g., generated files, schema changes)
 - Shared file modifications across phases — two builders in the same wave cannot edit the same file
-- Phase A's validation must pass before phase B's work begins (e.g., migrations must succeed before seeding)
+- Phase A's checks must pass before phase B's work begins (e.g., migrations must succeed before seeding)
 
 **Examples**:
 - Two phases of 2 tasks each, no shared files → merge into one phase of 4 tasks in 2 waves
@@ -348,10 +323,6 @@ Risk: <risk>
 - [ ] <measurable criterion>
 </criteria>
 
-<validation>
-- `<command>` — <what it checks>
-</validation>
-
 <test-contract>
 - <test expectation for this phase>
 (optional — include when phase produces testable behavior)
@@ -372,16 +343,16 @@ Risk: <risk>
 
 - Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
-- Inside phase: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<validation>`, `<test-contract>` (optional), `<handoff>` (except last phase)
+- Inside phase: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<test-contract>` (optional), `<handoff>` (except last phase)
 - Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo)
 
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
 - **PLANNING AND ROUTING ONLY.** Do not build, write code, or deploy builder agents.
-- **The orchestrator NEVER reads source code files directly.** Use the **Task tool call** with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
+- **The orchestrator NEVER reads source code files directly.** Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
 - **Explore agents focus on source code.** Devorch state files (`.devorch/*`) are read by the orchestrator, not by Explore agents. This keeps agent prompts focused and avoids conflicting reads.
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
-- No Task agents except Explore (for understanding code).
+- No agents except Explore (for understanding code).
