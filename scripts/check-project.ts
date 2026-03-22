@@ -1,20 +1,17 @@
 /**
  * check-project.ts — Detects and runs project validation scripts.
  * Usage: bun ~/.claude/devorch-scripts/check-project.ts [project-dir] [--timeout <ms>] [--no-test]
- *        bun ~/.claude/devorch-scripts/check-project.ts [project-dir] --with-validation --plan <path> --phase <N>
- * Output: JSON with results for lint, typecheck, build, test (and optionally validation)
+ *        bun ~/.claude/devorch-scripts/check-project.ts [project-dir] --quick
+ * Output: JSON with results for lint, typecheck, build, test
  */
 import { existsSync, readFileSync } from "fs";
-import { join, resolve } from "path";
-import { extractTagContent, parsePhaseBounds, readPlan } from "./lib/plan-parser";
+import { join } from "path";
 
 // Positional + flag args (shared lib doesn't handle positional args)
 let cwd = process.cwd();
 let timeoutOverride: number | null = null;
 let noTest = false;
-let withValidation = false;
-let planPath = "";
-let phaseNum = 0;
+let quick = false;
 
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -22,12 +19,8 @@ for (let i = 0; i < argv.length; i++) {
     timeoutOverride = parseInt(argv[++i], 10);
   } else if (argv[i] === "--no-test") {
     noTest = true;
-  } else if (argv[i] === "--with-validation") {
-    withValidation = true;
-  } else if (argv[i] === "--plan" && argv[i + 1]) {
-    planPath = argv[++i];
-  } else if (argv[i] === "--phase" && argv[i + 1]) {
-    phaseNum = parseInt(argv[++i], 10);
+  } else if (argv[i] === "--quick") {
+    quick = true;
   } else if (!argv[i].startsWith("--")) {
     cwd = argv[i];
   }
@@ -35,25 +28,10 @@ for (let i = 0; i < argv.length; i++) {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const TEST_TIMEOUT_MS = 120_000;
-const VALIDATION_TIMEOUT_MS = 30_000;
+const QUICK_TIMEOUT_MS = 10_000;
 
 interface CheckResult {
   [key: string]: "pass" | "skip" | string;
-}
-
-interface ValidationResult {
-  command: string;
-  description: string;
-  cwd: string;
-  status: "pass" | "fail" | "timeout";
-  output?: string;
-}
-
-interface ValidationOutput {
-  totalCommands: number;
-  passed: number;
-  failed: number;
-  results: ValidationResult[];
 }
 
 const results: CheckResult = {};
@@ -166,180 +144,37 @@ async function runCheck(name: string, command: string, timeoutMs: number): Promi
   }
 }
 
-// --- Validation helpers ---
-function parseValidationCommands(text: string): { command: string; description: string }[] {
-  const commands: { command: string; description: string }[] = [];
-  const lines = text.split("\n").filter((l) => l.trim());
-  for (const line of lines) {
-    const cmdMatch = line.trim().match(/^[-*]\s*`([^`]+)`\s*(?:—|--|-)\s*(.*)/);
-    if (cmdMatch) {
-      commands.push({ command: cmdMatch[1], description: cmdMatch[2].trim() });
-    }
-  }
-  return commands;
-}
-
-function extractWorkingDirs(tasksContent: string): string[] {
-  const dirs: Set<string> = new Set();
-  const lines = tasksContent.split("\n");
-  for (const line of lines) {
-    const match = line.match(/Working directory:\s*`([^`]+)`/) || line.match(/Working directory:\s*(\S+)/);
-    if (match) {
-      dirs.add(match[1].trim());
-    }
-  }
-  return [...dirs];
-}
-
-function lastNLines(text: string, n: number): string {
-  const lines = text.split("\n").filter((l) => l.trim());
-  return lines.slice(-n).join("\n");
-}
-
-function determineCwd(command: string, workingDirs: string[]): string {
-  if (workingDirs.length === 0) return process.cwd();
-  if (workingDirs.length === 1) return workingDirs[0];
-
-  for (const dir of workingDirs) {
-    const dirNorm = dir.replaceAll("\\", "/");
-    const parts = dirNorm.split("/");
-    const lastPart = parts[parts.length - 1];
-    if (command.includes(lastPart + "/") || command.includes(lastPart + "\\")) {
-      return dir;
-    }
-  }
-
-  return workingDirs[0];
-}
-
-async function runValidationCommand(command: string, runCwd: string): Promise<{ status: "pass" | "fail" | "timeout"; output: string }> {
-  const shell = ["bash", "-c", command];
-
-  try {
-    const proc = Bun.spawn(shell, {
-      cwd: runCwd,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    const timeout = setTimeout(() => {
-      proc.kill();
-    }, VALIDATION_TIMEOUT_MS);
-
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-
-    const exitCode = await proc.exited;
-    clearTimeout(timeout);
-
-    if (exitCode === null || exitCode === undefined) {
-      return { status: "timeout", output: lastNLines(stderr || stdout, 5) };
-    }
-
-    if (exitCode === 0) {
-      return { status: "pass", output: "" };
-    }
-
-    return { status: "fail", output: lastNLines(stderr || stdout, 5) };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("timeout") || msg.includes("killed")) {
-      return { status: "timeout", output: msg };
-    }
-    return { status: "fail", output: msg };
-  }
-}
-
-async function runValidation(): Promise<ValidationOutput> {
-  if (!planPath || !phaseNum) {
-    console.error("--with-validation requires --plan and --phase");
-    process.exit(1);
-  }
-
-  const content = readPlan(planPath);
-  const phases = parsePhaseBounds(content);
-
-  const targetPhase = phases.find((p) => p.phase === phaseNum);
-  if (!targetPhase) {
-    return { totalCommands: 0, passed: 0, failed: 0, results: [] };
-  }
-
-  const phaseContent = targetPhase.content;
-  const validationContent = extractTagContent(phaseContent, "validation");
-  if (!validationContent) {
-    return { totalCommands: 0, passed: 0, failed: 0, results: [] };
-  }
-
-  const commands = parseValidationCommands(validationContent);
-  if (commands.length === 0) {
-    return { totalCommands: 0, passed: 0, failed: 0, results: [] };
-  }
-
-  const tasksContent = extractTagContent(phaseContent, "tasks") || "";
-  const workingDirs = extractWorkingDirs(tasksContent);
-
-  const validationResults: ValidationResult[] = [];
-  let passed = 0;
-  let failed = 0;
-
-  const validationPromises = commands.map(async ({ command, description }) => {
-    const cmdCwd = resolve(determineCwd(command, workingDirs));
-    const result = await runValidationCommand(command, cmdCwd);
-
-    const entry: ValidationResult = {
-      command,
-      description,
-      cwd: cmdCwd.replaceAll("\\", "/"),
-      status: result.status,
-    };
-
-    if (result.status !== "pass") {
-      entry.output = result.output;
-    }
-
-    return entry;
-  });
-
-  const allValidationResults = await Promise.all(validationPromises);
-  for (const entry of allValidationResults) {
-    if (entry.status === "pass") {
-      passed++;
-    } else {
-      failed++;
-    }
-    validationResults.push(entry);
-  }
-
-  return {
-    totalCommands: commands.length,
-    passed,
-    failed,
-    results: validationResults,
-  };
-}
+// --- Quick mode checks: only build + typecheck ---
+const QUICK_CHECKS = new Set(["build", "typecheck"]);
 
 // --- Run all checks in parallel ---
 const defaultTimeout = timeoutOverride ?? DEFAULT_TIMEOUT_MS;
 const allChecks: Promise<[string, string]>[] = [];
 
 for (const check of checks) {
+  if (quick && !QUICK_CHECKS.has(check.name)) {
+    results[check.name] = "skip";
+    continue;
+  }
   if (noTest && check.name === "test") {
     results.test = "skip";
     continue;
   }
   const cmd = check.detect();
   if (cmd) {
-    const timeout = check.name === "test" ? (timeoutOverride ?? TEST_TIMEOUT_MS) : defaultTimeout;
+    let timeout: number;
+    if (quick) {
+      timeout = QUICK_TIMEOUT_MS;
+    } else if (check.name === "test") {
+      timeout = timeoutOverride ?? TEST_TIMEOUT_MS;
+    } else {
+      timeout = defaultTimeout;
+    }
     allChecks.push(runCheck(check.name, cmd, timeout).then((r) => [check.name, r]));
   } else {
     results[check.name] = "skip";
   }
 }
-
-// Run validation in parallel with checks if --with-validation is set
-const validationPromise = withValidation ? runValidation() : null;
 
 const allResults = await Promise.all(allChecks);
 for (const [name, result] of allResults) {
@@ -348,9 +183,5 @@ for (const [name, result] of allResults) {
 
 // Build final output
 const output: Record<string, unknown> = { ...results };
-
-if (validationPromise) {
-  output.validation = await validationPromise;
-}
 
 console.log(JSON.stringify(output, null, 2));
