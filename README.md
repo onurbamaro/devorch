@@ -37,7 +37,7 @@ bun run install.ts
 /devorch:talk "add user authentication with JWT"
 ```
 
-That's it. devorch explores your codebase with parallel Agent Teams, clarifies ambiguities with you, creates a phased plan with parallel waves, sets up a git worktree, and hands off to `/devorch:build`. Coding conventions are detected automatically on first run.
+That's it. devorch explores your codebase with parallel Explore agents, clarifies ambiguities with you, creates a phased plan with parallel waves, sets up a git worktree, and hands off to `/devorch:build`. Coding conventions are detected automatically on first run.
 
 ---
 
@@ -77,7 +77,7 @@ devorch classifies the task intelligently -- if it needs design decisions or has
 /devorch:talk "how does the auth module work? is it safe to refactor?"
 ```
 
-Conversation mode: devorch explores the codebase with Agent Teams and presents findings. If you decide to act, it generates a plan.
+Conversation mode: devorch explores the codebase with Explore agents and presents findings. If you decide to act, it generates a plan.
 
 ---
 
