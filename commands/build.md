@@ -13,7 +13,7 @@ Execute all remaining phases of the plan automatically, then verify the full imp
   - A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
   - A **full path** (contains `/` or ends in `.md`) → used as-is
   - Omitted → auto-detects from active worktrees
-- `--no-tests` (optional boolean flag) → skip tests in the post-review check (3c). When set, the post-review `check-project.ts` receives `--no-test` and the report shows tests as skipped. Per-phase tests always run regardless of this flag. Parse this flag early alongside `--plan` and store as `noTests = true/false`.
+- `--no-tests` (optional boolean flag) → skip tests in the post-review check (3c). When set, the post-review `check-project.ts` receives `--no-test` and the report shows tests as skipped. Parse this flag early alongside `--plan` and store as `noTests = true/false`.
 
 ## Workflow
 
@@ -96,28 +96,28 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 
 #### 2d. Validate phase code
 
-Run the following via Bash with `run_in_background=true`:
+**Single-phase plans**: If `totalPhases == 1`, skip per-phase check entirely — the final check in step 3c covers everything. Proceed directly to 2e.
+
+**Multi-phase plans** (`totalPhases > 1`): Run the following via Bash with `run_in_background=true`:
 
 ```
-bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --with-validation --plan <planPath> --phase N
+bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick
 ```
 
-Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
-- If lint/typecheck/test fail: fix ALL errors regardless of origin. **Effort guidance for fix loop**: When fixing errors, reason deeply about root cause. Don't just patch symptoms — understand why the error occurred and fix the underlying issue. If unable to fix after one retry, report the errors and block the phase — do not proceed.
-- If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
+Collect results after it completes. The `--quick` flag runs only build and typecheck (lint and test are skipped). Evaluate:
+- If build or typecheck fail: fix ALL errors regardless of origin. **Effort guidance for fix loop**: When fixing errors, reason deeply about root cause. Don't just patch symptoms — understand why the error occurred and fix the underlying issue. If unable to fix after one retry, report the errors and block the phase — do not proceed.
 - If everything passes: proceed.
 
 **Satellite validation** (when init-phase output includes non-empty `satellites` array): After validating the primary repo, determine which satellites had tasks in this phase by scanning the `tasks` map for entries where `repo` field != `"primary"`. Collect the unique repo names and match them to the `satellites` array by name.
 
 For each satellite that had tasks in this phase, run:
 ```
-bun $CLAUDE_HOME/devorch-scripts/check-project.ts <satellite.worktreePath> --no-test
+bun $CLAUDE_HOME/devorch-scripts/check-project.ts <satellite.worktreePath> --quick
 ```
-Note: satellite checks do NOT use `--with-validation` — only lint, typecheck, and build.
 
-If any satellite lint/typecheck fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase.
+If any satellite build/typecheck fail: fix ALL errors regardless of origin. If unable to fix after one retry, report the errors and block the phase.
 
-**Check-project overlap with next phase**: After dispatching builders and they return, start `check-project.ts` in background (`run_in_background=true`) AND start `init-phase.ts` for the next phase in parallel. If check-project fails, stop before dispatching next phase builders. If check passes and next phase init is ready, proceed immediately — no waiting.
+**Check-project overlap with next phase**: After dispatching builders and they return, start `check-project.ts --quick` in background (`run_in_background=true`) AND start `init-phase.ts` for the next phase in parallel. If check-project fails, stop before dispatching next phase builders. If check passes and next phase init is ready, proceed immediately — no waiting.
 
 #### 2e. Phase summary and commit
 
