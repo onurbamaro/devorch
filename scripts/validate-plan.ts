@@ -109,7 +109,6 @@ if (phases.length === 0) {
       { pattern: /<tasks>[\s\S]*?<\/tasks>/i, name: "tasks" },
       { pattern: /<execution>[\s\S]*?<\/execution>/i, name: "execution" },
       { pattern: /<criteria>[\s\S]*?<\/criteria>/i, name: "criteria" },
-      { pattern: /<validation>[\s\S]*?<\/validation>/i, name: "validation" },
     ];
 
     for (const { pattern, name } of phaseRequired) {
