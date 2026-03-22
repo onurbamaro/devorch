@@ -44,12 +44,10 @@ Execute one phase of the current devorch plan.
 4. **Validate phase code**: Run the following via Bash with `run_in_background=true`:
 
    ```
-   bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --with-validation --plan .devorch/plans/current.md --phase N
+   bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick
    ```
 
-   Collect results after it completes. The JSON output includes standard fields (`lint`, `typecheck`, `build`, `test`) plus a `validation` field with `{totalCommands, passed, failed, results}`. Evaluate:
-   - If lint/typecheck/test fail: fix ALL errors regardless of origin. **Effort guidance for fix loop**: When fixing errors, reason deeply about root cause. Don't just patch symptoms — understand why the error occurred and fix the underlying issue. If unable to fix after one retry, report the errors and block the phase — do not proceed.
-   - If `validation.failed > 0`: log warning and proceed (the final check in build.md will catch issues).
+   Collect results after it completes. The JSON output includes `build` and `typecheck` fields (lint and test are skipped with --quick). If build/typecheck fail: fix ALL errors. If unable to fix after one retry, report and block.
    - If everything passes: proceed.
 
    **Satellite validation** (when init-phase output includes non-empty `satellites` array): After validating the primary repo, determine which satellites had tasks in this phase by scanning the `tasks` map for entries where `repo` field != `"primary"`. Collect the unique repo names and match them to the `satellites` array by name.
@@ -58,7 +56,7 @@ Execute one phase of the current devorch plan.
    ```
    bun $CLAUDE_HOME/devorch-scripts/check-project.ts <satellite.worktreePath> --no-test
    ```
-   Note: satellite checks do NOT use `--with-validation` — only lint, typecheck, and build.
+   Satellite checks also use `--quick` — only build and typecheck.
 
    Aggregate results across all satellites:
    - If any satellite check fails, report which satellite failed and the failure details.
