@@ -1,7 +1,7 @@
 # devorch State
 - Plan: Streamline Phase Checks and Simplify Exploration
-- Last completed phase: 1
-- Status: ready for phase 2
+- Last completed phase: 2
+- Status: all phases complete
 
-## Phase 1 Summary
-Added --quick flag to check-project.ts (build+typecheck, 10s), removed all validation code. Updated validate-plan.ts, build.md, talk.md, fix.md.
+## Phase 2 Summary
+Updated README.md, build-phase-reference.md, and devorch-builder.md to reflect quick checks, no validation, and simplified exploration.
