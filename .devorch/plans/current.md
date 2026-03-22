@@ -1,186 +1,147 @@
-# Plan: Streamline Phase Checks and Simplify Exploration
+# Plan: Inline Build and Cache Isolation
 
 <description>
-Three changes to devorch:
-1. Per-phase checks run only build + typecheck with 10s timeout (--quick flag). Single-phase plans skip per-phase check entirely.
-2. Remove the validation tag from plan format, check-project.ts, and all references across commands/docs.
-3. Simplify exploration from manual "Agent Teams" with template/dynamic role composition to direct Explore agent calls with focused prompts and thoroughness levels.
+Add inline build capability to /devorch:talk (execute plan directly without worktree for simple tasks) and isolate explore-cache per plan to prevent concurrent plan interference. Improve setup-worktree.ts resilience and speed.
 </description>
 
 <objective>
-Per-phase checks complete in ≤10s running only build+typecheck. The validation tag no longer exists in the plan format or any script/command. Exploration instructions use native Explore agent syntax (Agent tool with subagent_type="Explore") without template teams or dynamic team composition. All docs and README reflect the new behavior.
+Talk command offers inline or worktree build after plan generation, with heuristic recommendation based on total task count. Inline builds create a branch, execute phases, verify with 3 adversarial reviewers, and auto-merge. Explore-cache uses per-plan naming (`explore-cache-<name>.md`) eliminating conflicts between concurrent plans. Setup-worktree.ts handles orphan worktrees gracefully and creates satellites in parallel.
 </objective>
 
 <classification>
-Type: Refactor
+Type: Feature + Refactor
 Complexity: Medium
 Risk: Low
 </classification>
 
 <decisions>
-- Per-phase check scope → only build + typecheck, 10s timeout
-- Single-phase plans → skip per-phase check, only run final complete check
-- Validation tag → remove entirely from plan format, scripts, and commands
-- Exploration approach → 2-3 Explore agents with focused prompts (no role-playing/team templates), reviewers kept as-is
-- fix.md → also migrated to simplified exploration
-- explore-cache.md → keep caching mechanism
-- Docs → update both README.md and build-phase-reference.md
+- Inline build trigger → Always offer, recommend inline if totalTasks ≤ 8 AND single-repo
+- Inline isolation → Branch `devorch/<name>` in main repo, auto-merge on success, preserve branch on failure
+- Inline plan storage → Ephemeral (`.devorch/plans/<name>.md`), deleted after merge, summary in merge commit
+- Inline verification → Full (3 adversarial reviewers + check-project), same as worktree builds
+- Inline satellites → Not supported — multi-repo always uses worktree
+- explore-cache → Per-plan naming: `.devorch/explore-cache-<name>.md`
+- Cache name source → Derived from worktree/branch name, passed via `--cache-name` parameter
+- Backward compat → Scripts fall back to `explore-cache.md` when `--cache-name` not provided
+- Large plans → Keep current worktree-based flow (talk → /clear → build) unchanged
+- setup-worktree.ts → Parallel satellite creation, structured JSON errors, shared createWorktree function
 </decisions>
 
 <problem-statement>
-Per-phase validation runs all 4 checks (lint, typecheck, build, test) with 60-120s timeouts, adding unnecessary overhead between phases. The validation tag in plans adds noise without blocking value (failures are warnings only). Exploration instructions are complex with template teams, dynamic teams, and role-playing prompts that add orchestrator overhead without improving the native Explore agent's search quality.
+Three pain points:
+1. Concurrent plans on the same project interfere via shared `explore-cache.md` in the main repo
+2. Simple tasks (≤8 tasks) require full worktree ceremony adding ~30-40s overhead + an extra user interaction (/clear + /devorch:build)
+3. setup-worktree.ts lacks graceful error handling for orphan worktrees/branches and creates satellites sequentially
 </problem-statement>
 
 <solution-approach>
-1. Add --quick flag to check-project.ts: runs only build + typecheck with 10s timeout, skips lint and test entirely. Remove all validation-related code (--with-validation, parseValidationCommands, runValidation, ValidationResult, ValidationOutput, VALIDATION_TIMEOUT_MS).
-2. Update build.md step 2d to use --quick for per-phase checks, skip entirely for single-phase plans, and remove all validation references.
-3. Replace talk.md Step 2 "Explore with Agent Teams" with simplified "Explore" section using direct Agent tool calls with focused prompts.
-4. Simplify fix.md Step 3 to use Agent tool syntax instead of "Task with subagent_type" pattern.
-5. Update plan format to remove validation tag. Update validate-plan.ts to not require it.
-6. Update all docs and agent definitions for consistency.
+1. Per-plan cache naming via `--cache-name` parameter in init-phase.ts and manage-cache.ts. build.md derives cache name from plan path. Backward-compatible fallback to `explore-cache.md`.
+2. Inline build path in talk.md: after plan generation, heuristic recommends inline (≤8 tasks, single-repo) or worktree. Inline creates branch, executes phases with existing scripts (init-phase, check-project, phase-summary), runs full verification, and auto-merges.
+3. setup-worktree.ts: async satellite creation, structured JSON error output, shared worktree creation function.
+Alternative considered: native `isolation: "worktree"` — rejected because it lacks named branches, satellites, sparse checkout, and .devorch file copying.
 </solution-approach>
 
 <relevant-files>
-- `scripts/check-project.ts` — add --quick flag, remove all validation code
-- `scripts/validate-plan.ts` — remove validation from required phase tags (line 112)
-- `commands/build.md` — per-phase --quick, skip for 1-phase, remove validation refs, update --no-tests description
-- `commands/talk.md` — remove validation from plan format, simplify Step 2 exploration, update tool references
-- `commands/fix.md` — simplify Step 3 investigation, update tool references
-- `agents/devorch-builder.md` — update Task→Agent tool reference for Explore
-- `README.md` — update feature descriptions, script description, YAML section
-- `docs/build-phase-reference.md` — remove validation references from archived doc
+- `scripts/init-phase.ts` — add --cache-name parameter for per-plan cache resolution
+- `scripts/manage-cache.ts` — add --cache-name parameter
+- `commands/build.md` — derive cache-name from plan, pass to scripts, update cleanup
+- `scripts/setup-worktree.ts` — resilience, speed, simplicity improvements
+- `commands/talk.md` — inline build feature, cache naming, new plan options
 </relevant-files>
 
-<phase1 name="Core Scripts and Commands">
-<goal>Update check-project.ts with --quick flag and no validation, update validate-plan.ts, and update all three command files (build.md, talk.md, fix.md).</goal>
+<phase1 name="Cache Isolation, Script Improvements, and Inline Build">
+<goal>Add per-plan cache naming to scripts and build command, improve setup-worktree.ts, and add inline build capability to talk.md.</goal>
 
 <tasks>
-#### 1. Add --quick flag and remove validation from check-project.ts
-- **ID**: quick-flag-check-project
-- **Assigned To**: builder-scripts-check
-- Add `--quick` flag parsing (alongside existing `--no-test`, `--timeout`)
-- When `--quick` is set:
-  - Only run `build` and `typecheck` checks (skip `lint` and `test` entirely, mark them as `"skip"`)
-  - Override timeout to 10_000ms (10 seconds) for both checks, ignoring any `--timeout` value
-  - Do NOT run validation (validation is being removed entirely)
-- Remove ALL validation-related code:
-  - Remove flag parsing: `--with-validation`, `--plan`, `--phase` flags and their variables (`withValidation`, `planPath`, `phaseNum`)
-  - Remove constants: `VALIDATION_TIMEOUT_MS`
-  - Remove interfaces: `ValidationResult`, `ValidationOutput`
-  - Remove functions: `parseValidationCommands`, `extractWorkingDirs`, `lastNLines`, `determineCwd`, `runValidationCommand`, `runValidation`
-  - Remove validation execution: `validationPromise` conditional and `output.validation` assignment
-  - Remove imports: `extractTagContent`, `parsePhaseBounds`, `readPlan` from `./lib/plan-parser` (only used by validation code)
-- Update file header comment to remove `--with-validation` usage line and add `--quick` usage
-- Keep: `--no-test`, `--timeout` flags, all 4 check definitions (lint, typecheck, build, test), `runCheck` function, package.json detection, package manager detection
+#### 1. Per-plan Cache Naming in Scripts and Build Command
+- **ID**: cache-naming
+- **Assigned To**: builder-cache
+- **init-phase.ts** (`scripts/init-phase.ts`):
+  - Add `--cache-name` optional string parameter to parseArgs (line ~37, alongside existing plan, phase, cache-root)
+  - Update cache resolution (line ~102): when cacheName provided, resolve as `resolve(cacheRootDir, ".devorch", \`explore-cache-${cacheName}.md\`)`. When not provided, fall back to `resolve(cacheRootDir, ".devorch", "explore-cache.md")` — where cacheRootDir is `cacheRoot || projectRoot`
+  - The per-task cache filtering (line ~424) already uses `cacheRaw` from the resolved source — no changes needed there
+  - Update file header comment to document `--cache-name` usage
+- **manage-cache.ts** (`scripts/manage-cache.ts`):
+  - Add `--cache-name` optional string parameter
+  - When provided, operate on `explore-cache-<cacheName>.md` instead of `explore-cache.md`
+  - When not provided, fall back to `explore-cache.md` (backward compat)
+  - Update file header comment
+- **build.md** (`commands/build.md`):
+  - In step 0 (Resolve plan path, around line 20-36): after resolving planPath and projectRoot, derive cacheName. Logic: if planPath contains `.worktrees/<name>/`, extract `<name>` as cacheName. Else if planPath is `.devorch/plans/<filename>.md`, use filename without extension. Fallback: derive from plan title via kebab-case. Store as `cacheName` variable for use in subsequent steps.
+  - In step 2a (Init phase, line ~61): add `--cache-name <cacheName>` to init-phase.ts call
+  - In step 2f (Cache management, line ~145): add `--cache-name <cacheName>` to manage-cache.ts call
+  - In step 4c (Post-merge cleanup, lines ~309-314): change "Delete `.devorch/explore-cache.md`" to "Delete `.devorch/explore-cache-<cacheName>.md`. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup)."
 
-#### 2. Remove validation from required phase tags in validate-plan.ts
-- **ID**: remove-validation-validate-plan
-- **Assigned To**: builder-scripts-validate
-- In the `phaseRequired` array (around line 107-113), remove the entry: `{ pattern: /<validation>[\s\S]*?<\/validation>/i, name: "validation" }`
-- Keep all other required tags: goal, tasks, execution, criteria
+#### 2. Worktree Script Improvements
+- **ID**: worktree-improvements
+- **Assigned To**: builder-worktree
+- **Speed**: Convert the sequential `for (const repo of secondaryRepos)` loop in `createSatellites()` (line ~145) to parallel execution. Since each satellite operates on a different repo path, they're independent. Use `Promise.all` with async functions using `Bun.spawn` (not spawnSync) for satellite git operations. Keep primary worktree creation synchronous (it must complete before satellites). Make `createSatellites()` async and await it. The main script entry point needs a top-level async wrapper or use top-level await.
+- **Resilience**:
+  - When worktree already exists without `--recreate` (line ~264-269): output structured JSON `{"error": "exists", "worktreePath": "<path>", "branch": "<branch>", "hint": "use --recreate to replace"}` to stdout and exit code 1 (instead of `console.error` with plain string)
+  - When branch exists but worktree doesn't — orphan branch (line ~271-282): output JSON `{"error": "orphan-branch", "branch": "<branch>", "hint": "use --recreate to clean up"}` and exit code 1
+  - Same structured JSON errors for satellite worktree conflicts (lines ~159-182)
+- **Simplicity**: Extract shared function `createSingleWorktree(opts: { repoPath: string, worktreePath: string, branchName: string, sparsePaths?: string, recreate?: boolean }): { warnings: string[] }` that handles: ensure .gitignore has `.worktrees/` entry, `mkdirSync` parent dir, `git worktree add`, apply sparse-checkout if sparsePaths provided. Use this function for both primary (line ~300-316) and satellite (lines ~204-233) creation, replacing the duplicated logic.
 
-#### 3. Update build.md for quick per-phase checks and remove validation
-- **ID**: update-build-md
-- **Assigned To**: builder-cmd-build
-- **Step 0 (--no-tests description, around line 16)**: Remove the sentence "Per-phase tests always run regardless of this flag." since per-phase checks no longer run tests
-- **Step 2d (Validate phase code, lines 97-120)**: Replace the entire section with new logic:
-  - Add condition: if `totalPhases == 1`, skip per-phase check entirely (the final check in step 3c covers everything)
-  - If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick` (no --with-validation, --plan, --phase flags)
-  - Simplify result evaluation: only build and typecheck can fail (lint and test are skipped). If either fails, fix errors and retry once. If still failing, report and block the phase.
-  - Remove all validation.failed logic and validation field description
-  - **Satellite per-phase checks**: also use `--quick` instead of the current `--no-test` approach. Change `bun check-project.ts <satellite.worktreePath> --no-test` to `bun check-project.ts <satellite.worktreePath> --quick`
-  - Update the "Check-project overlap with next phase" note to reference --quick
-- **Step 3c (Post-review check, lines 219-232)**: No functional changes — keeps running the full check-project.ts. Just verify no --with-validation references remain.
-
-#### 4. Simplify exploration and remove validation from plan format in talk.md
-- **ID**: update-talk-md
-- **Assigned To**: builder-cmd-talk
-- **Description frontmatter (line 2)**: Change `"Conversa + exploração com Agent Teams + plano estruturado"` to `"Conversa + exploração + plano estruturado"`
-- **Step 1 (CONVENTIONS.md generation, lines 55-58)**: Replace `"Launch 1-2 Explore agents (use the **Task tool call** with subagent_type="Explore")"` with `"Launch 1-2 Explore agents (Agent tool with subagent_type="Explore", thoroughness "very thorough")"`
-- **Step 2 (lines 82-125)**: Replace the entire "Explore with Agent Teams" section with a simplified "Explore" section:
-  - New title: `### 2. Explore`
-  - Remove: template teams table (lines 86-93), dynamic team composition think-through block (lines 95-109)
-  - New content: `Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.` Then: `Launch 2-3 Explore agents (Agent tool with subagent_type="Explore") in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.`
-  - Keep: effort guidance line, explore-cache.md output format block
-- **Step 4 (Deep exploration, lines 159-163)**: Replace `"Use the **Task tool call** with subagent_type="Explore""` with `"Use the Agent tool with subagent_type="Explore""`
-- **Plan Format (lines 351-353)**: Remove the entire validation block from the phase template
-- **Plan Format Rules (line 375)**: Remove `<validation>` from the "Inside phase" list. New list: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<test-contract>` (optional), `<handoff>` (except last phase)
-- **Phase consolidation guidance (line 194)**: Change "Phase A's validation must pass" to "Phase A's checks must pass"
-- **Rules (lines 382-387)**: Replace `"Use the **Task tool call** with subagent_type="Explore""` with `"Use the Agent tool with subagent_type="Explore""`. Change `"No Task agents except Explore"` to `"No agents except Explore"`
-
-#### 5. Simplify exploration references in fix.md
-- **ID**: update-fix-md
-- **Assigned To**: builder-cmd-fix
-- **Description frontmatter (line 2)**: Change `"Fix/debug pontual com investigação Agent Teams"` to `"Fix/debug pontual com investigação"`
-- **Line 7**: Change `"Targeted fix/debug with Agent Teams investigation"` to `"Targeted fix/debug with investigation"`
-- **Step 3 title (line 43)**: Change `"Investigate with Agent Teams"` to `"Investigate"`
-- **Step 3 (line 47)**: Replace `"Launch 2-3 parallel Explore agents (Task with subagent_type="Explore")"` with `"Launch 2-3 Explore agents (Agent tool with subagent_type="Explore") in parallel"`
-- **Step 6 (line 71)**: Replace `"Task with subagent_type="Explore", foreground, parallel"` with `"Agent tool with subagent_type="Explore", foreground, parallel"`
-- Keep: hypothesis-based investigation structure, conditional review logic, all other content unchanged
+#### 3. Talk Command — Inline Build and Cache Naming
+- **ID**: talk-inline-build
+- **Assigned To**: builder-talk
+- Read current `commands/talk.md` and `commands/build.md` to understand both flows before making changes.
+- **After Step 1 (Load context), add Step 1b — Derive plan name**:
+  Add a new sub-step: "Derive a preliminary kebab-case name from $ARGUMENTS (3-5 descriptive words, lowercase, hyphenated). This name is used for: explore cache file, branch name (inline builds), and worktree name (worktree builds). The name may be refined later when the plan title is finalized — if so, rename the cache file."
+- **Step 2 (Explore)**: Change the explore-cache output path in the format block at the end from `.devorch/explore-cache.md` to `.devorch/explore-cache-<name>.md`
+- **Step 4 (Deep exploration)**: Update "Append findings to `.devorch/explore-cache.md`" to `.devorch/explore-cache-<name>.md`
+- **Step 5 (Propose plan) — REPLACE entirely with**:
+  Count total tasks across all phases in the designed plan. Show summary: "Plano: N fases, M tasks, K waves." Use AskUserQuestion with these options:
+  If totalTasks ≤ 8 AND no `<secondary-repos>` in plan:
+  - Option 1: "Executar agora — inline build" (Recommended) — "Cria branch, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
+  - Option 2: "Criar worktree para build separado" — "Worktree isolada + /devorch:build em sessão separada. Melhor para tarefas complexas ou paralelas"
+  If totalTasks > 8 OR has `<secondary-repos>`:
+  - Option 1: "Criar worktree para build separado" (Recommended) — same description
+  - Option 2: "Executar agora — inline build" — same description
+  Always include:
+  - Option 3: "Continuar explorando"
+  - Option 4: "Encerrar — tenho o que precisava"
+  Route: option explore → Step 2, option end → summarize and stop, option worktree → Step 6 then WORKTREE PATH, option inline → Step 6 then INLINE PATH
+- **Step 6 (Design solution)**: No changes — applies to both paths
+- **Steps 7-11 — WORKTREE PATH**: Keep current steps 7-11 with these updates:
+  - Step 7 (Create plan): use `<name>` from step 1b as the worktree name passed to setup-worktree.ts
+  - Step 10 (Commit main repo): stage `.devorch/explore-cache-<name>.md` instead of `explore-cache.md`
+  - Step 11 (Suggest next): include `--plan <name>` for the build command
+- **Steps 7-11 — INLINE PATH** (NEW section, add after the worktree path):
+  Step 7i (Create plan inline): Write plan to `.devorch/plans/<name>.md` (NOT `current.md`). Validate: `bun validate-plan.ts --plan .devorch/plans/<name>.md`. Fix if blocked. Delete `.devorch/state.md` if exists.
+  Step 8i (Create branch): Record current branch `git branch --show-current` → `originalBranch`. Create: `git checkout -b devorch/<name>`.
+  Step 9i (Phase loop): For each phase N sequentially:
+    (a) Init: `bun init-phase.ts --plan .devorch/plans/<name>.md --phase N --cache-name <name>`. Parse JSON, read contentFile if present.
+    (b) Deploy builders: For each wave, launch builders as foreground parallel Agent calls (`subagent_type="devorch-builder"`). Each builder receives: plan objective + decisions + solution approach (from init output), full task details from tasks map, conventions from conventionsByTask[taskId], cache from cacheByTask[taskId]. Include effort guidance and commit instruction. CRITICAL: builders call TaskUpdate with status "completed".
+    (c) Validate: if totalPhases == 1, skip. If > 1: `bun check-project.ts <cwd> --quick`. Fix failures or stop.
+    (d) Summary: `bun phase-summary.ts --plan .devorch/plans/<name>.md --phase N --status "ready for phase $((N+1))" --summary "<summary>"`. Commit if changes exist.
+    (e) Cache: `bun manage-cache.ts --action invalidate,trim --max-lines 3000 --cache-name <name>`
+  Step 10i (Final verification): Same as build command step 3. Determine changed files: `git diff --name-only <originalBranch>...HEAD`. Launch 3 adversarial reviewers (security, quality, completeness) as foreground parallel Agent calls (`subagent_type="Explore"`), each receives working directory, plan objective, CONVENTIONS.md, changed files list. Inline cross-phase check (imports, exports, TODOs, type consistency). Fix trivial findings inline, fix-level via devorch-builder agents. Post-review: `bun check-project.ts <cwd>`. Report.
+  Step 11i (Merge + cleanup): On SUCCESS: (1) `git checkout <originalBranch>`, (2) `git merge devorch/<name>` with commit message: `type(scope): <objective>` + body with plan summary (phases, tasks, key changes), (3) `git branch -d devorch/<name>`, (4) Delete `.devorch/plans/<name>.md`, `.devorch/explore-cache-<name>.md`, `.devorch/state.md`, `.devorch/project-map.md`, (5) commit cleanup: `chore(devorch): cleanup inline build <name>`, (6) Report verdict (same format as build command step 3d). On FAILURE: Do NOT merge, report "Build inline falhou na fase N. Branch `devorch/<name>` preservada com M commits.", suggest `/devorch:fix`.
+- **Rules section**: Add: "Inline builds are single-repo only. Plans with `<secondary-repos>` always use the worktree path."
+- **Legacy plan migration** (Step 1): Keep as-is. Additionally, clean up any stale `.devorch/explore-cache-*.md` files older than 7 days.
 
 </tasks>
 
 <execution>
-**Wave 1** (parallel): quick-flag-check-project, remove-validation-validate-plan, update-build-md, update-talk-md, update-fix-md
+**Wave 1** (parallel): cache-naming, worktree-improvements
+**Wave 2** (after wave 1): talk-inline-build
 </execution>
 
 <criteria>
-- [ ] check-project.ts --quick runs only build+typecheck with 10s timeout
-- [ ] check-project.ts has zero validation-related code
-- [ ] validate-plan.ts does not require validation tag in phases
-- [ ] build.md step 2d uses --quick for multi-phase plans, skips for single-phase
-- [ ] build.md has zero references to --with-validation or validation.failed
-- [ ] talk.md plan format has no validation tag
-- [ ] talk.md Step 2 has no template teams or dynamic team composition
-- [ ] talk.md uses "Agent tool" not "Task tool call" for Explore references
-- [ ] fix.md uses "Agent tool" not "Task" for Explore references
-- [ ] fix.md has no "Agent Teams" in titles or descriptions
+- [ ] init-phase.ts accepts --cache-name and resolves per-plan cache file
+- [ ] init-phase.ts falls back to explore-cache.md when --cache-name not provided
+- [ ] manage-cache.ts accepts --cache-name and operates on named cache file
+- [ ] build.md derives cacheName from plan path and passes --cache-name to scripts
+- [ ] build.md post-merge cleanup deletes named cache file
+- [ ] setup-worktree.ts satellites create in parallel (async, not sequential)
+- [ ] setup-worktree.ts outputs structured JSON for existing worktree/orphan branch errors
+- [ ] setup-worktree.ts has shared createSingleWorktree function
+- [ ] talk.md derives plan name early and uses it for explore-cache naming
+- [ ] talk.md Step 5 offers inline vs worktree with task-count heuristic
+- [ ] talk.md inline path creates branch, executes phases, runs full verification, auto-merges
+- [ ] talk.md inline path preserves branch on failure with clear report
+- [ ] talk.md worktree path uses per-plan cache naming
+- [ ] Multi-repo plans excluded from inline build option
 </criteria>
-
-<handoff>
-Core scripts and all 3 commands updated. Phase 2 updates README, archived docs, and builder agent definition to be consistent with the new behavior.
-</handoff>
 </phase1>
-
-<phase2 name="Documentation and Agent Updates">
-<goal>Update README.md, build-phase-reference.md, and devorch-builder.md to reflect the new check behavior, removed validation, and simplified exploration.</goal>
-
-<tasks>
-#### 1. Update README.md
-- **ID**: update-readme
-- **Assigned To**: builder-docs-readme
-- **Line 19 (Automatic validation feature)**: Change `"Every phase runs lint, typecheck, and validation commands in parallel. The final build step adds adversarial review with specialized agents (security, quality, completeness). Bugs surface immediately."` to `"Every phase runs a quick build + typecheck check (10s). The final build step runs the complete suite (lint, typecheck, build, tests) plus adversarial review with specialized agents (security, quality, completeness). Bugs surface immediately."`
-- **Line 88 (talk description)**: Change `"Launches parallel Explore agents with specialized roles (architecture, risk, patterns)"` to `"Launches parallel Explore agents to investigate the codebase"`
-- **Line 107 (check-project.ts in Scripts table)**: Change `"Runs lint + typecheck + build + test in parallel. With --with-validation, also runs phase validation commands. Returns JSON."` to `"Runs lint + typecheck + build + test in parallel. With --quick, runs only build + typecheck (10s). Returns JSON."`
-- **Line 135 (Commands Reference, talk)**: Change `"Explore (Agent Teams)"` to `"Explore"`
-- **Line 182 (YAML capabilities)**: Change `"Automatic phase validation (lint, typecheck, build, tests)"` to `"Quick per-phase checks (build, typecheck) with full validation at end"`
-- **Line 185 (YAML capabilities)**: Change `"Codebase exploration via parallel Agent Teams"` to `"Codebase exploration via parallel Explore agents"`
-- **Line 193 (YAML talk purpose)**: Change `"Conversation, exploration, and planning with Agent Teams"` to `"Conversation, exploration, and planning with Explore agents"`
-- **Line 212 (YAML check-project)**: Change `"check-project.ts (lint + typecheck + build + test + validation)"` to `"check-project.ts (lint + typecheck + build + test; --quick for per-phase)"`
-
-#### 2. Update build-phase-reference.md
-- **ID**: update-build-phase-ref
-- **Assigned To**: builder-docs-ref
-- **Line 47**: Change `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --with-validation --plan .devorch/plans/current.md --phase N` to `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`
-- **Lines 50-52**: Remove the validation field description and validation.failed logic. Replace with: `"The JSON output includes build and typecheck fields (lint and test are skipped with --quick). If build/typecheck fail: fix ALL errors. If unable to fix after one retry, report and block."`
-- **Line 61**: Remove `"Note: satellite checks do NOT use --with-validation — only lint, typecheck, and build."` Replace with `"Satellite checks also use --quick — only build and typecheck."`
-
-#### 3. Update devorch-builder.md Explore reference
-- **ID**: update-builder-agent
-- **Assigned To**: builder-docs-agent
-- **Line 19**: Change `"use \`Task\` with \`subagent_type=Explore\` to gather what you need before writing code. Launch multiple Explore agents in parallel when exploring independent areas."` to `"use the Agent tool with \`subagent_type=\"Explore\"\` to gather what you need before writing code. Launch multiple Explore agents in parallel when exploring independent areas."`
-
-</tasks>
-
-<execution>
-**Wave 1** (parallel): update-readme, update-build-phase-ref, update-builder-agent
-</execution>
-
-<criteria>
-- [ ] README.md describes quick per-phase checks, not full validation
-- [ ] README.md has no "Agent Teams" references
-- [ ] README.md check-project.ts description mentions --quick instead of --with-validation
-- [ ] build-phase-reference.md uses --quick, no --with-validation
-- [ ] devorch-builder.md uses "Agent tool" for Explore, not "Task"
-</criteria>
-</phase2>

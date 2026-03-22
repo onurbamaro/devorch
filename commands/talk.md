@@ -79,6 +79,14 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
 **Legacy plan migration**: If `.devorch/plans/current.md` exists in the main repo, archive it silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. Report: "Migrated legacy plan to archive." Plans now always live in worktrees — this path only triggers once during migration.
 
+**Stale cache cleanup**: Delete any `.devorch/explore-cache-*.md` files older than 7 days.
+
+### 1b. Derive plan name
+
+Derive a preliminary kebab-case name from $ARGUMENTS (3-5 descriptive words, lowercase, hyphenated). This name is used for: explore cache file, branch name (inline builds), and worktree name (worktree builds). The name may be refined later when the plan title is finalized — if so, rename the cache file accordingly (e.g., `mv .devorch/explore-cache-<old-name>.md .devorch/explore-cache-<new-name>.md`).
+
+Store this as `<name>` for all subsequent steps.
+
 ### 2. Explore
 
 Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
@@ -87,7 +95,7 @@ Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`) in paralle
 
 **Effort guidance**: Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth.
 
-After all return: write combined findings to `.devorch/explore-cache.md` with format:
+After all return: write combined findings to `.devorch/explore-cache-<name>.md` with format:
 ```markdown
 # Explore Cache
 Generated: <ISO timestamp>
@@ -131,7 +139,7 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 
 ### 4. Deep exploration (conditional)
 
-If user answers revealed new areas to explore, launch additional Explore agents targeted by the user's choices. Append findings to `.devorch/explore-cache.md`.
+If user answers revealed new areas to explore, launch additional Explore agents targeted by the user's choices. Append findings to `.devorch/explore-cache-<name>.md`.
 
 Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
 
@@ -139,14 +147,27 @@ Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. 
 
 ### 5. Propose plan
 
-Use `AskUserQuestion`:
-- Option 1: "Gerar plano e worktree" (Recommended)
-- Option 2: "Continuar explorando"
-- Option 3: "Encerrar — tenho o que precisava"
+Count total tasks across all phases in the designed plan. Show summary: "Plano: N fases, M tasks, K waves."
 
-If option 2: return to Step 2 with new focus.
-If option 3: summarize findings and end.
-If option 1: continue to Step 6.
+Use `AskUserQuestion` with options based on plan characteristics:
+
+**If totalTasks ≤ 8 AND no `<secondary-repos>` in plan:**
+- Option 1: "Executar agora — inline build" (Recommended) — "Cria branch, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
+- Option 2: "Criar worktree para build separado" — "Worktree isolada + /devorch:build em sessão separada. Melhor para tarefas complexas ou paralelas"
+
+**If totalTasks > 8 OR has `<secondary-repos>`:**
+- Option 1: "Criar worktree para build separado" (Recommended) — "Worktree isolada + /devorch:build em sessão separada. Melhor para tarefas complexas ou paralelas"
+- Option 2: "Executar agora — inline build" — "Cria branch, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
+
+**Always include:**
+- Option 3: "Continuar explorando"
+- Option 4: "Encerrar — tenho o que precisava"
+
+**Routing:**
+- Option explore → return to Step 2 with new focus
+- Option end → summarize findings and stop
+- Option worktree → continue to Step 6, then follow **WORKTREE PATH** (Steps 7-11)
+- Option inline → continue to Step 6, then follow **INLINE PATH** (Steps 7i-11i)
 
 ### 6. Design solution (medium/complex only)
 
@@ -173,21 +194,25 @@ Prefer **fewer, denser phases** over many thin ones. With 1M context, the orches
 - Phase 1 creates a new module, Phase 2 imports it → keep separate (producer/consumer dependency)
 - Phase 1 has 5 tasks, Phase 2 has 1 task → keep separate (Phase 1 already at max)
 
+---
+
+## WORKTREE PATH (Steps 7-11)
+
 ### 7. Create plan
 
-1. Derive a kebab-case name from the plan's descriptive name (e.g., "Courier Payroll Export" -> `courier-payroll-export`).
+1. Use `<name>` from Step 1b as the worktree name (refine if the plan title suggests a better name).
 2. **Setup worktree** (with optional satellites and sparse-checkout):
    - If the user selected sibling repos as satellites during Step 3, include them in the plan as `<secondary-repos>` entries (name + relative path from the "## Sibling Repos" section of map-project.ts output).
    - If the plan includes `<secondary-repos>`, parse it and build a JSON array: `[{"name": "<name>", "path": "<relative-path>"}, ...]`
    - **Derive sparse paths** (optional optimization): Extract unique top-level directories from `<relevant-files>` and `<new-files>` entries (e.g., `src/components/Foo.tsx` → `src`, `hooks/bar.ts` → `hooks`). Join as comma-separated string. Sparse-checkout is an optional optimization. If the plan references more than 10 top-level directories, skip `--sparse-paths` to use full checkout.
-   - With satellites and sparse paths: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>' --sparse-paths '<dirs>'`
-   - With satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --secondary '<json>'`
-   - With sparse paths, no satellites: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name> --sparse-paths '<dirs>'`
-   - No satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <kebab-name>`
+   - With satellites and sparse paths: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --secondary '<json>' --sparse-paths '<dirs>'`
+   - With satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --secondary '<json>'`
+   - With sparse paths, no satellites: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --sparse-paths '<dirs>'`
+   - No satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>`
    - Parse the JSON output to get `worktreePath`. If `sparsePaths` is present, log the sparse-checkout paths. If `satellites` is present in output, report each satellite worktree path and any warnings.
 3. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
 4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
-5. Do NOT copy `explore-cache.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
+5. Do NOT copy `explore-cache-<name>.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
 6. Set `planPath = <worktreePath>/.devorch/plans/current.md` for subsequent steps.
 
 ### 8. Validate
@@ -208,8 +233,8 @@ git -C <worktreePath> add .devorch/plans/current.md .devorch/CONVENTIONS.md
 git -C <worktreePath> commit -m "chore(devorch): plan — <descriptive plan name>"
 ```
 
-Also commit any devorch files changed in the main repo (explore-cache.md, CONVENTIONS.md):
-- Stage `.devorch/explore-cache.md`, `.devorch/CONVENTIONS.md` (if created/updated)
+Also commit any devorch files changed in the main repo (explore-cache, CONVENTIONS.md):
+- Stage `.devorch/explore-cache-<name>.md`, `.devorch/CONVENTIONS.md` (if created/updated)
 - Format: `chore(devorch): add worktree for <plan name>`
 
 ### 11. Suggest next
@@ -221,6 +246,138 @@ Plano criado na worktree: <worktreePath> (branch: <branch>)
 /devorch:build --plan <name>
 ```
 Explain: planning consumed significant context — `/clear` frees it before build starts.
+
+---
+
+## INLINE PATH (Steps 7i-11i)
+
+### 7i. Create plan inline
+
+1. Write the plan to `.devorch/plans/<name>.md` (NOT `current.md`) following the **Plan Format** below.
+2. Validate: `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/<name>.md`. Fix if blocked.
+3. Delete `.devorch/state.md` if it exists.
+
+### 8i. Create branch
+
+1. Record the current branch: `git branch --show-current` → store as `originalBranch`.
+2. Create and switch to inline build branch: `git checkout -b devorch/<name>`.
+
+### 9i. Phase loop
+
+For each phase N sequentially:
+
+#### (a) Init phase
+
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan .devorch/plans/<name>.md --phase N --cache-name <name>`.
+
+Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly.
+
+#### (b) Deploy builders
+
+For each wave, launch builders as foreground parallel Agent calls (`subagent_type="devorch-builder"`). Each builder receives:
+- Plan **Objective**, **Solution Approach** (if present), **Decisions** (if present) — from init output
+- Full task details from the `tasks` map
+- Convention sections from `conventionsByTask[taskId]`
+- Cache sections from `cacheByTask[taskId]`
+- **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
+- `commit with type(scope): description`
+- `CRITICAL: call TaskUpdate with status "completed" as your very last action`
+
+After all builders in a wave return, verify via `TaskList` that every task is marked completed.
+
+**On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
+- **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
+- **After 1 retry**: Stop and report the failure. Do not retry further.
+
+#### (c) Validate phase code
+
+**Single-phase plans**: If `totalPhases == 1`, skip per-phase check entirely — the final check in step 10i covers everything. Proceed directly to (d).
+
+**Multi-phase plans** (`totalPhases > 1`): Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <cwd> --quick`. The `--quick` flag runs only build and typecheck (lint and test are skipped).
+- If build or typecheck fail: fix ALL errors. If unable to fix after one retry, stop and report.
+- If everything passes: proceed.
+
+#### (d) Phase summary and commit
+
+Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/<name>.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`.
+
+If changes exist (`git status --porcelain`), commit with the generated message.
+
+#### (e) Cache management
+
+Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --cache-name <name>`.
+
+### 10i. Final verification
+
+Determine changed files: `git diff --name-only <originalBranch>...HEAD`.
+
+**Inline cross-phase check** (orchestrator reads diff files directly):
+
+Using the changed files list, read each changed file with the Read tool and verify:
+- Imports resolve — no references to moved/renamed/deleted modules
+- No orphan exports — exported symbols are imported somewhere
+- No leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders
+- Type consistency across module boundaries
+- No dead code introduced
+- Handoff contracts honored between phases
+
+Record findings with file:line evidence.
+
+**3 adversarial review agents** — foreground parallel Agent calls (`subagent_type="Explore"`):
+- Each agent receives: working directory, plan objective, CONVENTIONS.md content, list of changed files
+- **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
+- **quality-reviewer**: edge cases, error handling, correctness, maintainability
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
+
+**Fix findings**:
+- **Trivial** (1-2 files, fix is self-evident): fix directly with Edit tool.
+- **Fix-level** (well-defined fix, 3+ files or non-trivial logic): launch devorch-builder agents (`subagent_type="devorch-builder"`) as foreground calls.
+- **Talk-level** (requires design decisions): do NOT fix, report as pending issue.
+
+**Post-review check**: Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <cwd>`. Parse results.
+- If all checks pass: proceed to 11i.
+- If any check fails: diagnose and retry once. If retry fails, proceed to 11i with FAIL verdict.
+
+### 11i. Merge and cleanup
+
+**On SUCCESS** (all checks pass, no talk-level issues):
+
+1. Switch to original branch: `git checkout <originalBranch>`
+2. Merge: `git merge devorch/<name>` with commit message formatted as `type(scope): <objective>` and body containing plan summary (phases, tasks, key changes).
+3. Delete the build branch: `git branch -d devorch/<name>`
+4. Cleanup devorch files: delete `.devorch/plans/<name>.md`, `.devorch/explore-cache-<name>.md`, `.devorch/state.md`, `.devorch/project-map.md` (if they exist).
+5. Commit cleanup: `chore(devorch): cleanup inline build <name>`
+6. Report verdict using the same format as build command step 3d:
+   ```
+   ## Verificação Final: <plan name>
+
+   ### Integração Cross-phase
+   <findings ou "✅ OK">
+
+   ### Review Adversarial
+   Security: <findings ou "✅ clean">
+   Quality: <findings ou "✅ clean">
+   Completeness: <findings ou "✅ clean">
+
+   ### Correções de Review
+   <N issues corrigidos inline, M via builder agents> (ou "Nenhum")
+
+   ### Post-Review Check
+   Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M)
+
+   ### Issues Pendentes
+   <prompts /devorch:talk gerados> (ou "Nenhum")
+
+   ### Verdict: PASS / PASS com N issues pendentes / FAIL
+   ```
+
+**On FAILURE** (check failures, unresolvable issues):
+
+Do NOT merge. Do NOT delete the branch. Report:
+```
+Build inline falhou na fase N. Branch `devorch/<name>` preservada com M commits.
+```
+Suggest: `/devorch:fix` to address remaining issues.
 
 ---
 
@@ -349,10 +506,11 @@ Risk: <risk>
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- **PLANNING AND ROUTING ONLY.** Do not build, write code, or deploy builder agents.
-- **The orchestrator NEVER reads source code files directly.** Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
+- **PLANNING AND ROUTING ONLY.** Do not build, write code, or deploy builder agents (except during INLINE PATH execution).
+- **The orchestrator NEVER reads source code files directly** (except during INLINE PATH steps 10i-11i for review). Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
 - **Explore agents focus on source code.** Devorch state files (`.devorch/*`) are read by the orchestrator, not by Explore agents. This keeps agent prompts focused and avoids conflicting reads.
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
-- No agents except Explore (for understanding code).
+- No agents except Explore (for understanding code) and devorch-builder (for INLINE PATH execution only).
+- **Inline builds are single-repo only.** Plans with `<secondary-repos>` always use the worktree path.

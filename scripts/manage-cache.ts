@@ -1,8 +1,9 @@
 /**
  * manage-cache.ts — Invalidates and trims the explore-cache based on git changes.
- * Usage: bun ~/.claude/devorch-scripts/manage-cache.ts --action <invalidate|trim|invalidate,trim> [--max-lines 3000] [--root <path>]
+ * Usage: bun ~/.claude/devorch-scripts/manage-cache.ts --action <invalidate|trim|invalidate,trim> [--max-lines 3000] [--root <path>] [--cache-name <name>]
  * Output: JSON {"action", "sectionsRemoved", "sectionsRemaining", "linesAfter"}
  * --root: when provided, resolves cache path and runs git commands relative to <root> instead of process.cwd().
+ * --cache-name: when provided, operates on explore-cache-<name>.md instead of explore-cache.md. Enables per-plan cache isolation.
  */
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { resolve } from "path";
@@ -13,18 +14,21 @@ interface CacheSection {
   content: string;
 }
 
-const args = parseArgs<{ action: string; "max-lines": number; root: string }>([
+const args = parseArgs<{ action: string; "max-lines": number; root: string; "cache-name": string }>([
   { name: "action", type: "string", required: true },
   { name: "max-lines", type: "number" },
   { name: "root", type: "string" },
+  { name: "cache-name", type: "string" },
 ]);
 
 const action = args.action;
 const maxLines = args["max-lines"] || 5000;
 const root = args.root;
+const cacheName = args["cache-name"];
 const actions = action.split(",").map((a) => a.trim().toLowerCase());
 const baseDir = root || process.cwd();
-const cachePath = resolve(baseDir, ".devorch/explore-cache.md");
+const cacheFileName = cacheName ? `explore-cache-${cacheName}.md` : "explore-cache.md";
+const cachePath = resolve(baseDir, ".devorch", cacheFileName);
 
 if (!existsSync(cachePath)) {
   console.log(JSON.stringify({ action, sectionsRemoved: 0, sectionsRemaining: 0, linesAfter: 0 }));
