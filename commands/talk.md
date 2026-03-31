@@ -152,12 +152,12 @@ Count total tasks across all phases in the designed plan. Show summary: "Plano: 
 Use `AskUserQuestion` with options based on plan characteristics:
 
 **If totalTasks ≤ 8 AND no `<secondary-repos>` in plan:**
-- Option 1: "Executar agora — inline build" (Recommended) — "Cria branch, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
+- Option 1: "Executar agora — inline build" (Recommended) — "Cria worktree otimizada, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
 - Option 2: "Criar worktree para build separado" — "Worktree isolada + /devorch:build em sessão separada. Melhor para tarefas complexas ou paralelas"
 
 **If totalTasks > 8 OR has `<secondary-repos>`:**
 - Option 1: "Criar worktree para build separado" (Recommended) — "Worktree isolada + /devorch:build em sessão separada. Melhor para tarefas complexas ou paralelas"
-- Option 2: "Executar agora — inline build" — "Cria branch, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
+- Option 2: "Executar agora — inline build" — "Cria worktree otimizada, executa fases, verifica e faz merge automático. Ideal para tarefas simples"
 
 **Always include:**
 - Option 3: "Continuar explorando"
@@ -167,7 +167,7 @@ Use `AskUserQuestion` with options based on plan characteristics:
 - Option explore → return to Step 2 with new focus
 - Option end → summarize findings and stop
 - Option worktree → continue to Step 6, then follow **WORKTREE PATH** (Steps 7-11)
-- Option inline → continue to Step 6, then follow **INLINE PATH** (Steps 7i-11i)
+- Option inline → continue to Step 6, then follow **INLINE PATH** (Steps 7i-10i)
 
 ### 6. Design solution (medium/complex only)
 
@@ -249,32 +249,48 @@ Explain: planning consumed significant context — `/clear` frees it before buil
 
 ---
 
-## INLINE PATH (Steps 7i-11i)
+## INLINE PATH (Steps 7i-10i)
 
-### 7i. Create plan inline
+### 7i. Create plan in worktree
 
-1. Write the plan to `.devorch/plans/<name>.md` (NOT `current.md`) following the **Plan Format** below.
-2. Validate: `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan .devorch/plans/<name>.md`. Fix if blocked.
-3. Delete `.devorch/state.md` if it exists.
+1. Record the current branch: `git branch --show-current` → store as `originalBranch`. Set `mainRoot` = current working directory.
+2. **Derive sparse paths** (optional optimization): Extract unique top-level directories from `<relevant-files>` and `<new-files>` entries (e.g., `src/components/Foo.tsx` → `src`, `hooks/bar.ts` → `hooks`). Join as comma-separated string. If the plan references more than 10 top-level directories, skip `--sparse-paths` to use full checkout.
+3. **Setup worktree**:
+   - With sparse paths: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --sparse-paths '<dirs>'`
+   - No sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>`
+   - Parse the JSON output to get `worktreePath`. If `sparsePaths` is present, log the sparse-checkout paths.
+4. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
+5. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
+6. Do NOT copy `explore-cache-<name>.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
+7. Validate: `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <worktreePath>/.devorch/plans/current.md`. Fix if blocked.
+8. Delete `<worktreePath>/.devorch/state.md` if it exists.
+9. Commit plan in worktree:
+   ```bash
+   git -C <worktreePath> add .devorch/plans/current.md .devorch/CONVENTIONS.md
+   git -C <worktreePath> commit -m "chore(devorch): plan — <descriptive plan name>"
+   ```
+10. Also commit any devorch files changed in the main repo (explore-cache, CONVENTIONS.md):
+    - Stage `.devorch/explore-cache-<name>.md`, `.devorch/CONVENTIONS.md` (if created/updated)
+    - Format: `chore(devorch): add inline worktree for <plan name>`
+11. Set `projectRoot = <worktreePath>`, `planPath = <worktreePath>/.devorch/plans/current.md`.
 
-### 8i. Create branch
+All `git` and `bun` commands in subsequent steps must run with `cwd` set to `<projectRoot>` (or use `git -C <projectRoot>`).
 
-1. Record the current branch: `git branch --show-current` → store as `originalBranch`.
-2. Create and switch to inline build branch: `git checkout -b devorch/<name>`.
-
-### 9i. Phase loop
+### 8i. Phase loop
 
 For each phase N sequentially:
 
 #### (a) Init phase
 
-Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan .devorch/plans/<name>.md --phase N --cache-name <name>`.
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <name>`.
 
 Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly.
 
 #### (b) Deploy builders
 
 For each wave, launch builders as foreground parallel Agent calls (`subagent_type="devorch-builder"`). Each builder receives:
+- `Working directory: <projectRoot>`
+- `All file operations and git commands must use this directory as root`
 - Plan **Objective**, **Solution Approach** (if present), **Decisions** (if present) — from init output
 - Full task details from the `tasks` map
 - Convention sections from `conventionsByTask[taskId]`
@@ -291,68 +307,104 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 
 #### (c) Validate phase code
 
-**Single-phase plans**: If `totalPhases == 1`, skip per-phase check entirely — the final check in step 10i covers everything. Proceed directly to (d).
+**Single-phase plans**: If `totalPhases == 1`, skip per-phase check entirely — the final check in step 9i covers everything. Proceed directly to (d).
 
-**Multi-phase plans** (`totalPhases > 1`): Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <cwd> --quick`. The `--quick` flag runs only build and typecheck (lint and test are skipped).
+**Multi-phase plans** (`totalPhases > 1`): Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. The `--quick` flag runs only build and typecheck (lint and test are skipped).
 - If build or typecheck fail: fix ALL errors. If unable to fix after one retry, stop and report.
 - If everything passes: proceed.
 
 #### (d) Phase summary and commit
 
-Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/<name>.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`.
+Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`.
 
-If changes exist (`git status --porcelain`), commit with the generated message.
+If changes exist (`git -C <projectRoot> status --porcelain`), commit with the generated message.
 
 #### (e) Cache management
 
-Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --cache-name <name>`.
+Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot> --cache-name <name>`.
 
-### 10i. Final verification
+### 9i. Final verification
 
-Determine changed files: `git diff --name-only <originalBranch>...HEAD`.
+Determine changed files: `git -C <projectRoot> diff --name-only <originalBranch>...HEAD`.
 
-**Inline cross-phase check** (orchestrator reads diff files directly):
+**Residual scan** (quick, no file reading):
 
-Using the changed files list, read each changed file with the Read tool and verify:
-- Imports resolve — no references to moved/renamed/deleted modules
-- No orphan exports — exported symbols are imported somewhere
-- No leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders
-- Type consistency across module boundaries
-- No dead code introduced
-- Handoff contracts honored between phases
+Use the Grep tool to search for `TODO|FIXME|HACK|XXX` across the changed files (using `<projectRoot>` as base path). Record any findings with file:line evidence.
 
-Record findings with file:line evidence.
+**Adversarial review agents** — scale by plan size:
 
-**3 adversarial review agents** — foreground parallel Agent calls (`subagent_type="Explore"`):
-- Each agent receives: working directory, plan objective, CONVENTIONS.md content, list of changed files
+Count total tasks across all phases. Launch reviewers as foreground parallel Agent calls (`subagent_type="Explore"`), all in a single message:
+
+- **1-2 tasks** → **1 combined reviewer** (security + quality + completeness + cross-phase integration in one prompt)
+- **3-5 tasks** → **2 reviewers**: security-reviewer + quality-completeness-reviewer (quality, completeness, and cross-phase integration combined)
+- **6+ tasks** → **3 reviewers**: security-reviewer + quality-reviewer + completeness-reviewer
+
+Each reviewer receives: `Working directory: <projectRoot>`, plan objective, CONVENTIONS.md content, list of changed files. Reviewer mandates:
 - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
 - **quality-reviewer**: edge cases, error handling, correctness, maintainability
-- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec? Cross-phase integration — imports resolve, no orphan exports, handoff contracts honored, type consistency across modules
 
 **Fix findings**:
 - **Trivial** (1-2 files, fix is self-evident): fix directly with Edit tool.
-- **Fix-level** (well-defined fix, 3+ files or non-trivial logic): launch devorch-builder agents (`subagent_type="devorch-builder"`) as foreground calls.
+- **Fix-level** (well-defined fix, 3+ files or non-trivial logic): launch devorch-builder agents (`subagent_type="devorch-builder"`) as foreground calls. Include `Working directory: <projectRoot>` in builder prompt.
 - **Talk-level** (requires design decisions): do NOT fix, report as pending issue.
 
-**Post-review check**: Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <cwd>`. Parse results.
-- If all checks pass: proceed to 11i.
-- If any check fails: diagnose and retry once. If retry fails, proceed to 11i with FAIL verdict.
+**Skip-on-zero-findings**: If all reviewers AND the residual scan report zero findings, skip fix execution AND post-review check entirely.
 
-### 11i. Merge and cleanup
+**Post-review check**: Determine intensity based on fix tiers:
+- **Trivial fixes only**: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`
+- **Fix-level fixes**: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>` (full)
+- If all checks pass: proceed to 10i.
+- If any check fails: diagnose and retry once. If retry fails, proceed to 10i with FAIL verdict.
+
+### 10i. Merge and cleanup
 
 **On SUCCESS** (all checks pass, no talk-level issues):
 
-1. Switch to original branch: `git checkout <originalBranch>`
-2. Merge: `git merge devorch/<name>` with commit message formatted as `type(scope): <objective>` and body containing plan summary (phases, tasks, key changes).
-3. Delete the build branch: `git branch -d devorch/<name>`
-4. Cleanup devorch files: delete `.devorch/plans/<name>.md`, `.devorch/explore-cache-<name>.md`, `.devorch/state.md`, `.devorch/project-map.md` (if they exist).
-5. Commit cleanup: `chore(devorch): cleanup inline build <name>`
-6. Report verdict using the same format as build command step 3d:
+1. **Pre-flight stash**: Run `git status --porcelain` in the main repo (`<mainRoot>`) and filter out lines starting with `??` (untracked files). If any tracked changes remain:
+   ```bash
+   git stash push -m "devorch-pre-merge"
+   ```
+   Record that the repo was stashed. If no tracked changes exist, skip stash and record as clean.
+
+2. **Dry-run merge**:
+   ```bash
+   git merge --no-commit --no-ff devorch/<name>
+   git merge --abort
+   ```
+   If dry-run fails and the repo was stashed: run `git stash pop` to restore changes. Report the conflict between branches and stop.
+
+3. **Merge**:
+   ```bash
+   git checkout <originalBranch>
+   git merge devorch/<name>
+   ```
+
+4. **Restore stash**: If the repo was stashed:
+   ```bash
+   git stash pop
+   ```
+   If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
+
+5. **Post-merge cleanup**:
+   - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
+   - Delete `.devorch/state.md` from the main repo if it exists.
+   - Delete `.devorch/explore-cache-<name>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
+   - Delete `.devorch/project-map.md` from the main repo if it exists.
+   - Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <plan name>`
+
+6. **Remove worktree**:
+   ```bash
+   git worktree remove <projectRoot>
+   git branch -d devorch/<name>
+   ```
+
+7. Report verdict using the same format as build command step 3d:
    ```
    ## Verificação Final: <plan name>
 
-   ### Integração Cross-phase
-   <findings ou "✅ OK">
+   ### Residual Scan
+   <TODO/FIXME findings ou "✅ clean">
 
    ### Review Adversarial
    Security: <findings ou "✅ clean">
@@ -371,13 +423,15 @@ Record findings with file:line evidence.
    ### Verdict: PASS / PASS com N issues pendentes / FAIL
    ```
 
+   Report: "Merged `devorch/<name>` into `<originalBranch>`. Worktree removed."
+
 **On FAILURE** (check failures, unresolvable issues):
 
-Do NOT merge. Do NOT delete the branch. Report:
+Do NOT merge. Do NOT remove worktree. Report:
 ```
-Build inline falhou na fase N. Branch `devorch/<name>` preservada com M commits.
+Build inline falhou na fase N. Worktree `<projectRoot>` preservada (branch `devorch/<name>`) com M commits.
 ```
-Suggest: `/devorch:fix` to address remaining issues.
+Suggest: `/devorch:fix` to address remaining issues, or `/devorch:build --plan <name>` to retry in a new session.
 
 ---
 
@@ -507,7 +561,7 @@ Risk: <risk>
 
 - Do not narrate actions. Execute directly without preamble.
 - **PLANNING AND ROUTING ONLY.** Do not build, write code, or deploy builder agents (except during INLINE PATH execution).
-- **The orchestrator NEVER reads source code files directly** (except during INLINE PATH steps 10i-11i for review). Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
+- **The orchestrator NEVER reads source code files directly** (except for applying trivial fixes during INLINE PATH step 9i review). Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. The orchestrator only reads devorch files (`.devorch/*`) and Explore agent results. Use Grep directly only for quantification (counting matches, residual scans). **Rationale**: orchestrators that read source files directly consume context that should remain free for planning, clarification rounds, and plan generation. Explore agents run in isolated context windows, so their work costs zero tokens in the orchestrator's window.
 - **Explore agents focus on source code.** Devorch state files (`.devorch/*`) are read by the orchestrator, not by Explore agents. This keeps agent prompts focused and avoids conflicting reads.
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.
