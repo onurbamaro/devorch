@@ -359,44 +359,46 @@ Each reviewer receives: `Working directory: <projectRoot>`, plan objective, CONV
 
 ### 10i. Merge and cleanup
 
+All merge operations in this step run from `<mainRoot>` (the main repo), not `<projectRoot>` (the worktree).
+
 **On SUCCESS** (all checks pass, no talk-level issues):
 
-1. **Pre-flight stash**: Run `git status --porcelain` in the main repo (`<mainRoot>`) and filter out lines starting with `??` (untracked files). If any tracked changes remain:
+1. **Pre-flight stash**: Run `git -C <mainRoot> status --porcelain` and filter out lines starting with `??` (untracked files). If any tracked changes remain:
    ```bash
-   git stash push -m "devorch-pre-merge"
+   git -C <mainRoot> stash push -m "devorch-pre-merge"
    ```
    Record that the repo was stashed. If no tracked changes exist, skip stash and record as clean.
 
 2. **Dry-run merge**:
    ```bash
-   git merge --no-commit --no-ff devorch/<name>
-   git merge --abort
+   git -C <mainRoot> merge --no-commit --no-ff devorch/<name>
+   git -C <mainRoot> merge --abort
    ```
-   If dry-run fails and the repo was stashed: run `git stash pop` to restore changes. Report the conflict between branches and stop.
+   If dry-run fails and the repo was stashed: run `git -C <mainRoot> stash pop` to restore changes. Report the conflict between branches and stop.
 
 3. **Merge**:
    ```bash
-   git checkout <originalBranch>
-   git merge devorch/<name>
+   git -C <mainRoot> checkout <originalBranch>
+   git -C <mainRoot> merge devorch/<name>
    ```
 
 4. **Restore stash**: If the repo was stashed:
    ```bash
-   git stash pop
+   git -C <mainRoot> stash pop
    ```
-   If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
+   If `stash pop` fails (exit code != 0): run `git -C <mainRoot> status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
 
 5. **Post-merge cleanup**:
    - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
    - Delete `.devorch/state.md` from the main repo if it exists.
    - Delete `.devorch/explore-cache-<name>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
    - Delete `.devorch/project-map.md` from the main repo if it exists.
-   - Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <plan name>`
+   - Run `git -C <mainRoot> status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <plan name>`
 
 6. **Remove worktree**:
    ```bash
-   git worktree remove <projectRoot>
-   git branch -d devorch/<name>
+   git -C <mainRoot> worktree remove <projectRoot>
+   git -C <mainRoot> branch -d devorch/<name>
    ```
 
 7. Report verdict using the same format as build command step 3d:
