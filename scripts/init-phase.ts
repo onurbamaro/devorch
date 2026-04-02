@@ -9,7 +9,7 @@
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos } from "./lib/plan-parser";
+import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 
 const CONTENT_THRESHOLD = 50000;
@@ -417,9 +417,13 @@ if (isProjectMapFresh()) {
   }
 }
 
+// --- Extract phase-level specs ---
+const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
+
 // --- Build per-task filtered context ---
 const conventionsByTask: Record<string, string> = {};
 const cacheByTask: Record<string, string> = {};
+const specsByTask: Record<string, string> = {};
 
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskExts = extractExtensions(task.content);
@@ -427,6 +431,15 @@ for (const [taskId, task] of Object.entries(tasks)) {
 
   const taskRefs = extractFileRefs(task.content);
   cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
+
+  // Extract **Spec refs** from task content; if present, filter specs; otherwise include full spec section
+  const specRefsMatch = task.content.match(/\*\*Spec refs\*\*:\s*(.+)/);
+  if (specRefsMatch && phaseSpecContent) {
+    const refs = specRefsMatch[1].split(",").map((r) => r.trim()).filter(Boolean);
+    specsByTask[taskId] = filterSpecsByRefs(phaseSpecContent, refs);
+  } else {
+    specsByTask[taskId] = phaseSpecContent;
+  }
 }
 
 // --- Build output content ---
@@ -475,6 +488,13 @@ if (conventions) {
   parts.push("");
 }
 
+if (phaseSpecContent) {
+  parts.push("## Spec Contracts");
+  parts.push("");
+  parts.push(phaseSpecContent);
+  parts.push("");
+}
+
 if (state) {
   parts.push("## Current State");
   parts.push("");
@@ -510,6 +530,8 @@ const result: {
   tasks: Record<string, TaskInfo>;
   conventionsByTask: Record<string, string>;
   cacheByTask: Record<string, string>;
+  /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
+  specsByTask: Record<string, string>;
   content?: string;
   contentFile?: string;
 } = {
@@ -522,6 +544,7 @@ const result: {
   tasks,
   conventionsByTask,
   cacheByTask,
+  specsByTask,
 };
 
 if (fullContent.length > CONTENT_THRESHOLD) {
