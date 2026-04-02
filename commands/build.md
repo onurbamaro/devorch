@@ -67,7 +67,7 @@ For each remaining phase N (sequentially):
 
 Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <cacheName>`
 
-Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, and structured waves and tasks.
+Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, structured waves and tasks, and `specsByTask` (spec contracts extracted from the plan's `<spec>` section, filtered per task by **Spec refs**).
 
 #### 2b. Explore
 
@@ -83,8 +83,10 @@ Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
 - Full task details inline from the `tasks` map (builders skip TaskGet)
 - Convention sections from `conventionsByTask[taskId]` — pre-filtered by init-phase.ts based on file extensions in the task
+- Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task
 - Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
+- **Spec verification instruction**: "Verify your implementation satisfies all spec contracts before committing. Check: function signatures match `<interface>` specs, error handling matches `<error-contract>` cases, pre/postconditions from `<behavior>` specs are honored."
 - `commit with type(scope): description`
 - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
@@ -195,7 +197,7 @@ Record findings with file:line evidence. This runs inline while the adversarial 
 - Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
 - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
 - **quality-reviewer**: edge cases, error handling, correctness, maintainability
-- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec?
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec? Implementation matches `<spec>` contracts — function signatures, error handling, behavioral pre/postconditions, API response shapes
 
 All 3 adversarial agents block as foreground Task calls.
 
