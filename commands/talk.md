@@ -124,11 +124,16 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 - **Priority** — Speed vs completeness? MVP vs full implementation?
 - **Integration** — Should this connect to existing feature X? Replace or extend current behavior?
 - **Naming / conventions** — When the codebase doesn't have a clear precedent for something, ask.
+- **Contracts & specs** — What are the input/output contracts? What error cases must be handled? What invariants must hold? What API shapes are needed?
 - **Edge cases** — Anything the exploration revealed that has no obvious right answer.
 - **Multi-repo** — When the task involves or mentions multiple projects/repos, ask which secondary repos should be included as satellites. Present discovered repo paths as options. Each satellite gets its own worktree with the same branch name.
 - **Sibling repos (automatic)** — If the map-project.ts output from Step 1 contains a "## Sibling Repos" section, include a question asking which of those repos should be satellites for this plan. List each detected repo as an option (name + relative path). Always include the option "Nenhum — só o repo principal" as the last choice. This question should appear even if the user did not explicitly mention multi-repo.
 
 **Ask in rounds.** Use up to 4 questions per `AskUserQuestion` call (tool limit). If more questions remain, make another call after the user answers. Continue until all ambiguity is resolved — there is no cap on rounds. The goal is **zero assumptions** in the plan.
+
+### 3b. Propose specs
+
+Based on exploration findings and user answers, draft spec contracts for each planned phase. Use `AskUserQuestion` to present the proposed specs and let the user confirm, adjust, or reject. Group specs by phase. Include concrete examples derived from the exploration (real function names, real error cases discovered). If the user confirms, include specs verbatim in the plan. If the user adjusts, incorporate changes.
 
 **Guidelines:**
 - Use short, concrete options — not vague ones like "Option A" / "Option B". Each option should describe a real choice (e.g., "JWT with refresh tokens", "Session-based with Redis").
@@ -174,6 +179,8 @@ Use `AskUserQuestion` with options based on plan characteristics:
 **Effort guidance**: Think deeply. Consider alternatives, edge cases, and long-term implications. This is where reasoning depth matters most.
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
+
+Include `<spec>` section design as part of solution design. Each phase should have specs that define the contracts builders must implement. Prefer fewer, more precise specs over many vague ones.
 
 #### Phase consolidation guidance
 
@@ -512,17 +519,39 @@ Risk: <risk>
 <phase1 name="Name">
 <goal>one sentence</goal>
 
+<spec>
+<interface name="unique-name">
+  <input>parameter descriptions with types</input>
+  <output>return value description with types</output>
+  <error case="error-name">expected behavior</error>
+</interface>
+<error-contract name="unique-name">
+  <case trigger="condition" handling="expected behavior" />
+</error-contract>
+<behavior name="unique-name">
+  <precondition>what must be true before</precondition>
+  <postcondition>what must be true after</postcondition>
+</behavior>
+<invariant>condition that must always hold</invariant>
+<endpoint path="/path" method="METHOD">
+  <request>schema or description</request>
+  <response status="NNN">schema or description</response>
+</endpoint>
+</spec>
+
 <tasks>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
 - **Repo**: <name> <!-- optional, default: primary. Use secondary repo name when task targets a satellite repo -->
+- **Spec refs**: <comma-separated spec names from phase <spec> section> <!-- optional -->
 - <specific action>
 - <specific action>
 
 #### 2. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
+- **Spec refs**: <comma-separated spec names> <!-- optional -->
 - <specific action>
 
 </tasks>
@@ -535,11 +564,6 @@ Risk: <risk>
 <criteria>
 - [ ] <measurable criterion>
 </criteria>
-
-<test-contract>
-- <test expectation for this phase>
-(optional — include when phase produces testable behavior)
-</test-contract>
 
 <handoff>
 <what next phase needs to know>
@@ -556,8 +580,9 @@ Risk: <risk>
 
 - Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
-- Inside phase: `<goal>`, `<tasks>`, `<execution>`, `<criteria>`, `<test-contract>` (optional), `<handoff>` (except last phase)
-- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo)
+- Inside phase: `<goal>`, `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase)
+- Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`. All names must be unique within a phase.
+- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
 
 ## Rules
 
