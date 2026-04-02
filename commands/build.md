@@ -155,17 +155,11 @@ Run `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim -
 
 If new Explore agents were launched during this phase, append their summaries to `<mainRoot>/.devorch/explore-cache-<cacheName>.md` before or after running manage-cache.
 
-#### 2g. Verify completion
-
-Read `<projectRoot>/.devorch/state.md`. Check that `Last completed phase:` shows N.
-- If verified → report "Phase N/Y complete." and continue to next phase.
-- If NOT verified → stop and report: "Phase N did not complete successfully."
-
 ### 3. Final verification
 
 After all phases complete successfully, execute the full implementation verification **inline in this context** (not as Task — so that agents are first-level Task calls).
 
-> **Source-read rule relaxation**: The orchestrator reads source files directly in this step only (review phase). During phase execution (step 2), source reads remain delegated to builders and Explore agents.
+> **Source-read rule relaxation**: The orchestrator may read source files in this step only — limited to applying trivial fixes (via Edit tool) based on reviewer findings. All deep analysis is delegated to adversarial review agents. During phase execution (step 2), source reads remain delegated to builders and Explore agents.
 
 #### 3a. Determine changed files
 
@@ -174,36 +168,39 @@ Run `git -C <projectRoot> diff --name-only` against the baseline:
 - If partial: diff up to the last completed phase.
 - Fallback: diff against the plan commit (`chore(devorch): plan`).
 
-#### 3b. Inline cross-phase verification + launch review agents
+#### 3b. Residual scan + adversarial review agents
 
-Perform the cross-phase verification **inline** (no Explore agent) and launch adversarial reviewers **in parallel in the same message**:
+**Residual scan** (quick, no file reading):
 
-**Inline cross-phase check** (orchestrator reads diff files directly):
+Use the Grep tool to search for `TODO|FIXME|HACK|XXX` across the changed files from 3a. Record any findings with file:line evidence. This takes seconds and keeps the orchestrator's context clean (Principle 1).
 
-Using the changed files list from 3a, read each changed file with the Read tool and verify:
-- Imports resolve — no references to moved/renamed/deleted modules
-- No orphan exports — exported symbols are imported somewhere
-- No leftover `TODO`/`FIXME`/`HACK`/`XXX` from builders
-- Type consistency across module boundaries
-- No dead code introduced
-- Handoff contracts honored between phases
+**Adversarial review agents** — scale by plan size:
 
-Record findings with file:line evidence. This runs inline while the adversarial reviewers execute in parallel.
+Count total tasks across all phases in the plan. Launch reviewers as Task foreground calls (`subagent_type="Explore"`), all parallel in a single message:
 
-**3 adversarial review agents** — Task foreground, all parallel in the same message (`subagent_type="Explore"`):
-- **Effort guidance for reviewers**: Analyze deeply. Look for subtle bugs, security issues, and edge cases that builders might miss. Thoroughness matters more than speed here.
-- Each agent receives: `Working directory: <projectRoot>`, plan objective + description (NOT source code), CONVENTIONS.md, list of changed files
+- **1-2 tasks** → **1 combined reviewer** (security + quality + completeness + cross-phase integration in one prompt)
+- **3-5 tasks** → **2 reviewers**: security-reviewer + quality-completeness-reviewer (quality, completeness, and cross-phase integration combined)
+- **6+ tasks** → **3 reviewers**: security-reviewer + quality-reviewer + completeness-reviewer
+
+**All reviewers receive:**
+- `Working directory: <projectRoot>`
+- Plan objective + description (NOT source code)
+- CONVENTIONS.md content
+- List of changed files
 - **All file reads and git commands must use `<projectRoot>` as the base path**
 - Each explores the code INDEPENDENTLY — as if unfamiliar with the implementation
+- **Effort guidance**: Analyze deeply. Look for subtle bugs, security issues, and edge cases that builders might miss. Thoroughness matters more than speed here.
+
+**Reviewer mandates:**
 - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
 - **quality-reviewer**: edge cases, error handling, correctness, maintainability
-- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec? Implementation matches `<spec>` contracts — function signatures, error handling, behavioral pre/postconditions, API response shapes
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec? Implementation matches `<spec>` contracts — function signatures, error handling, behavioral pre/postconditions, API response shapes. Cross-phase integration — imports resolve across module boundaries, no orphan exports, handoff contracts honored between phases, type consistency across modules
 
-All 3 adversarial agents block as foreground Task calls.
+All adversarial agents block as foreground Task calls.
 
 #### 3c. Code review fixes
 
-Collect results from: inline cross-phase check, 3 adversarial reviewers.
+Collect results from: residual scan, adversarial reviewers.
 
 Classify each finding into one of three tiers:
 
@@ -216,7 +213,7 @@ Classify each finding into one of three tiers:
 
 **Fix execution** (batch by file):
 
-**Skip-on-zero-findings**: If all 3 adversarial reviewers AND the inline cross-phase check report zero findings, skip the fix execution AND the post-review check entirely. The last phase's `check-project.ts` already validated everything — no need to re-run.
+**Skip-on-zero-findings**: If all adversarial reviewers AND the residual scan report zero findings, skip the fix execution AND the post-review check entirely. The last phase's `check-project.ts` already validated everything — no need to re-run.
 
 Otherwise:
 
@@ -227,13 +224,15 @@ Otherwise:
 
 **Post-review check** (with 1 retry for fix-level builders):
 
-After review fixes are committed, run automated checks inline:
+After review fixes are committed, determine check intensity based on fix tiers applied:
+- **Trivial fixes only** (no fix-level builders launched): run with `--quick` — build + typecheck only. Lint and tests already passed in per-phase checks; cosmetic fixes don't warrant a full re-run.
+- **Fix-level fixes** (any fix-level builder launched): run full check.
 
 ```bash
-bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot>
+bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> [--quick]
 ```
 
-Append `--no-test` only if `noTests` is true. Parse the JSON output.
+Append `--no-test` only if `noTests` is true (applies to full checks only). Parse the JSON output.
 
 - If all checks pass: proceed to verdict.
 - If any check fails (lint, typecheck, build, test): diagnose which fix-level builder's changes caused the failure. Re-launch that specific builder with error context (1 retry max, `subagent_type="devorch-builder"`). After retry, run `check-project.ts` once more.
@@ -245,8 +244,8 @@ Append `--no-test` only if `noTests` is true. Parse the JSON output.
 ```
 ## Verificação Final: <plan name>
 
-### Integração Cross-phase
-<findings do Explore agent ou "✅ OK">
+### Residual Scan
+<TODO/FIXME findings ou "✅ clean">
 
 ### Review Adversarial
 Security: <findings ou "✅ clean">
@@ -380,7 +379,7 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 - Do not narrate actions. Execute directly without preamble.
 - Phases run sequentially — phase logic executes inline (no phase agent delegation).
 - Stop on first failure. Report which phase failed.
-- The orchestrator reads devorch files (`.devorch/*`, plan, state) but never reads source code files during phase execution. Source code reads are allowed only during review (step 3).
+- The orchestrator reads devorch files (`.devorch/*`, plan, state) but never reads source code files during phase execution. During review (step 3), source reads are limited to applying trivial fixes — all deep analysis is delegated to adversarial review agents.
 - **Context discipline**: builders run in isolated Task contexts with only task-specific conventions and cache (from `conventionsByTask` and `cacheByTask`). The orchestrator coordinates via scripts that return JSON — not by reading code.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
 - Auto-fix trivial and fix-level findings. Only escalate talk-level issues with `/devorch:talk` prompt.

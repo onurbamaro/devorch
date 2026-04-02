@@ -91,10 +91,17 @@ function deriveWorktreeName(title: string): string {
   return title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 }
 
-const worktreeName = deriveWorktreeName(planTitle);
+// Prefer actual worktree directory name over plan-title derivation.
+// If projectRoot is inside a .worktrees/<name> folder, use <name> directly.
+const worktreesDirMatch = projectRoot.match(/\.worktrees\/([^/]+)$/);
+const worktreeName = worktreesDirMatch ? worktreesDirMatch[1] : deriveWorktreeName(planTitle);
+
+// Resolve satellite paths from the main repo root (not the worktree).
+// Secondary repo paths like "../salsago-core" are relative to the main repo.
+const mainRoot = worktreesDirMatch ? resolve(projectRoot, "../..") : projectRoot;
 
 const satellites: SatelliteInfo[] = secondaryRepos.map((repo) => {
-  const resolvedPath = resolve(projectRoot, repo.path);
+  const resolvedPath = resolve(mainRoot, repo.path);
   const wtPath = resolve(resolvedPath, ".worktrees", worktreeName);
   return { name: repo.name, path: resolvedPath, worktreePath: wtPath };
 });
