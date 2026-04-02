@@ -1,7 +1,7 @@
 # devorch State
 - Plan: Spec-Driven Talk Phase
-- Last completed phase: 1
-- Status: ready for phase 2
+- Last completed phase: 2
+- Status: all phases complete
 
-## Phase 1 Summary
-Added spec format to talk.md replacing test-contract, added spec parsing utilities to plan-parser.ts, updated validate-plan.ts with spec validation
+## Phase 2 Summary
+Wired specs through pipeline: init-phase.ts extracts and filters specs per task, build.md passes specsByTask to builders, devorch-builder.md adds spec verification step
