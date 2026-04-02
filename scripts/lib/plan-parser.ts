@@ -86,6 +86,81 @@ export interface SecondaryRepo {
   path: string;
 }
 
+// --- Spec parsing ---
+
+export type SpecType = "interface" | "error-contract" | "behavior" | "invariant" | "endpoint";
+
+export function extractPhaseSpec(phaseContent: string): string | null {
+  const match = phaseContent.match(/<spec>([\s\S]*?)<\/spec>/i);
+  return match ? match[1].trim() || null : null;
+}
+
+export function parseSpecNames(specContent: string): string[] {
+  const names: string[] = [];
+
+  // Named tags: interface, error-contract, behavior — extract name="..."
+  const namedTagRegex = /<(?:interface|error-contract|behavior)\s+[^>]*name="([^"]+)"[^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = namedTagRegex.exec(specContent)) !== null) {
+    names.push(m[1]);
+  }
+
+  // Invariant tags — implicit naming: invariant-1, invariant-2, ...
+  const invariantRegex = /<invariant(?:\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
+  let invIdx = 0;
+  while (invariantRegex.exec(specContent) !== null) {
+    invIdx++;
+    names.push(`invariant-${invIdx}`);
+  }
+
+  // Endpoint tags — implicit naming: METHOD-/path
+  const endpointRegex = /<endpoint\s+[^>]*(?:method="([^"]+)"[^>]*path="([^"]+)"|path="([^"]+)"[^>]*method="([^"]+)")[^>]*>/gi;
+  while ((m = endpointRegex.exec(specContent)) !== null) {
+    const method = (m[1] || m[4]).toUpperCase();
+    const path = m[2] || m[3];
+    names.push(`${method}-${path}`);
+  }
+
+  // Deduplicate while preserving order
+  return [...new Set(names)];
+}
+
+export function filterSpecsByRefs(specContent: string, refs: string[]): string {
+  const refsSet = new Set(refs);
+  const matched: string[] = [];
+
+  // Named tags: interface, error-contract, behavior
+  const namedRegex = /<(interface|error-contract|behavior)\s+[^>]*name="([^"]+)"[^>]*>[\s\S]*?<\/\1>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = namedRegex.exec(specContent)) !== null) {
+    if (refsSet.has(m[2])) {
+      matched.push(m[0]);
+    }
+  }
+
+  // Invariant tags with implicit names
+  const invariantRegex = /<invariant(?:\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
+  let invIdx = 0;
+  while ((m = invariantRegex.exec(specContent)) !== null) {
+    invIdx++;
+    if (refsSet.has(`invariant-${invIdx}`)) {
+      matched.push(m[0]);
+    }
+  }
+
+  // Endpoint tags with implicit names
+  const endpointRegex = /<endpoint\s+[^>]*(?:method="([^"]+)"[^>]*path="([^"]+)"|path="([^"]+)"[^>]*method="([^"]+)")[^>]*>[\s\S]*?<\/endpoint>/gi;
+  while ((m = endpointRegex.exec(specContent)) !== null) {
+    const method = (m[1] || m[4]).toUpperCase();
+    const path = m[2] || m[3];
+    if (refsSet.has(`${method}-${path}`)) {
+      matched.push(m[0]);
+    }
+  }
+
+  return matched.join("\n");
+}
+
 export function extractSecondaryRepos(planContent: string): SecondaryRepo[] {
   const block = extractTagContent(planContent, "secondary-repos");
   if (!block) return [];

@@ -5,7 +5,7 @@
  */
 import { createHash } from "crypto";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, extractSecondaryRepos, readPlan } from "./lib/plan-parser";
+import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, readPlan } from "./lib/plan-parser";
 
 const args = parseArgs<{ plan: string }>([
   { name: "plan", type: "string", required: true },
@@ -138,10 +138,113 @@ if (phases.length === 0) {
       }
     }
 
-    // Optional <test-contract>
-    const testContractContent = extractTagContent(phaseContent, "test-contract");
-    if (testContractContent !== null && !testContractContent) {
-      warnings.push(`Phase ${phase.num}: <test-contract> tag is empty`);
+    // --- Spec validation ---
+    const specContent = extractPhaseSpec(phaseContent);
+    if (specContent === null) {
+      warnings.push(`Phase ${phase.num} has no <spec> section`);
+    } else {
+      // Structural validation for each sub-tag type
+      const interfaceRegex = /<interface\s+([^>]*)>([\s\S]*?)<\/interface>/gi;
+      let specMatch: RegExpExecArray | null;
+      while ((specMatch = interfaceRegex.exec(specContent)) !== null) {
+        const attrs = specMatch[1];
+        const body = specMatch[2];
+        if (!/name="[^"]+"/.test(attrs)) {
+          errors.push(`Phase ${phase.num}: <interface> missing name attribute`);
+        }
+        if (!/<input[\s>]/i.test(body)) {
+          errors.push(`Phase ${phase.num}: <interface> missing <input>`);
+        }
+        if (!/<output[\s>]/i.test(body)) {
+          errors.push(`Phase ${phase.num}: <interface> missing <output>`);
+        }
+        // Quality: placeholder check
+        const inputMatch = body.match(/<input[^>]*>([\s\S]*?)<\/input>/i);
+        if (inputMatch && /^\s*\.{3}\s*$/.test(inputMatch[1])) {
+          warnings.push(`Phase ${phase.num}: <interface> <input> is a placeholder`);
+        }
+        const outputMatch = body.match(/<output[^>]*>([\s\S]*?)<\/output>/i);
+        if (outputMatch && /^\s*\.{3}\s*$/.test(outputMatch[1])) {
+          warnings.push(`Phase ${phase.num}: <interface> <output> is a placeholder`);
+        }
+      }
+
+      const ecRegex = /<error-contract\s+([^>]*)>([\s\S]*?)<\/error-contract>/gi;
+      while ((specMatch = ecRegex.exec(specContent)) !== null) {
+        const attrs = specMatch[1];
+        const body = specMatch[2];
+        if (!/name="[^"]+"/.test(attrs)) {
+          errors.push(`Phase ${phase.num}: <error-contract> missing name attribute`);
+        }
+        const cases = body.match(/<case[\s>]/gi);
+        if (!cases || cases.length === 0) {
+          errors.push(`Phase ${phase.num}: <error-contract> must contain at least 1 <case>`);
+        } else if (cases.length === 1) {
+          warnings.push(`Phase ${phase.num}: <error-contract> has only 1 case — consider covering more`);
+        }
+      }
+
+      const behaviorRegex = /<behavior\s+([^>]*)>([\s\S]*?)<\/behavior>/gi;
+      while ((specMatch = behaviorRegex.exec(specContent)) !== null) {
+        const attrs = specMatch[1];
+        const body = specMatch[2];
+        if (!/name="[^"]+"/.test(attrs)) {
+          errors.push(`Phase ${phase.num}: <behavior> missing name attribute`);
+        }
+        if (!/<precondition[\s>]/i.test(body) && !/<postcondition[\s>]/i.test(body)) {
+          errors.push(`Phase ${phase.num}: <behavior> must contain <precondition> or <postcondition>`);
+        }
+      }
+
+      const invariantRegex = /<invariant(?:\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
+      while ((specMatch = invariantRegex.exec(specContent)) !== null) {
+        const bodyText = specMatch[0].replace(/<\/?invariant[^>]*>/gi, "").trim();
+        if (!bodyText) {
+          errors.push(`Phase ${phase.num}: <invariant> has empty text content`);
+        }
+      }
+
+      const endpointRegex = /<endpoint\s+([^>]*)>([\s\S]*?)<\/endpoint>/gi;
+      while ((specMatch = endpointRegex.exec(specContent)) !== null) {
+        const attrs = specMatch[1];
+        const body = specMatch[2];
+        if (!/path="[^"]+"/.test(attrs)) {
+          errors.push(`Phase ${phase.num}: <endpoint> missing path attribute`);
+        }
+        if (!/method="[^"]+"/.test(attrs)) {
+          errors.push(`Phase ${phase.num}: <endpoint> missing method attribute`);
+        }
+        if (!/<response[\s>]/i.test(body)) {
+          errors.push(`Phase ${phase.num}: <endpoint> must contain at least 1 <response>`);
+        }
+      }
+
+      // Uniqueness: all spec names within a phase must be unique
+      const specNames = parseSpecNames(specContent);
+      const seen = new Set<string>();
+      for (const name of specNames) {
+        if (seen.has(name)) {
+          errors.push(`Phase ${phase.num}: duplicate spec name "${name}"`);
+        }
+        seen.add(name);
+      }
+
+      // Ref integrity: tasks referencing specs that don't exist
+      const specNamesSet = new Set(specNames);
+      const taskSectionsForRefs = tasksContent.split(/####\s+\d+\.\s+/);
+      for (const section of taskSectionsForRefs.slice(1)) {
+        const taskIdMatch = section.match(/\*\*ID\*\*:\s*(\S+)/i);
+        const refsMatch = section.match(/\*\*Spec refs\*\*:\s*(.+)/i);
+        if (refsMatch) {
+          const refNames = refsMatch[1].split(",").map((r) => r.trim()).filter(Boolean);
+          for (const ref of refNames) {
+            if (!specNamesSet.has(ref)) {
+              const tid = taskIdMatch ? taskIdMatch[1] : "unknown";
+              errors.push(`Phase ${phase.num}: task "${tid}" references unknown spec "${ref}"`);
+            }
+          }
+        }
+      }
     }
 
     // Handoff — required except last phase
