@@ -314,7 +314,9 @@ If `stash pop` fails (exit code != 0): run `git -C <repoMainPath> status --porce
 
 If `stash pop` succeeds: the stash is auto-removed, continue to next repo.
 
-c. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
+c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <primaryMainPath>`. If `fixed > 0`, include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
+
+d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
 2. Delete `.devorch/state.md` from the main repo if it exists.
@@ -322,7 +324,7 @@ c. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
 5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
-d. **Cleanup all repos** — For each repo (primary + satellites):
+e. **Cleanup all repos** — For each repo (primary + satellites):
 ```bash
 git -C <repoMainPath> worktree remove <worktreePath>
 git -C <repoMainPath> branch -d <worktreeBranch>
@@ -355,7 +357,9 @@ If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conf
 
 If `stash pop` succeeds: the stash is auto-removed, continue.
 
-c. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
+c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, include the journal file in the cleanup commit.
+
+d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
 2. Delete `.devorch/state.md` from the main repo if it exists.
@@ -363,7 +367,7 @@ c. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
 5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
-d. **Cleanup**:
+e. **Cleanup**:
 ```bash
 git worktree remove <projectRoot>
 git branch -d <worktreeBranch>

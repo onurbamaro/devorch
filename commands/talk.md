@@ -131,15 +131,24 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 
 **Ask in rounds.** Use up to 4 questions per `AskUserQuestion` call (tool limit). If more questions remain, make another call after the user answers. Continue until all ambiguity is resolved — there is no cap on rounds. The goal is **zero assumptions** in the plan.
 
+**Reflection pass (after all rounds complete).** Before moving on, step back and review the full picture: the original request, exploration findings, and all user answers so far. Consider what the user might want but didn't explicitly ask for — common causes:
+- **Short or vague prompt** — the user had a clear mental picture but described only part of it.
+- **Assumed obvious** — features or behaviors the user takes for granted but never stated (e.g., error feedback, loading states, undo, accessibility, mobile responsiveness).
+- **Adjacent functionality** — things that naturally complement the request (e.g., user asked for "create" but probably also needs "edit" and "delete"; asked for an API endpoint but probably needs validation and error responses).
+- **Operational concerns** — logging, monitoring, rollback, migration path, performance under load.
+- **Things the exploration revealed** that the user likely doesn't know about (hidden dependencies, undocumented constraints, patterns the codebase already follows that affect this work).
+
+If this reflection surfaces new questions or suggestions, present them in a final `AskUserQuestion` round framed as: "Revisando tudo que discutimos, pensei em mais algumas coisas que podem ser relevantes:" — with options including "Já está bom, seguir em frente" as the last choice. If nothing new surfaces, proceed silently.
+
 ### 3b. Propose specs
 
-Based on exploration findings and user answers, draft spec contracts for each planned phase. Use `AskUserQuestion` to present the proposed specs and let the user confirm, adjust, or reject. Group specs by phase. Include concrete examples derived from the exploration (real function names, real error cases discovered). If the user confirms, include specs verbatim in the plan. If the user adjusts, incorporate changes.
+Based on exploration findings and user answers, draft spec contracts for each planned phase. **Display the specs as formatted text directly in the chat** — do NOT put them inside `AskUserQuestion`. Group specs by phase using markdown headers and code blocks. Include concrete examples derived from the exploration (real function names, real error cases discovered).
+
+After displaying all specs, use `AskUserQuestion` with a simple confirmation prompt: options like "Aprovado — seguir com essas specs", "Quero ajustar algumas specs (vou detalhar)", "Rejeitar e repensar". If the user wants adjustments, apply them and re-display only the changed specs for a second confirmation.
 
 **Guidelines:**
-- Use short, concrete options — not vague ones like "Option A" / "Option B". Each option should describe a real choice (e.g., "JWT with refresh tokens", "Session-based with Redis").
-- Front-load the recommended option and append "(Recommended)" to its label.
-- Ground questions in what the exploration found — reference real files, patterns, or constraints discovered.
-- Don't ask what the codebase or conventions already answer.
+- Ground specs in what the exploration found — reference real files, patterns, or constraints discovered.
+- Don't spec what the codebase or conventions already define.
 - Don't ask the user to make decisions you're better equipped to make (pure implementation details).
 
 ### 4. Deep exploration (conditional)
@@ -395,20 +404,23 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
    ```
    If `stash pop` fails (exit code != 0): run `git -C <mainRoot> status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
 
-5. **Post-merge cleanup**:
+5. **Fix migration journal** (Drizzle projects only):
+   Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, the journal was corrected — include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
+
+6. **Post-merge cleanup**:
    - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
    - Delete `.devorch/state.md` from the main repo if it exists.
    - Delete `.devorch/explore-cache-<name>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
    - Delete `.devorch/project-map.md` from the main repo if it exists.
    - Run `git -C <mainRoot> status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <plan name>`
 
-6. **Remove worktree**:
+7. **Remove worktree**:
    ```bash
    git -C <mainRoot> worktree remove <projectRoot>
    git -C <mainRoot> branch -d devorch/<name>
    ```
 
-7. Report verdict using the same format as build command step 3d:
+8. Report verdict using the same format as build command step 3d:
    ```
    ## Verificação Final: <plan name>
 
@@ -595,3 +607,4 @@ Risk: <risk>
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
 - No agents except Explore (for understanding code) and devorch-builder (for INLINE PATH execution only).
 - **Inline builds are single-repo only.** Plans with `<secondary-repos>` always use the worktree path.
+- **Output format**: All output to the user must be plain text in the chat. Never use ASCII art, box-drawing characters, or decorative diagrams. Use markdown formatting (headers, lists, bold, code blocks) for structure.

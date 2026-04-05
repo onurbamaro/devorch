@@ -75,7 +75,9 @@ git -C <satellite.repoPath> checkout <mainBranch>
 git -C <satellite.repoPath> merge <worktreeBranch>
 ```
 
-c. **Cleanup all repos** — For each repo (primary + existing satellites):
+c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <primaryRepoMainPath>`. If `fixed > 0`, stage and commit the journal file: `fix(db): normalize migration journal timestamps`.
+
+d. **Cleanup all repos** — For each repo (primary + existing satellites):
 ```bash
 git worktree remove <worktreePath>
 git branch -d <worktreeBranch>
@@ -97,6 +99,9 @@ git merge <worktreeBranch>
 ```
 
 If merge succeeds:
+
+Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root .` (Drizzle projects only). If `fixed > 0`, commit the journal: `fix(db): normalize migration journal timestamps`.
+
 ```bash
 git worktree remove <worktreePath>
 git branch -d <worktreeBranch>
