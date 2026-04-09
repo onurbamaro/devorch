@@ -9,7 +9,7 @@
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs } from "./lib/plan-parser";
+import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 
 const CONTENT_THRESHOLD = 50000;
@@ -424,6 +424,89 @@ if (isProjectMapFresh()) {
   }
 }
 
+// --- Run TLDR analysis for TS/TSX files in phase ---
+interface TldrFileAnalysis {
+  exports: Array<{ name: string; kind: string; signature?: string }>;
+  imports: Array<{ from: string; names: string[] }>;
+  functions: Array<{ name: string; params: string; returnType: string; isAsync: boolean; isExported: boolean }>;
+  types: Array<{ name: string; kind: string; members?: string[] }>;
+}
+
+interface TldrResult {
+  files: Record<string, TldrFileAnalysis>;
+  warnings: string[];
+  tokenEstimate: number;
+}
+
+function extractTsFiles(phaseText: string): string[] {
+  const refs = extractFileRefs(phaseText);
+  return [...refs].filter((r) => r.endsWith(".ts") || r.endsWith(".tsx"));
+}
+
+function formatTldrAnalysis(tldrResult: TldrResult): Record<string, string> {
+  const formatted: Record<string, string> = {};
+
+  for (const [filePath, analysis] of Object.entries(tldrResult.files)) {
+    // Use relative-looking filename (last segment or relative path)
+    const parts: string[] = [];
+    const fileName = filePath.split("/").pop() || filePath;
+
+    parts.push(`### ${fileName}`);
+
+    if (analysis.exports.length > 0) {
+      const exportStr = analysis.exports.map((e) => `${e.name} (${e.kind})`).join(", ");
+      parts.push(`**Exports**: ${exportStr}`);
+    }
+
+    if (analysis.imports.length > 0) {
+      const importStr = analysis.imports.map((i) => `${i.from} (${i.names.join(", ")})`).join(", ");
+      parts.push(`**Imports**: ${importStr}`);
+    }
+
+    if (analysis.functions.length > 0) {
+      const funcLines = analysis.functions.map((f) => {
+        let line = `${f.name}(${f.params}): ${f.returnType}`;
+        if (f.isAsync) line += " [async]";
+        if (f.isExported) line += " [exported]";
+        return line;
+      });
+      parts.push(`**Functions**: ${funcLines.join(", ")}`);
+    }
+
+    if (analysis.types.length > 0) {
+      const typeStr = analysis.types.map((t) => `${t.name} (${t.kind})`).join(", ");
+      parts.push(`**Types**: ${typeStr}`);
+    }
+
+    formatted[filePath] = parts.join("\n");
+  }
+
+  return formatted;
+}
+
+const phaseTsFiles = extractTsFiles(phaseContent);
+let tldrByFile: Record<string, string> = {};
+
+if (phaseTsFiles.length > 0) {
+  try {
+    const tldrProc = Bun.spawnSync(
+      ["bun", resolve(scriptDir, "tldr-analyze.ts"), "--files", phaseTsFiles.join(","), "--root", projectRoot],
+      { cwd: projectRoot, stderr: "pipe" }
+    );
+    if (tldrProc.exitCode === 0) {
+      const tldrResult: TldrResult = JSON.parse(tldrProc.stdout.toString().trim());
+      tldrByFile = formatTldrAnalysis(tldrResult);
+    } else {
+      console.error(`[init-phase] TLDR analysis failed (exit ${tldrProc.exitCode}) — skipping code structure context`);
+    }
+  } catch (e) {
+    console.error(`[init-phase] TLDR analysis error: ${e instanceof Error ? e.message : String(e)} — skipping code structure context`);
+  }
+}
+
+// --- Extract explore queries from phase content ---
+const exploreQueries = extractExploreQueries(phaseContent);
+
 // --- Extract phase-level specs ---
 const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
 
@@ -431,6 +514,7 @@ const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
 const conventionsByTask: Record<string, string> = {};
 const cacheByTask: Record<string, string> = {};
 const specsByTask: Record<string, string> = {};
+const codeStructureByTask: Record<string, string> = {};
 
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskExts = extractExtensions(task.content);
@@ -446,6 +530,20 @@ for (const [taskId, task] of Object.entries(tasks)) {
     specsByTask[taskId] = filterSpecsByRefs(phaseSpecContent, refs);
   } else {
     specsByTask[taskId] = phaseSpecContent;
+  }
+
+  // Filter TLDR by file refs — match task file paths against TLDR file paths
+  if (Object.keys(tldrByFile).length > 0) {
+    const matchedSections: string[] = [];
+    for (const [tldrPath, tldrMarkdown] of Object.entries(tldrByFile)) {
+      for (const ref of taskRefs) {
+        if (tldrPath.includes(ref) || tldrPath.endsWith(ref)) {
+          matchedSections.push(tldrMarkdown);
+          break;
+        }
+      }
+    }
+    codeStructureByTask[taskId] = matchedSections.join("\n\n");
   }
 }
 
@@ -539,6 +637,10 @@ const result: {
   cacheByTask: Record<string, string>;
   /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
   specsByTask: Record<string, string>;
+  /** Per-task TLDR code structure analysis. Markdown-formatted summaries of exports, imports, functions, types. */
+  codeStructureByTask: Record<string, string>;
+  /** Directed explore queries extracted from phase content. Each has a query text and associated taskId. */
+  exploreQueries: Array<{ query: string; taskId: string }>;
   content?: string;
   contentFile?: string;
 } = {
@@ -552,6 +654,8 @@ const result: {
   conventionsByTask,
   cacheByTask,
   specsByTask,
+  codeStructureByTask,
+  exploreQueries,
 };
 
 if (fullContent.length > CONTENT_THRESHOLD) {

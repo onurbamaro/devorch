@@ -67,11 +67,13 @@ For each remaining phase N (sequentially):
 
 Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <cacheName>`
 
-Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, structured waves and tasks, and `specsByTask` (spec contracts extracted from the plan's `<spec>` section, filtered per task by **Spec refs**).
+Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, structured waves and tasks, `specsByTask` (spec contracts extracted from the plan's `<spec>` section, filtered per task by **Spec refs**), `codeStructureByTask` (TLDR structural analysis of TS/TSX files, filtered per task by file refs), and `exploreQueries` (directed explore queries extracted from `<explore-queries>` tag).
 
 #### 2b. Explore
 
 Check the explore cache (included in init-phase output) for areas relevant to this phase's tasks. If the explore-cache contains sections that cover ALL files in `<relevant-files>` for this phase, do NOT launch Explore agents — the cache already provides sufficient context. Only launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) for areas with partial or missing coverage in cache. Append new summaries to explore-cache.
+
+If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
 
 #### 2c. Deploy builders
 
@@ -83,6 +85,7 @@ Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
 - Full task details inline from the `tasks` map (builders skip TaskGet)
 - Convention sections from `conventionsByTask[taskId]` — pre-filtered by init-phase.ts based on file extensions in the task
+- Code structure from `codeStructureByTask[taskId]` — labeled as "## Code Structure" in the builder prompt. Only include if non-empty. Contains TLDR structural analysis (exports, imports, functions, types) of TS/TSX files relevant to the task. Place AFTER conventions and BEFORE cache sections.
 - Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task
 - Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
@@ -100,8 +103,40 @@ Each builder prompt includes:
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
 
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
-- **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
-- **After 1 retry**: Stop and report the failure. Do not retry further.
+
+Track retries **per task ID** (not per wave). Each task has an independent retry counter starting at 0, max 3 retries.
+
+For each retry (up to 3):
+1. **Extract error context** from the failed builder's Task result output: capture the **last 50 lines** of output as the error message.
+2. **Extract git diff** of changes made by the failed builder: run `git -C <projectRoot> diff HEAD~1` if the builder made any commits (check `git log --oneline -1` for a commit matching the task). If no commits were made, note "No commits from failed attempt."
+3. **Re-launch the builder** with the original task context unchanged, plus an additional `## Previous Failure Context` section appended to the prompt containing:
+   - `Retry attempt: N of 3`
+   - `Error from previous attempt (last 50 lines):` followed by the captured error output
+   - `Git diff from failed attempt:` followed by the diff (or "No commits from failed attempt")
+   - `Instruction: Analyze the error above. Fix the root cause — do not repeat the same approach if it failed.`
+4. Increment the retry counter for this task ID.
+
+**After 3 retries exhausted**: Stop the entire phase. Report structured failure to the user:
+```
+## Build Failure: <task title>
+
+Task ID: <taskId>
+Phase: <N>
+Retries exhausted: 3/3
+
+### Error Timeline
+Attempt 1: <last 50 lines summary>
+Attempt 2: <last 50 lines summary>
+Attempt 3: <last 50 lines summary>
+
+### Last Git Diff
+<diff from final attempt or "No commits">
+
+### Suggestion
+Review the task spec and error pattern. Consider running `/devorch:talk` to re-plan this task with a different approach.
+```
+
+Do not continue to the next wave or phase after retry exhaustion. The phase is considered failed.
 
 #### 2d. Validate phase code
 
@@ -382,7 +417,7 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 
 - Do not narrate actions. Execute directly without preamble.
 - Phases run sequentially — phase logic executes inline (no phase agent delegation).
-- Stop on first failure. Report which phase failed.
+- Stop on first failure after retries are exhausted (3 retries per task). Report which phase and task failed, including all retry context.
 - The orchestrator reads devorch files (`.devorch/*`, plan, state) but never reads source code files during phase execution. During review (step 3), source reads are limited to applying trivial fixes — all deep analysis is delegated to adversarial review agents.
 - **Context discipline**: builders run in isolated Task contexts with only task-specific conventions and cache (from `conventionsByTask` and `cacheByTask`). The orchestrator coordinates via scripts that return JSON — not by reading code.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.

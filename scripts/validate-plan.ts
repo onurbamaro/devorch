@@ -5,7 +5,7 @@
  */
 import { createHash } from "crypto";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, readPlan } from "./lib/plan-parser";
+import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, extractExploreQueries, readPlan } from "./lib/plan-parser";
 
 const args = parseArgs<{ plan: string }>([
   { name: "plan", type: "string", required: true },
@@ -273,6 +273,26 @@ if (phases.length === 0) {
         .filter((f) => /\.\w{1,5}$/.test(f));
 
       tasks.push({ id: taskId, files: fileRefs });
+    }
+
+    // --- Explore queries validation (optional section) ---
+    const exploreQueries = extractExploreQueries(phaseContent);
+    if (exploreQueries.length > 0) {
+      const phaseTaskIds = tasks.map((t) => t.id);
+      const seenQueries = new Set<string>();
+
+      for (const eq of exploreQueries) {
+        if (!eq.query) {
+          warnings.push(`Phase ${phase.num}: <explore-queries> has an empty query text`);
+        }
+        if (!phaseTaskIds.includes(eq.taskId)) {
+          warnings.push(`Phase ${phase.num}: <explore-queries> references unknown task-id "${eq.taskId}"`);
+        }
+        if (seenQueries.has(eq.query)) {
+          warnings.push(`Phase ${phase.num}: <explore-queries> has duplicate query "${eq.query}"`);
+        }
+        seenQueries.add(eq.query);
+      }
     }
 
     const executionBlock = extractTagContent(phaseContent, "execution") || "";
