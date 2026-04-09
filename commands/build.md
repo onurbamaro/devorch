@@ -67,11 +67,13 @@ For each remaining phase N (sequentially):
 
 Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <cacheName>`
 
-Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, structured waves and tasks, and `specsByTask` (spec contracts extracted from the plan's `<spec>` section, filtered per task by **Spec refs**).
+Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, structured waves and tasks, `specsByTask` (spec contracts extracted from the plan's `<spec>` section, filtered per task by **Spec refs**), `codeStructureByTask` (TLDR structural analysis of TS/TSX files, filtered per task by file refs), and `exploreQueries` (directed explore queries extracted from `<explore-queries>` tag).
 
 #### 2b. Explore
 
 Check the explore cache (included in init-phase output) for areas relevant to this phase's tasks. If the explore-cache contains sections that cover ALL files in `<relevant-files>` for this phase, do NOT launch Explore agents — the cache already provides sufficient context. Only launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) for areas with partial or missing coverage in cache. Append new summaries to explore-cache.
+
+If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
 
 #### 2c. Deploy builders
 
@@ -83,6 +85,7 @@ Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
 - Full task details inline from the `tasks` map (builders skip TaskGet)
 - Convention sections from `conventionsByTask[taskId]` — pre-filtered by init-phase.ts based on file extensions in the task
+- Code structure from `codeStructureByTask[taskId]` — labeled as "## Code Structure" in the builder prompt. Only include if non-empty. Contains TLDR structural analysis (exports, imports, functions, types) of TS/TSX files relevant to the task. Place AFTER conventions and BEFORE cache sections.
 - Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task
 - Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
