@@ -100,8 +100,40 @@ Each builder prompt includes:
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
 
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
-- **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
-- **After 1 retry**: Stop and report the failure. Do not retry further.
+
+Track retries **per task ID** (not per wave). Each task has an independent retry counter starting at 0, max 3 retries.
+
+For each retry (up to 3):
+1. **Extract error context** from the failed builder's Task result output: capture the **last 50 lines** of output as the error message.
+2. **Extract git diff** of changes made by the failed builder: run `git -C <projectRoot> diff HEAD~1` if the builder made any commits (check `git log --oneline -1` for a commit matching the task). If no commits were made, note "No commits from failed attempt."
+3. **Re-launch the builder** with the original task context unchanged, plus an additional `## Previous Failure Context` section appended to the prompt containing:
+   - `Retry attempt: N of 3`
+   - `Error from previous attempt (last 50 lines):` followed by the captured error output
+   - `Git diff from failed attempt:` followed by the diff (or "No commits from failed attempt")
+   - `Instruction: Analyze the error above. Fix the root cause — do not repeat the same approach if it failed.`
+4. Increment the retry counter for this task ID.
+
+**After 3 retries exhausted**: Stop the entire phase. Report structured failure to the user:
+```
+## Build Failure: <task title>
+
+Task ID: <taskId>
+Phase: <N>
+Retries exhausted: 3/3
+
+### Error Timeline
+Attempt 1: <last 50 lines summary>
+Attempt 2: <last 50 lines summary>
+Attempt 3: <last 50 lines summary>
+
+### Last Git Diff
+<diff from final attempt or "No commits">
+
+### Suggestion
+Review the task spec and error pattern. Consider running `/devorch:talk` to re-plan this task with a different approach.
+```
+
+Do not continue to the next wave or phase after retry exhaustion. The phase is considered failed.
 
 #### 2d. Validate phase code
 
@@ -382,7 +414,7 @@ If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>
 
 - Do not narrate actions. Execute directly without preamble.
 - Phases run sequentially — phase logic executes inline (no phase agent delegation).
-- Stop on first failure. Report which phase failed.
+- Stop on first failure after retries are exhausted (3 retries per task). Report which phase and task failed, including all retry context.
 - The orchestrator reads devorch files (`.devorch/*`, plan, state) but never reads source code files during phase execution. During review (step 3), source reads are limited to applying trivial fixes — all deep analysis is delegated to adversarial review agents.
 - **Context discipline**: builders run in isolated Task contexts with only task-specific conventions and cache (from `conventionsByTask` and `cacheByTask`). The orchestrator coordinates via scripts that return JSON — not by reading code.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
