@@ -191,6 +191,53 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 
 Include `<spec>` section design as part of solution design. Each phase should have specs that define the contracts builders must implement. Prefer fewer, more precise specs over many vague ones.
 
+### 6b. Devil's Advocate (automatic)
+
+After the solution design is complete, launch an adversarial challenge to surface risks before committing to a plan.
+
+**Launch**: 1 Explore agent (Agent tool with `subagent_type="Explore"`, thoroughness "very thorough") with adversarial mandate. The agent receives:
+- Solution approach from Step 6
+- Proposed specs from Step 3b
+- `<relevant-files>` list from the emerging plan
+- Explore-cache content from `.devorch/explore-cache-<name>.md`
+- CONVENTIONS.md content (if exists)
+
+**Agent mandate**: Investigate and report structured findings in exactly 4 categories:
+- **Implicit assumptions** — design takes for granted things that may not hold
+- **Wave/task conflicts** — shared file risks, hidden dependencies between parallel tasks
+- **Spec gaps** — missing error cases, undefined edge behaviors, incomplete contracts
+- **Regression risks** — existing functionality that may break, with file evidence
+
+**On no findings**: If the agent finds no significant issues in any category, report "No significant issues found" and proceed automatically to Step 7 (no user prompt needed). Do not fabricate findings.
+
+**On findings**: Display as structured report in chat using plain markdown (headers, lists, bold — no box-drawing):
+
+```
+### Devil's Advocate — Findings
+
+**Implicit Assumptions**
+- <finding or "None">
+
+**Wave/Task Conflicts**
+- <finding or "None">
+
+**Spec Gaps**
+- <finding or "None">
+
+**Regression Risks**
+- <finding or "None">
+```
+
+Then use `AskUserQuestion` with options:
+- "Ajustar design" — return to Step 6 with DA findings as additional input context
+- "Ignorar — seguir" — proceed to Step 7
+- "Cancelar" — stop the talk session
+
+**Routing:**
+- "Ajustar design" → return to Step 6. Include the DA findings as explicit constraints/considerations in the redesign pass.
+- "Ignorar — seguir" → proceed to Step 7 (or Step 7i for inline path).
+- "Cancelar" → report "Sessão cancelada pelo usuário após Devil's Advocate." and stop.
+
 #### Phase consolidation guidance
 
 Prefer **fewer, denser phases** over many thin ones. With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate when safe.
@@ -318,8 +365,20 @@ For each wave, launch builders as foreground parallel Agent calls (`subagent_typ
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
 
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
-- **First failure (0 retries)**: Use the Task result output to diagnose the issue. Re-launch the task with an additional note describing the previous failure. Increment retry counter.
-- **After 1 retry**: Stop and report the failure. Do not retry further.
+
+Track retries **per task ID** (not per wave). Each task has an independent retry counter starting at 0, max 3 retries.
+
+For each retry (up to 3):
+1. **Extract error context** from the failed builder's Task result output: capture the **last 50 lines** of output as the error message.
+2. **Extract git diff** of changes made by the failed builder: run `git -C <projectRoot> diff HEAD~1` if the builder made any commits (check `git log --oneline -1` for a commit matching the task). If no commits were made, note "No commits from failed attempt."
+3. **Re-launch the builder** with the original task context unchanged, plus an additional `## Previous Failure Context` section appended to the prompt containing:
+   - `Retry attempt: N of 3`
+   - `Error from previous attempt (last 50 lines):` followed by the captured error output
+   - `Git diff from failed attempt:` followed by the diff (or "No commits from failed attempt")
+   - `Instruction: Analyze the error above. Fix the root cause — do not repeat the same approach if it failed.`
+4. Increment the retry counter for this task ID.
+
+**After 3 retries exhausted**: Stop and report the failure. Do not continue to the next wave or phase.
 
 #### (c) Validate phase code
 
