@@ -1,7 +1,7 @@
 # devorch State
 - Plan: Ecosystem Enhancements — Self-fix, Devil's Advocate, TLDR Analysis, Directed Artifacts
-- Last completed phase: 1
-- Status: ready for phase 2
+- Last completed phase: 2
+- Status: complete
 
-## Phase 1 Summary
-Self-fix retry loop (3 attempts with error context + diff) added to build.md. Devil's Advocate step 6b added to talk.md with adversarial Explore agent and user interaction. Inline path retry updated to 3 attempts.
+## Phase 2 Summary
+TLDR code analysis script created with ts-morph. init-phase.ts integrates TLDR subprocess call and outputs codeStructureByTask + exploreQueries. build.md passes Code Structure to builders and supports directed explore queries. Plan format and validation updated for explore-queries section.
