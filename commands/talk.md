@@ -359,6 +359,8 @@ For each wave, launch builders as foreground parallel Agent calls (`subagent_typ
 - Plan **Objective**, **Solution Approach** (if present), **Decisions** (if present) — from init output
 - Full task details from the `tasks` map
 - Convention sections from `conventionsByTask[taskId]`
+- Spec contracts from `specsByTask[taskId]`
+- Code structure from `codeStructureByTask[taskId]` (if non-empty)
 - Cache sections from `cacheByTask[taskId]`
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
 - `commit with type(scope): description`
@@ -380,7 +382,23 @@ For each retry (up to 3):
    - `Instruction: Analyze the error above. Fix the root cause — do not repeat the same approach if it failed.`
 4. Increment the retry counter for this task ID.
 
-**After 3 retries exhausted**: Stop and report the failure. Do not continue to the next wave or phase.
+**After 3 retries exhausted**: Stop the entire phase. Report structured failure:
+```
+### Task Failure: <task-id>
+**Retries exhausted**: 3/3
+
+#### Error Timeline
+1. **Attempt 1**: <error summary>
+2. **Attempt 2**: <error summary>
+3. **Attempt 3**: <error summary>
+
+#### Last Git Diff
+<diff from last attempt or "No commits">
+
+#### Suggestion
+<what might fix the issue>
+```
+Do not continue to the next wave or phase.
 
 #### (c) Validate phase code
 

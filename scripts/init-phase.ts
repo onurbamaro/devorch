@@ -496,9 +496,11 @@ if (phaseTsFiles.length > 0) {
     if (tldrProc.exitCode === 0) {
       const tldrResult: TldrResult = JSON.parse(tldrProc.stdout.toString().trim());
       tldrByFile = formatTldrAnalysis(tldrResult);
+    } else {
+      console.error(`[init-phase] TLDR analysis failed (exit ${tldrProc.exitCode}) — skipping code structure context`);
     }
-  } catch {
-    // ignore — TLDR is optional context
+  } catch (e) {
+    console.error(`[init-phase] TLDR analysis error: ${e instanceof Error ? e.message : String(e)} — skipping code structure context`);
   }
 }
 
