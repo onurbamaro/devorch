@@ -191,6 +191,8 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 
 Include `<spec>` section design as part of solution design. Each phase should have specs that define the contracts builders must implement. Prefer fewer, more precise specs over many vague ones.
 
+When the design identifies areas that will need deeper exploration during build (complex modules the builder hasn't seen, third-party API patterns), add `<explore-queries>` to the relevant phase with directed queries targeting specific knowledge artifacts.
+
 ### 6b. Devil's Advocate (automatic)
 
 After the solution design is complete, launch an adversarial challenge to surface risks before committing to a plan.
@@ -610,6 +612,12 @@ Risk: <risk>
 </endpoint>
 </spec>
 
+<!-- optional — directed exploration for build phase: -->
+<explore-queries>
+- "public API and exports of src/modules/auth" — for task auth-refactor
+- "error handling patterns in src/api/handlers" — for task error-handling
+</explore-queries>
+
 <tasks>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
@@ -651,7 +659,7 @@ Risk: <risk>
 
 - Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
-- Inside phase: `<goal>`, `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase)
+- Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`. All names must be unique within a phase.
 - Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
 
