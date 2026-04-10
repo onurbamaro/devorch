@@ -73,9 +73,7 @@ Parse JSON output. If `contentFile` field is present, read that file for full ph
 
 **Cache covers check**: Read `cacheCoversPhase` from the init-phase JSON output.
 - If `cacheCoversPhase == true` → skip all Explore agents for this phase. Log: "Cache covers phase N". Proceed directly to 2c.
-- If `cacheCoversPhase == false` → check `uncoveredFiles` from init-phase output. Proceed with current LLM evaluation: launch Explore agents only for areas with partial or missing coverage in cache (using `uncoveredFiles` as the guide).
-
-Check the explore cache (included in init-phase output) for areas relevant to this phase's tasks. If the explore-cache contains sections that cover ALL files in `<relevant-files>` for this phase, do NOT launch Explore agents — the cache already provides sufficient context. Only launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`, `model="sonnet"`) for areas with partial or missing coverage in cache. Append new summaries to explore-cache.
+- If `cacheCoversPhase == false` → check `uncoveredFiles` from init-phase output. Launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`, `model="sonnet"`) only for areas with partial or missing coverage in cache (using `uncoveredFiles` as the guide). Append new summaries to explore-cache.
 
 If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`, `model="sonnet"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
 

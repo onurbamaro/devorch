@@ -377,7 +377,6 @@ Each builder receives:
 - Spec contracts from `specsByTask[taskId]`
 - Code structure from `codeStructureByTask[taskId]` (if non-empty)
 - Cache sections from `cacheByTask[taskId]`
-- Spec contracts from `specsByTask[taskId]`
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
 - `commit with type(scope): description`
 - `CRITICAL: call TaskUpdate with status "completed" as your very last action`

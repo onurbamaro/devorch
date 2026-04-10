@@ -150,7 +150,11 @@ if (!existsSync(pkgPath)) {
   process.exit(1);
 }
 
-const currentDepsHash = computeDepsHash()!;
+const currentDepsHash = computeDepsHash();
+if (!currentDepsHash) {
+  console.error("check-conventions-staleness: failed to parse package.json");
+  process.exit(1);
+}
 const currentSourceHash = computeSourceHash();
 
 const stored = readStoredHashes();
