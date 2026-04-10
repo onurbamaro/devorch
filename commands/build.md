@@ -89,7 +89,7 @@ For each wave from init-phase output, use `TaskCreate` with wave dependencies vi
 Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
 - Full task details inline from the `tasks` map (builders skip TaskGet)
-- Convention sections from `conventionsByTask[taskId]` — pre-filtered by init-phase.ts based on file extensions in the task
+- Convention sections filtered from the init-phase output: read `conventions` (full text) from the JSON root and `conventionSectionsByTask[taskId]` (array of section header names like `"## Naming"`, `"## Patterns"`). If the array is empty or missing, send the full `conventions` text. Otherwise, split `conventions` by `## ` headers, match the section names from the array, extract the content of matching sections, join them, and inject into the builder prompt
 - Code structure from `codeStructureByTask[taskId]` — labeled as "## Code Structure" in the builder prompt. Only include if non-empty. Contains TLDR structural analysis (exports, imports, functions, types) of TS/TSX files relevant to the task. Place AFTER conventions and BEFORE cache sections.
 - Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task
 - Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
@@ -106,6 +106,11 @@ Each builder prompt includes:
   - `Use git -C <satellite.worktreePath> for all git commands`
 
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
+
+**Build Report extraction** — After verifying task completion for a wave, extract the `## Build Report` block from each completed builder's text output (the text returned by the Task/Agent call):
+- Use regex: from `## Build Report` to the next `##` header or end of text.
+- If no `## Build Report` is found in a builder's output, skip silently (backward compatible with older builders).
+- Store the parsed report content keyed by task-id for aggregation in the final verification report (step 3d).
 
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
 
@@ -295,6 +300,9 @@ Completeness: <findings ou "✅ clean">
 ### Correções de Review
 <N issues corrigidos inline, M via builder agents> (ou "Nenhum")
 
+### Builder Reports
+<For each task-id with non-trivial fields, list: **<task-id>**: <field>: <value> (one line per non-trivial field). Non-trivial = values that are NOT "none" and NOT "adequate". If ALL builders reported only "none"/"adequate" for all fields, omit this section entirely.>
+
 ### Post-Review Check
 Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M) OR ⏭ SKIPPED (if `noTests`)
 
@@ -321,7 +329,7 @@ If **merge**:
 
    For each repo, run `git -C <repoMainPath> status --porcelain` and filter out lines starting with `??` (untracked files). If any tracked changes remain:
    ```bash
-   git -C <repoMainPath> stash push -m "devorch-pre-merge"
+   git -C <repoMainPath> stash push -m "devorch-pre-merge" -- ':!.devorch/'
    ```
    Record that this repo was stashed. If no tracked changes exist, skip stash and record the repo as clean.
 
@@ -358,7 +366,7 @@ c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/d
 
 d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
-1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback).
+1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <repoMainPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback). The `--target-root` flag writes the archive to the main repo instead of inside the worktree.
 2. Delete `.devorch/state.md` from the main repo if it exists.
 3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
@@ -366,7 +374,7 @@ d. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 
 e. **Cleanup all repos** — For each repo (primary + satellites):
 ```bash
-git -C <repoMainPath> worktree remove <worktreePath>
+git -C <repoMainPath> worktree remove --force <worktreePath>
 git -C <repoMainPath> branch -d <worktreeBranch>
 ```
 
@@ -401,7 +409,7 @@ c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/d
 
 d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
-1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback).
+1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <repoMainPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback). The `--target-root` flag writes the archive to the main repo instead of inside the worktree.
 2. Delete `.devorch/state.md` from the main repo if it exists.
 3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
@@ -409,7 +417,7 @@ d. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 
 e. **Cleanup**:
 ```bash
-git worktree remove <projectRoot>
+git worktree remove --force <projectRoot>
 git branch -d <worktreeBranch>
 ```
 Report: "Merged `<worktreeBranch>` into `<mainBranch>`. Worktree removed."
@@ -462,7 +470,7 @@ N dificuldades registradas nesta sessão. Para evoluir o devorch:
 - Phases run sequentially — phase logic executes inline (no phase agent delegation).
 - Stop on first failure after retries are exhausted (3 retries per task). Report which phase and task failed, including all retry context.
 - The orchestrator reads devorch files (`.devorch/*`, plan, state) but never reads source code files during phase execution. During review (step 3), source reads are limited to applying trivial fixes — all deep analysis is delegated to adversarial review agents.
-- **Context discipline**: builders run in isolated Task contexts with only task-specific conventions and cache (from `conventionsByTask` and `cacheByTask`). The orchestrator coordinates via scripts that return JSON — not by reading code.
+- **Context discipline**: builders run in isolated Task contexts with only task-specific conventions and cache (from `conventionSectionsByTask` and `cacheByTask`). The orchestrator coordinates via scripts that return JSON — not by reading code.
 - Final verification runs INLINE (not as Task) so that Explore/review agents are first-level Task calls.
 - Auto-fix trivial and fix-level findings. Only escalate talk-level issues with `/devorch:talk` prompt.
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.

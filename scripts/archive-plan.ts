@@ -8,8 +8,9 @@ import { resolve, dirname } from "path";
 import { parseArgs } from "./lib/args";
 import { readPlan, extractPlanTitle } from "./lib/plan-parser";
 
-const args = parseArgs<{ plan: string }>([
+const args = parseArgs<{ plan: string; "target-root": string }>([
   { name: "plan", type: "string", required: true },
+  { name: "target-root", type: "string", required: false },
 ]);
 
 const planPath = args.plan;
@@ -37,9 +38,12 @@ const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "
 const kebabName = toKebabCase(planName);
 const archiveFilename = `${dateStr}-${kebabName}.md`;
 
-// Resolve archive directory relative to plan location
+// Resolve archive directory: use --target-root if provided, otherwise relative to plan location
 const planDir = dirname(resolved);
-const archiveDir = resolve(planDir, "archive");
+const targetRoot = args["target-root"];
+const archiveDir = targetRoot
+  ? resolve(targetRoot, ".devorch/plans/archive")
+  : resolve(planDir, "archive");
 const archivePath = resolve(archiveDir, archiveFilename);
 
 // Create archive directory

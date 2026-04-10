@@ -28,7 +28,7 @@ for (let i = 0; i < argv.length; i++) {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const TEST_TIMEOUT_MS = 120_000;
-const QUICK_TIMEOUT_MS = 10_000;
+const QUICK_TIMEOUT_MS = 30_000;
 
 interface CheckResult {
   [key: string]: "pass" | "skip" | string;
@@ -139,14 +139,16 @@ async function runCheck(name: string, command: string, timeoutMs: number): Promi
       env: { ...process.env, CI: "true" },
     });
 
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
       proc.kill();
       // Force-kill after 5s grace period if SIGTERM was ignored (e.g. jest watch mode)
-      setTimeout(() => proc.kill(9), 5_000);
+      killTimer = setTimeout(() => proc.kill(9), 5_000);
     }, timeoutMs);
 
     const exitCode = await proc.exited;
     clearTimeout(timeout);
+    if (killTimer) clearTimeout(killTimer);
 
     if (exitCode === 0) return "pass";
 

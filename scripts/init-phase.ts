@@ -256,18 +256,16 @@ const EXT_KEYWORDS: Record<string, string[]> = {
   ".json": ["json", "package", "config"],
 };
 
-function filterConventionsForTask(conventionsText: string, taskExts: Set<string>): string {
-  if (!conventionsText || taskExts.size === 0) return conventionsText;
+function filterConventionsForTask(conventionsText: string, taskExts: Set<string>): string[] {
+  if (!conventionsText || taskExts.size === 0) return [];
 
   const sections = parseConventionSections(conventionsText);
   const matched: string[] = [];
 
   for (const section of sections) {
     if (!section.header) {
-      matched.push(section.content);
       continue;
     }
-    // Always include top-level header (# Code Conventions) and sections without extension specificity
     const headerLower = section.header.toLowerCase();
     const contentLower = section.content.toLowerCase();
 
@@ -283,11 +281,11 @@ function filterConventionsForTask(conventionsText: string, taskExts: Set<string>
       if (sectionMatches) break;
     }
     if (sectionMatches) {
-      matched.push(section.content);
+      matched.push(`## ${section.header}`);
     }
   }
 
-  return matched.join("").trim();
+  return matched;
 }
 
 // --- Parse waves from <execution> block ---
@@ -522,14 +520,14 @@ const exploreQueries = extractExploreQueries(phaseContent);
 const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
 
 // --- Build per-task filtered context ---
-const conventionsByTask: Record<string, string> = {};
+const conventionSectionsByTask: Record<string, string[]> = {};
 const cacheByTask: Record<string, string> = {};
 const specsByTask: Record<string, string> = {};
 const codeStructureByTask: Record<string, string> = {};
 
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskExts = extractExtensions(task.content);
-  conventionsByTask[taskId] = filterConventionsForTask(conventions, taskExts);
+  conventionSectionsByTask[taskId] = filterConventionsForTask(conventions, taskExts);
 
   const taskRefs = extractFileRefs(task.content);
   cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
@@ -597,13 +595,6 @@ if (handoff) {
   parts.push("");
 }
 
-if (conventions) {
-  parts.push("## Conventions");
-  parts.push("");
-  parts.push(conventions);
-  parts.push("");
-}
-
 if (phaseSpecContent) {
   parts.push("## Spec Contracts");
   parts.push("");
@@ -644,7 +635,8 @@ const result: {
   satellites: SatelliteInfo[];
   waves: WaveInfo[];
   tasks: Record<string, TaskInfo>;
-  conventionsByTask: Record<string, string>;
+  conventions?: string;
+  conventionSectionsByTask?: Record<string, string[]>;
   cacheByTask: Record<string, string>;
   /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
   specsByTask: Record<string, string>;
@@ -662,12 +654,16 @@ const result: {
   satellites,
   waves,
   tasks,
-  conventionsByTask,
   cacheByTask,
   specsByTask,
   codeStructureByTask,
   exploreQueries,
 };
+
+if (conventions) {
+  result.conventions = conventions;
+  result.conventionSectionsByTask = conventionSectionsByTask;
+}
 
 if (fullContent.length > CONTENT_THRESHOLD) {
   const contextPath = resolve(projectRoot, CONTEXT_FILE);
