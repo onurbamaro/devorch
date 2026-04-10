@@ -378,6 +378,11 @@ Each builder receives:
 
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
 
+**Build Report extraction** — After verifying task completion for a wave, extract the `## Build Report` block from each completed builder's text output (the text returned by the Task/Agent call):
+- Use regex: from `## Build Report` to the next `##` header or end of text.
+- If no `## Build Report` is found in a builder's output, skip silently (backward compatible with older builders).
+- Store the parsed report content keyed by task-id for aggregation in the final verification report (step 10i).
+
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
 
 Track retries **per task ID** (not per wave). Each task has an independent retry counter starting at 0, max 3 retries.
@@ -523,6 +528,9 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
 
    ### Correções de Review
    <N issues corrigidos inline, M via builder agents> (ou "Nenhum")
+
+   ### Builder Reports
+   <For each task-id with non-trivial fields, list: **<task-id>**: <field>: <value> (one line per non-trivial field). Non-trivial = values that are NOT "none" and NOT "adequate". If ALL builders reported only "none"/"adequate" for all fields, omit this section entirely.>
 
    ### Post-Review Check
    Lint: ✅/❌  Typecheck: ✅/❌  Build: ✅/❌  Tests: ✅/❌ (N/M)
