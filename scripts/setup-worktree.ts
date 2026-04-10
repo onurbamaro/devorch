@@ -63,9 +63,8 @@ function removeWorktreeAndBranch(wtPath: string, branchName: string, repoCwd: st
  * Non-blocking — logs warning on failure and continues.
  */
 const BASE_SPARSE_PATHS = [".devorch"];
-const ROOT_CONFIG_FILES = ["package.json", "tsconfig.json", "bun.lock", "pnpm-lock.yaml", "yarn.lock", "package-lock.json"];
 
-function applySparseCheckout(wtPath: string, sparsePaths: string, repoCwd: string): string[] | null {
+function applySparseCheckout(wtPath: string, sparsePaths: string, _repoCwd: string): string[] | null {
   try {
     const initProc = Bun.spawnSync(
       ["git", "-C", wtPath, "sparse-checkout", "init", "--cone"],
@@ -79,15 +78,7 @@ function applySparseCheckout(wtPath: string, sparsePaths: string, repoCwd: strin
 
     const userPaths = sparsePaths.split(",").map((p) => p.trim()).filter(Boolean);
 
-    const allPaths = [...BASE_SPARSE_PATHS];
-    for (const cfg of ROOT_CONFIG_FILES) {
-      if (existsSync(join(repoCwd, cfg))) {
-        allPaths.push(cfg);
-      }
-    }
-    allPaths.push(...userPaths);
-
-    const uniquePaths = [...new Set(allPaths)];
+    const uniquePaths = [...new Set([...BASE_SPARSE_PATHS, ...userPaths])];
 
     const setProc = Bun.spawnSync(
       ["git", "-C", wtPath, "sparse-checkout", "set", ...uniquePaths],
@@ -96,12 +87,14 @@ function applySparseCheckout(wtPath: string, sparsePaths: string, repoCwd: strin
     if (setProc.exitCode !== 0) {
       const stderr = setProc.stderr.toString("utf-8").trim();
       console.error(`Warning: sparse-checkout set failed: ${stderr}`);
+      Bun.spawnSync(["git", "-C", wtPath, "sparse-checkout", "disable"]);
       return null;
     }
 
     return uniquePaths;
   } catch (e) {
     console.error(`Warning: sparse-checkout failed: ${e}`);
+    Bun.spawnSync(["git", "-C", wtPath, "sparse-checkout", "disable"]);
     return null;
   }
 }
