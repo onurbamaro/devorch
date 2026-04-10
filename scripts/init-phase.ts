@@ -303,7 +303,7 @@ function parseWaves(phaseText: string): WaveInfo[] {
     const taskIdStr = waveMatch[3];
 
     let type: "parallel" | "sequential" = "parallel";
-    if (annotation === "sequential" || annotation.startsWith("after wave")) {
+    if (annotation === "sequential") {
       type = "sequential";
     }
 

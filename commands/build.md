@@ -337,7 +337,19 @@ If **merge**:
 
 **With satellites (coordinated merge)**:
 
-a. **Dry-run all repos first** — For each repo (primary + all satellites), run:
+a. **Untracked file guard** — Before dry-running, detect untracked files in the primary repo that would conflict with the incoming branch:
+```bash
+git -C <primaryMainPath> diff --name-only <mainBranch>..<worktreeBranch>
+git -C <primaryMainPath> ls-files --others --exclude-standard
+```
+Compute the intersection of both lists. If the intersection is non-empty:
+```bash
+git -C <primaryMainPath> add <conflicting-files>
+git -C <primaryMainPath> commit -m "chore: track files before devorch merge"
+```
+If the intersection is empty, skip this step and proceed directly to the dry-run.
+
+b. **Dry-run all repos first** — For each repo (primary + all satellites), run:
 ```bash
 git -C <repoMainPath> merge --no-commit --no-ff <worktreeBranch>
 git -C <repoMainPath> merge --abort
@@ -348,13 +360,13 @@ git -C <repoMainPath> stash pop
 ```
 Report which repo has conflicts between branches and stop. Do NOT merge any repo.
 
-b. **Merge sequentially** (only if all dry-runs pass) — Primary first, then satellites in order:
+c. **Merge sequentially** (only if all dry-runs pass) — Primary first, then satellites in order:
 ```bash
 git checkout <mainBranch>
 git merge <worktreeBranch>
 ```
 
-b2. **Restore stashed changes** — After all merges succeed, for each repo that was stashed in step 5:
+c2. **Restore stashed changes** — After all merges succeed, for each repo that was stashed in step 5:
 ```bash
 git -C <repoMainPath> stash pop
 ```
@@ -362,9 +374,11 @@ If `stash pop` fails (exit code != 0): run `git -C <repoMainPath> status --porce
 
 If `stash pop` succeeds: the stash is auto-removed, continue to next repo.
 
-c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <primaryMainPath>`. If `fixed > 0`, include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
+d. **Self-build reinstall** — Run `git -C <primaryMainPath> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<primaryMainPath>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<primaryMainPath>`. If no match or `install.ts` doesn't exist, skip this step.
 
-d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
+e. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <primaryMainPath>`. If `fixed > 0`, include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
+
+f. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <repoMainPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback). The `--target-root` flag writes the archive to the main repo instead of inside the worktree.
 2. Delete `.devorch/state.md` from the main repo if it exists.
@@ -372,7 +386,7 @@ d. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
 5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
-e. **Cleanup all repos** — For each repo (primary + satellites):
+g. **Cleanup all repos** — For each repo (primary + satellites):
 ```bash
 git -C <repoMainPath> worktree remove --force <worktreePath>
 git -C <repoMainPath> branch -d <worktreeBranch>
@@ -384,20 +398,32 @@ Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All workt
 
 Run pre-flight stash for the primary repo as described in step 5 above.
 
-a. **Dry-run**:
+a. **Untracked file guard** — Before dry-running, detect untracked files in the primary repo that would conflict with the incoming branch:
+```bash
+git -C <mainRoot> diff --name-only <mainBranch>..<worktreeBranch>
+git -C <mainRoot> ls-files --others --exclude-standard
+```
+Compute the intersection of both lists. If the intersection is non-empty:
+```bash
+git -C <mainRoot> add <conflicting-files>
+git -C <mainRoot> commit -m "chore: track files before devorch merge"
+```
+If the intersection is empty, skip this step and proceed directly to the dry-run.
+
+b. **Dry-run**:
 ```bash
 git merge --no-commit --no-ff <worktreeBranch>
 git merge --abort
 ```
 If dry-run fails and the repo was stashed: run `git stash pop` to restore changes. Report the conflict between branches and stop.
 
-b. **Merge**:
+c. **Merge**:
 ```bash
 git checkout <mainBranch>
 git merge <worktreeBranch>
 ```
 
-b2. **Restore stashed changes** — If the primary repo was stashed in step 5:
+c2. **Restore stashed changes** — If the primary repo was stashed in step 5:
 ```bash
 git stash pop
 ```
@@ -405,9 +431,11 @@ If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conf
 
 If `stash pop` succeeds: the stash is auto-removed, continue.
 
-c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, include the journal file in the cleanup commit.
+d. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<mainRoot>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match or `install.ts` doesn't exist, skip this step.
 
-d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
+e. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, include the journal file in the cleanup commit.
+
+f. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <repoMainPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback). The `--target-root` flag writes the archive to the main repo instead of inside the worktree.
 2. Delete `.devorch/state.md` from the main repo if it exists.
@@ -415,7 +443,7 @@ d. **Post-merge cleanup** — Archive the plan and remove stale devorch files fr
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
 5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
-e. **Cleanup**:
+g. **Cleanup**:
 ```bash
 git worktree remove --force <projectRoot>
 git branch -d <worktreeBranch>
