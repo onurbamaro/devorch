@@ -510,7 +510,7 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
    ```
    If `stash pop` fails (exit code != 0): run `git -C <mainRoot> status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
 
-6. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <originalBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found: log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match, skip this step.
+6. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <originalBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<mainRoot>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match or `install.ts` doesn't exist, skip this step.
 
 7. **Fix migration journal** (Drizzle projects only):
    Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, the journal was corrected — include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.

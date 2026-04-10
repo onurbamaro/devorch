@@ -73,6 +73,7 @@ function applySparseCheckout(wtPath: string, sparsePaths: string, _repoCwd: stri
     if (initProc.exitCode !== 0) {
       const stderr = initProc.stderr.toString("utf-8").trim();
       console.error(`Warning: sparse-checkout init failed: ${stderr}`);
+      Bun.spawnSync(["git", "-C", wtPath, "sparse-checkout", "disable"]);
       return null;
     }
 

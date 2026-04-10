@@ -374,7 +374,7 @@ If `stash pop` fails (exit code != 0): run `git -C <repoMainPath> status --porce
 
 If `stash pop` succeeds: the stash is auto-removed, continue to next repo.
 
-d. **Self-build reinstall** — Run `git -C <primaryMainPath> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found: log "devorch scripts updated — running install" and run `bun run install` in `<primaryMainPath>`. If no match, skip this step.
+d. **Self-build reinstall** — Run `git -C <primaryMainPath> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<primaryMainPath>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<primaryMainPath>`. If no match or `install.ts` doesn't exist, skip this step.
 
 e. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <primaryMainPath>`. If `fixed > 0`, include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
 
@@ -431,7 +431,7 @@ If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conf
 
 If `stash pop` succeeds: the stash is auto-removed, continue.
 
-d. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found: log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match, skip this step.
+d. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<mainRoot>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match or `install.ts` doesn't exist, skip this step.
 
 e. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, include the journal file in the cleanup commit.
 
