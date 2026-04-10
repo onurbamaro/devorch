@@ -240,8 +240,8 @@ state_files:
     purpose: Coding conventions, auto-generated on first run
   - path: .devorch/explore-cache.md
     purpose: Cached Explore agent summaries
-  - path: .devorch/plans/current.md
-    purpose: Active plan
+  - path: .devorch/plans/<name>.md
+    purpose: Active plan (where <name> is the plan name)
   - path: .devorch/plans/archive/
     purpose: Completed plans (auto-archived)
   - path: .devorch/state.md
