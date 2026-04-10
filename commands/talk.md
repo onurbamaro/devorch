@@ -75,7 +75,7 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
   **Sampling rule:** When a section has many files (50+ components, 20+ routes), read 3-5 representative files to identify the pattern. Stop when the pattern is clear.
 
-- **If exists**: Quick staleness check — compare library names mentioned in CONVENTIONS.md against current `package.json` dependencies. If CONVENTIONS.md references libraries no longer in package.json (or major new dependencies aren't reflected), regenerate it using the process above.
+- **If exists**: Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts`. Parse the JSON output. If `stale` is `false` → skip regeneration, use the existing CONVENTIONS.md as-is. If `stale` is `true` → regenerate CONVENTIONS.md using the process above, then run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save the new hashes.
 
 **Legacy plan migration**: If `.devorch/plans/current.md` exists in the main repo, archive it silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. Report: "Migrated legacy plan to archive." Plans now always live in worktrees — this path only triggers once during migration.
 
@@ -89,7 +89,9 @@ Store this as `<name>` for all subsequent steps.
 
 ### 2. Explore
 
-Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
+**Fast-path condition**: If $ARGUMENTS contains ALL of: (1) specific file path references, (2) an explicit action (fix, change, update, rename, add, remove), and (3) sufficient context to implement without discovery — reduce this step to 1 Explore agent at "medium" thoroughness (not "very thorough") with a single combined focus. Also reduce Step 3 (Clarify) to 1 confirmative round. Otherwise, proceed with the standard exploration below.
+
+**Standard exploration**: Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
 
 Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`, `model="sonnet"`) in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.
 
@@ -198,6 +200,8 @@ When the design identifies areas that will need deeper exploration during build 
 ### 6b. Devil's Advocate (automatic)
 
 After the solution design is complete, launch an adversarial challenge to surface risks before committing to a plan.
+
+**DA auto-skip**: Before launching the DA agent, check if ALL of the following hold: `classification.complexity == "simple"`, `classification.risk == "low"`, total tasks across all phases ≤ 2, total phases == 1, and no `<secondary-repos>` in the plan. If ALL conditions hold → skip the DA entirely, log "DA skipped — simple/low-risk plan", and proceed directly to Step 7 (or Step 7i for inline path). If any condition fails → run DA normally as described below.
 
 **Launch**: 1 Explore agent (Agent tool with `subagent_type="Explore"`, thoroughness "very thorough") with adversarial mandate. The agent receives:
 - Solution approach from Step 6
@@ -356,6 +360,8 @@ Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N 
 Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly.
 
 #### (b) Deploy builders
+
+**Cache coverage check**: If the init-phase JSON output contains `cacheCoversPhase: true` → skip explore agents for this phase, log "Cache covers phase N — skipping explore". If `cacheCoversPhase` is `false` → check the `uncoveredFiles` array from init-phase output. If the phase has `<explore-queries>`, the orchestrator evaluates whether `uncoveredFiles` overlap with the queries' targets and decides whether explore is needed. If no explore-queries exist and cache does not cover the phase, let builders use Explore agents as needed.
 
 For each wave, launch builders as foreground parallel Agent calls. Use per-task model and effort from the `tasks` map:
 
