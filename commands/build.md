@@ -10,7 +10,7 @@ Execute all remaining phases of the plan automatically, then verify the full imp
 
 **Input**: `$ARGUMENTS` may contain:
 - `--plan <name>` to specify which plan to build. The value can be:
-  - A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/current.md`
+  - A **worktree name** (e.g., `--plan feature-b`) → resolves to `.worktrees/feature-b/.devorch/plans/<name>.md` (where `<name>` is the plan filename; falls back to `current.md` for worktrees created before named plans were introduced)
   - A **full path** (contains `/` or ends in `.md`) → used as-is
   - Omitted → auto-detects from active worktrees
 - `--no-tests` (optional boolean flag) → skip tests in the post-review check (3c). When set, the post-review `check-project.ts` receives `--no-test` and the report shows tests as skipped. Parse this flag early alongside `--plan` and store as `noTests = true/false`.
@@ -24,11 +24,11 @@ Parse `$ARGUMENTS` for `--plan <value>` and `--no-tests` (boolean, defaults to f
 **Resolution logic:**
 1. If `--plan <value>` provided:
    - If value contains `/` or ends in `.md` → treat as full path. Derive `projectRoot` by stripping `/.devorch/plans/<filename>` from the path.
-   - Otherwise → treat as worktree name. Set `planPath = .worktrees/<value>/.devorch/plans/current.md`, `projectRoot = .worktrees/<value>`.
+   - Otherwise → treat as worktree name. Set `planPath` by scanning `.worktrees/<value>/.devorch/plans/` for the first `.md` file (excluding `archive/`). If found, use that file; if not found, fall back to `current.md` (backward compat for worktrees created before named plans). Set `projectRoot = .worktrees/<value>`.
 2. If `--plan` NOT provided:
    - Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON output.
    - If `count == 0`: report error "No active worktrees. Run `/devorch:talk` first." and stop.
-   - If `count == 1`: auto-detect. Set `planPath = .worktrees/<name>/.devorch/plans/current.md`, `projectRoot = .worktrees/<name>`. Report: "Auto-detected worktree: `<name>` (<planTitle>)"
+   - If `count == 1`: auto-detect. Scan `.worktrees/<name>/.devorch/plans/` for the first `.md` file (excluding `archive/`); use it as `planPath`. Fall back to `current.md` if no named plan file is found (backward compat). Set `projectRoot = .worktrees/<name>`. Report: "Auto-detected worktree: `<name>` (<planTitle>)"
    - If `count > 1`: use `AskUserQuestion` to present the worktrees as options (each option shows name + plan title + status). Set `planPath` and `projectRoot` based on the user's choice.
 
 Verify the plan file exists. If not, report error and stop.
@@ -353,7 +353,7 @@ c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/d
 
 d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
-1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
+1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback).
 2. Delete `.devorch/state.md` from the main repo if it exists.
 3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
 4. Delete `.devorch/project-map.md` from the main repo if it exists.
@@ -396,7 +396,7 @@ c. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/d
 
 d. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
 
-1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
+1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback).
 2. Delete `.devorch/state.md` from the main repo if it exists.
 3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
 4. Delete `.devorch/project-map.md` from the main repo if it exists.

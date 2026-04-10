@@ -69,11 +69,26 @@ try {
   const summaryMatch = stateContent.match(/## Phase \d+ Summary\n([\s\S]*?)(?:\n##|$)/);
   const summary = summaryMatch ? summaryMatch[1].trim().split("\n")[0] : "";
 
-  // Read plan title and count phases from current.md (single read)
+  // Read plan title and count phases from the plan file (single read)
   let planTitle = "unknown";
   let totalPhases = "?";
-  const planPath = join(projectRoot, ".devorch", "plans", "current.md");
-  if (existsSync(planPath)) {
+  const plansDir = join(projectRoot, ".devorch", "plans");
+  let planPath: string | undefined;
+  try {
+    const planEntries = readdirSync(plansDir);
+    const planFile = planEntries.find((f) => f.endsWith(".md") && f !== "archive");
+    if (planFile) {
+      planPath = join(plansDir, planFile);
+    }
+  } catch {
+    // ignore — plans dir may not exist
+  }
+  // Fallback to current.md for worktrees created before named plans were introduced
+  if (!planPath) {
+    const fallback = join(plansDir, "current.md");
+    if (existsSync(fallback)) planPath = fallback;
+  }
+  if (planPath && existsSync(planPath)) {
     try {
       const planContent = readFileSync(planPath, "utf-8");
       const titleMatch = planContent.match(/^# Plan:\s*(.+)/m);

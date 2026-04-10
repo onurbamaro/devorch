@@ -2,13 +2,13 @@
 
 Execute one phase of the current devorch plan.
 
-**Input**: $ARGUMENTS (phase number). If not provided, read `.devorch/state.md` and suggest the next phase. If no state exists, start with Phase 1. If state exists but its `Plan:` field doesn't match the current plan title (first `# Plan:` heading in `.devorch/plans/current.md`), **ignore the stale state** and start with Phase 1.
+**Input**: $ARGUMENTS (phase number). If not provided, read `.devorch/state.md` and suggest the next phase. If no state exists, start with Phase 1. If state exists but its `Plan:` field doesn't match the current plan title (first `# Plan:` heading in `.devorch/plans/<name>.md`), **ignore the stale state** and start with Phase 1.
 
 **Parse `mainRoot`**: Extract `mainRoot` from the prompt context — look for "Main repo root for cache: <path>" appended by build.md. If not found, default `mainRoot` to the current working directory (backward compatibility).
 
 ## Workflow
 
-1. **Init phase**: Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan .devorch/plans/current.md --phase N --cache-root <mainRoot>`
+1. **Init phase**: Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan .devorch/plans/<name>.md --phase N --cache-root <mainRoot>`
 
    Parse JSON output. If `contentFile` field is present, read that file for full phase context. Otherwise use the `content` field directly. This provides: plan objective, decisions, solution approach, phase content, previous handoff, conventions, current state, filtered explore-cache, and structured waves and tasks — no separate Read calls needed.
 
@@ -64,7 +64,7 @@ Execute one phase of the current devorch plan.
 
 5. **Phase summary and commit**: Generate commit message and update state in one call:
 
-   - Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/current.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
+   - Run `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan .devorch/plans/<name>.md --phase N --status "ready for phase $((N+1))" --summary "<concise phase summary>"`
    - Use the `message` field from the JSON output as the git commit message for all repos.
    - The script also writes `state.md` automatically — no separate state update step needed.
 

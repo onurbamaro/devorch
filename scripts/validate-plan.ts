@@ -41,14 +41,17 @@ for (const { pattern, name } of requiredTags) {
 // --- Classification validation ---
 const classBlock = extractTagContent(content, "classification") || "";
 if (classBlock) {
-  if (!/Type:\s*(feature|fix|refactor|migration|chore|enhancement)/i.test(classBlock)) {
-    errors.push("Classification: missing or invalid Type");
+  const typeMatch = classBlock.match(/Type:\s*(\S+)/i);
+  if (!typeMatch) {
+    errors.push("Classification: missing Type. Must be one of: feature, fix, refactor, migration, chore, enhancement, infrastructure");
+  } else if (!/Type:\s*(feature|fix|refactor|migration|chore|enhancement|infrastructure)/i.test(classBlock)) {
+    errors.push(`Classification: invalid Type '${typeMatch[1]}'. Must be one of: feature, fix, refactor, migration, chore, enhancement, infrastructure`);
   }
   if (!/Complexity:\s*(simple|medium|complex)/i.test(classBlock)) {
-    errors.push("Classification: missing or invalid Complexity");
+    errors.push("Classification: missing or invalid Complexity. Must be one of: simple, medium, complex");
   }
   if (!/Risk:\s*(low|medium|high)/i.test(classBlock)) {
-    errors.push("Classification: missing or invalid Risk");
+    errors.push("Classification: missing or invalid Risk. Must be one of: low, medium, high");
   }
 }
 
@@ -240,7 +243,8 @@ if (phases.length === 0) {
           for (const ref of refNames) {
             if (!specNamesSet.has(ref)) {
               const tid = taskIdMatch ? taskIdMatch[1] : "unknown";
-              errors.push(`Phase ${phase.num}: task "${tid}" references unknown spec "${ref}"`);
+              const availableSpecs = Array.from(specNamesSet).join(", ");
+              errors.push(`Phase ${phase.num}: task '${tid}' references unknown spec '${ref}'. Available specs in this phase: [${availableSpecs}]`);
             }
           }
         }

@@ -155,7 +155,17 @@ for (const name of entries) {
   const wtPath = join(worktreesDir, name);
   const relPath = `.worktrees/${name}`;
 
-  const planContent = safeReadFile(join(wtPath, ".devorch/plans/current.md"));
+  const plansDir = join(wtPath, ".devorch/plans");
+  let planFile: string | undefined;
+  try {
+    const planEntries = readdirSync(plansDir);
+    planFile = planEntries.find((f) => f.endsWith(".md") && f !== "archive");
+  } catch {
+    // ignore — plans dir may not exist
+  }
+  const planContent = planFile
+    ? safeReadFile(join(plansDir, planFile))
+    : safeReadFile(join(wtPath, ".devorch/plans/current.md"));
   const stateContent = safeReadFile(join(wtPath, ".devorch/state.md"));
 
   const planTitle = planContent ? extractPlanTitle(planContent) : "(no plan)";
