@@ -411,26 +411,61 @@ function isProjectMapFresh(): boolean {
   }
 }
 
-if (isProjectMapFresh()) {
-  projectMap = safeReadFile(projectMapPath);
-} else {
-  try {
-    const mapProc = Bun.spawnSync(
-      ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
-      { cwd: projectRoot, stderr: "pipe" }
-    );
-    if (mapProc.exitCode === 0) {
-      projectMap = mapProc.stdout.toString().trim();
-      try {
-        mkdirSync(dirname(projectMapPath), { recursive: true });
-        writeFileSync(projectMapPath, projectMap, "utf-8");
-      } catch {
-        // ignore — caching is best-effort
-      }
-    }
-  } catch {
-    // ignore — map is optional context
+// --- Parallel subprocess execution: map-project + tldr-analyze ---
+const phaseTsFiles = extractTsFiles(phaseContent);
+
+async function runMapProject(): Promise<string> {
+  if (isProjectMapFresh()) {
+    return safeReadFile(projectMapPath);
   }
+  const mapProc = Bun.spawn(
+    ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
+    { cwd: projectRoot, stderr: "pipe" }
+  );
+  const exitCode = await mapProc.exited;
+  if (exitCode === 0) {
+    const output = await new Response(mapProc.stdout).text();
+    const trimmed = output.trim();
+    try {
+      mkdirSync(dirname(projectMapPath), { recursive: true });
+      writeFileSync(projectMapPath, trimmed, "utf-8");
+    } catch {
+      // ignore — caching is best-effort
+    }
+    return trimmed;
+  }
+  return "";
+}
+
+async function runTldrAnalyze(): Promise<Record<string, string>> {
+  if (phaseTsFiles.length === 0) return {};
+  const tldrProc = Bun.spawn(
+    ["bun", resolve(scriptDir, "tldr-analyze.ts"), "--files", phaseTsFiles.join(","), "--root", projectRoot],
+    { cwd: projectRoot, stderr: "pipe" }
+  );
+  const exitCode = await tldrProc.exited;
+  if (exitCode === 0) {
+    const output = await new Response(tldrProc.stdout).text();
+    const tldrResult: TldrResult = JSON.parse(output.trim());
+    return formatTldrAnalysis(tldrResult);
+  }
+  console.error(`[init-phase] TLDR analysis failed (exit ${exitCode}) — skipping code structure context`);
+  return {};
+}
+
+const [mapResult, tldrResult] = await Promise.allSettled([runMapProject(), runTldrAnalyze()]);
+
+if (mapResult.status === "fulfilled") {
+  projectMap = mapResult.value;
+} else {
+  console.error(`[init-phase] map-project error: ${mapResult.reason instanceof Error ? mapResult.reason.message : String(mapResult.reason)} — skipping project map`);
+}
+
+let tldrByFile: Record<string, string> = {};
+if (tldrResult.status === "fulfilled") {
+  tldrByFile = tldrResult.value;
+} else {
+  console.error(`[init-phase] TLDR analysis error: ${tldrResult.reason instanceof Error ? tldrResult.reason.message : String(tldrResult.reason)} — skipping code structure context`);
 }
 
 // --- Run TLDR analysis for TS/TSX files in phase ---
@@ -493,25 +528,7 @@ function formatTldrAnalysis(tldrResult: TldrResult): Record<string, string> {
   return formatted;
 }
 
-const phaseTsFiles = extractTsFiles(phaseContent);
-let tldrByFile: Record<string, string> = {};
-
-if (phaseTsFiles.length > 0) {
-  try {
-    const tldrProc = Bun.spawnSync(
-      ["bun", resolve(scriptDir, "tldr-analyze.ts"), "--files", phaseTsFiles.join(","), "--root", projectRoot],
-      { cwd: projectRoot, stderr: "pipe" }
-    );
-    if (tldrProc.exitCode === 0) {
-      const tldrResult: TldrResult = JSON.parse(tldrProc.stdout.toString().trim());
-      tldrByFile = formatTldrAnalysis(tldrResult);
-    } else {
-      console.error(`[init-phase] TLDR analysis failed (exit ${tldrProc.exitCode}) — skipping code structure context`);
-    }
-  } catch (e) {
-    console.error(`[init-phase] TLDR analysis error: ${e instanceof Error ? e.message : String(e)} — skipping code structure context`);
-  }
-}
+// tldrByFile and projectMap are populated above via parallel subprocess execution
 
 // --- Extract explore queries from phase content ---
 const exploreQueries = extractExploreQueries(phaseContent);
@@ -626,6 +643,33 @@ if (filteredCache) {
 
 const fullContent = parts.join("\n");
 
+// --- Compute cache coverage for phase ---
+const phaseFileRefs = extractFileRefs(phaseContent);
+let cacheCoversPhase = false;
+let uncoveredFiles: string[] = [];
+
+if (phaseFileRefs.size === 0 || !filteredCache) {
+  cacheCoversPhase = false;
+  uncoveredFiles = [];
+} else {
+  const cacheSections = filteredCache.split(/(?=^## )/m);
+  const missing: string[] = [];
+  for (const ref of phaseFileRefs) {
+    let found = false;
+    for (const section of cacheSections) {
+      if (section.includes(ref)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      missing.push(ref);
+    }
+  }
+  cacheCoversPhase = missing.length === 0;
+  uncoveredFiles = missing;
+}
+
 // --- Output ---
 const result: {
   phaseNumber: number;
@@ -644,6 +688,10 @@ const result: {
   codeStructureByTask: Record<string, string>;
   /** Directed explore queries extracted from phase content. Each has a query text and associated taskId. */
   exploreQueries: Array<{ query: string; taskId: string }>;
+  /** Whether all phase relevant-files appear in at least one filtered cache section. */
+  cacheCoversPhase: boolean;
+  /** File paths from phase relevant-files that are not covered by any cache section. */
+  uncoveredFiles: string[];
   content?: string;
   contentFile?: string;
 } = {
@@ -658,6 +706,8 @@ const result: {
   specsByTask,
   codeStructureByTask,
   exploreQueries,
+  cacheCoversPhase,
+  uncoveredFiles,
 };
 
 if (conventions) {
