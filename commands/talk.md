@@ -52,7 +52,7 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
 **Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
-- **If missing**: Generate it now. Launch 1-2 Explore agents (Agent tool with `subagent_type="Explore"`, thoroughness "very thorough") to investigate:
+- **If missing**: Generate it now. Launch 1-2 Explore agents (Agent tool with `subagent_type="Explore"`, `model="sonnet"`, thoroughness "very thorough") to investigate:
   - **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management, error handling patterns
   - **Active workarounds** — patterns builders must preserve and why (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER")
   - **Gotchas** — things a builder needs to know to avoid mistakes
@@ -91,7 +91,7 @@ Store this as `<name>` for all subsequent steps.
 
 Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
 
-Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`) in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.
+Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`, `model="sonnet"`) in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.
 
 **Effort guidance**: Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth.
 
@@ -157,7 +157,7 @@ After displaying all specs, use `AskUserQuestion` with a simple confirmation pro
 
 If user answers revealed new areas to explore, launch additional Explore agents targeted by the user's choices. Append findings to `.devorch/explore-cache-<name>.md`.
 
-Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
+Use the Agent tool with `subagent_type="Explore"`, `model="sonnet"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
@@ -357,7 +357,12 @@ Parse JSON output. If `contentFile` field is present, read that file for full ph
 
 #### (b) Deploy builders
 
-For each wave, launch builders as foreground parallel Agent calls (`subagent_type="devorch-builder"`). Each builder receives:
+For each wave, launch builders as foreground parallel Agent calls. Use per-task model and effort from the `tasks` map:
+
+- **`subagent_type`**: If `task.effort == "high"`, use `"devorch-builder-deep"`. Otherwise use `"devorch-builder"`.
+- **`model` override**: If `task.model` is set, pass it as the `model` parameter in the Agent call. Otherwise omit (defaults to `opus`).
+
+Each builder receives:
 - `Working directory: <projectRoot>`
 - `All file operations and git commands must use this directory as root`
 - Plan **Objective**, **Solution Approach** (if present), **Decisions** (if present) — from init output
@@ -366,6 +371,7 @@ For each wave, launch builders as foreground parallel Agent calls (`subagent_typ
 - Spec contracts from `specsByTask[taskId]`
 - Code structure from `codeStructureByTask[taskId]` (if non-empty)
 - Cache sections from `cacheByTask[taskId]`
+- Spec contracts from `specsByTask[taskId]`
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
 - `commit with type(scope): description`
 - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
@@ -445,7 +451,7 @@ Each reviewer receives: `Working directory: <projectRoot>`, plan objective, CONV
 
 **Fix findings**:
 - **Trivial** (1-2 files, fix is self-evident): fix directly with Edit tool.
-- **Fix-level** (well-defined fix, 3+ files or non-trivial logic): launch devorch-builder agents (`subagent_type="devorch-builder"`) as foreground calls. Include `Working directory: <projectRoot>` in builder prompt.
+- **Fix-level** (well-defined fix, 3+ files or non-trivial logic): launch devorch-builder agents (`subagent_type="devorch-builder-deep"`) as foreground calls — fix-level builders always use high effort. Include `Working directory: <projectRoot>` in builder prompt.
 - **Talk-level** (requires design decisions): do NOT fix, report as pending issue.
 
 **Skip-on-zero-findings**: If all reviewers AND the residual scan report zero findings, skip fix execution AND post-review check entirely.
@@ -562,6 +568,32 @@ Quality guardrails:
 - Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused.
 - **Minimize phase count**: With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate adjacent phases when safe (see Phase consolidation guidance in Step 6). A 2-phase plan that takes 10 min is better than a 4-phase plan that takes 18 min for the same work.
 
+## Per-Task Model & Effort Classification
+
+Each task can optionally specify `**Model**` and `**Effort**` to optimize cost and speed without losing quality. **Both fields are optional** — when omitted, defaults are `opus` / `medium`.
+
+### Classification rules
+
+Classify each task based on its complexity, risk, and type:
+
+| Task characteristics | Model | Effort | Examples |
+|---|---|---|---|
+| Simple edits: docs, config, renaming, copy changes | sonnet | low | Update README, change env var names, adjust config values |
+| Straightforward implementation with clear spec, 1-3 files | sonnet | medium | Add a new route handler following existing pattern, create a simple component |
+| Implementation with clear spec, moderate complexity, following existing patterns | sonnet | medium | Implement a service with 2-3 methods following existing pattern, wire up a new module, CRUD endpoints |
+| Implementation with moderate complexity, cross-module or no clear precedent | opus | medium | Implement a service integrating multiple modules, new API patterns |
+| Multi-file changes with cross-module interactions | opus | high | Refactor shared utilities, implement middleware affecting multiple routes |
+| Complex algorithms, state management, security-sensitive code | opus | high | Auth logic, payment processing, data migration, concurrency handling |
+| New architecture patterns, system design decisions | opus | high | First implementation of a new pattern the codebase will follow |
+
+### Guidelines
+
+- **Default to sonnet/medium** for tasks with clear spec and existing patterns in the codebase. Escalate to `opus` when cross-module reasoning, novel patterns, or security-sensitive logic is involved.
+- **Sonnet is the workhorse**: most implementation tasks with a clear spec and codebase precedent run well on sonnet. Reserve opus for tasks where the model needs to reason across module boundaries or make architectural decisions.
+- **Effort matters more than model** for quality: `opus` at `medium` handles most implementation work well. Reserve `high` for tasks where reasoning depth directly impacts correctness.
+- **Never use `low` effort** for tasks that involve logic, only for pure text/config changes.
+- **Fix-loop tasks** (from review findings) always run at `high` effort regardless of plan classification — the build orchestrator overrides this.
+
 ## Plan Format
 
 Plans use XML tags for structure. The format below is the **complete specification**.
@@ -644,6 +676,8 @@ Risk: <risk>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
+- **Model**: <sonnet|opus> <!-- optional, default: opus. Use sonnet for simple/pattern-following tasks -->
+- **Effort**: <low|medium|high> <!-- optional, default: medium. See Per-Task Model & Effort Classification -->
 - **Repo**: <name> <!-- optional, default: primary. Use secondary repo name when task targets a satellite repo -->
 - **Spec refs**: <comma-separated spec names from phase <spec> section> <!-- optional -->
 - <specific action>
@@ -652,6 +686,8 @@ Risk: <risk>
 #### 2. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
+- **Model**: <sonnet|opus> <!-- optional -->
+- **Effort**: <low|medium|high> <!-- optional -->
 - **Spec refs**: <comma-separated spec names> <!-- optional -->
 - <specific action>
 
@@ -683,9 +719,21 @@ Risk: <risk>
 - Phase tags: `<phaseN name="...">` where N is sequential integer
 - Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`. All names must be unique within a phase.
-- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
+- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (optional — `sonnet` or `opus`, default: `opus`), `**Effort**` (optional — `low`, `medium`, or `high`, default: `medium`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
 - Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high.
 - Endpoint spec refs use the auto-generated `METHOD-/path` format (e.g., `GET-/api/health`) matching the `<endpoint path method>` tag attributes.
+
+## Feedback logging (INLINE PATH only)
+
+During inline builds, log difficulties to `.devorch/feedback.md` in the **main repo** (not the worktree). Same format and triggers as the build command — see build.md § Feedback logging.
+
+After the verdict in step 10i, if `.devorch/feedback.md` exists and has entries from this session, append to the report:
+
+```
+### Feedback devorch
+N dificuldades registradas nesta sessão. Para evoluir o devorch:
+/devorch:talk Evoluir o devorch baseado no feedback de dificuldades em .devorch/feedback.md — analisar padrões, priorizar melhorias e implementar as mais impactantes
+```
 
 ## Rules
 
@@ -696,6 +744,6 @@ Risk: <risk>
 - Always validate the plan before reporting.
 - Create `.devorch/plans/` directory if needed.
 - **Language policy**: User-facing output (questions, reports, summaries, progress messages) in Portuguese pt-BR with correct accentuation (e.g., "não", "ação", "é", "código", "será"). Code, git commits, internal files, and technical documentation in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese text.
-- No agents except Explore (for understanding code) and devorch-builder (for INLINE PATH execution only).
+- No agents except Explore (for understanding code) and devorch-builder (for INLINE PATH execution only) and devorch-builder-deep (for fix-level findings in INLINE PATH review).
 - **Inline builds are single-repo only.** Plans with `<secondary-repos>` always use the worktree path.
 - **Output format**: All output to the user must be plain text in the chat. Never use ASCII art, box-drawing characters, or decorative diagrams. Use markdown formatting (headers, lists, bold, code blocks) for structure.

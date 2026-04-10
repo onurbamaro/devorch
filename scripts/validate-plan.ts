@@ -251,6 +251,26 @@ if (phases.length === 0) {
       }
     }
 
+    // --- Model and Effort validation ---
+    const validModels = new Set(["sonnet", "opus", "haiku"]);
+    const validEfforts = new Set(["low", "medium", "high"]);
+
+    const taskSectionsForME = tasksContent.split(/####\s+\d+\.\s+/);
+    for (const section of taskSectionsForME.slice(1)) {
+      const taskIdMatchME = section.match(/\*\*ID\*\*:\s*(\S+)/i);
+      const tid = taskIdMatchME ? taskIdMatchME[1] : "unknown";
+
+      const modelMatch = section.match(/\*\*Model\*\*:\s*(\S+)/i);
+      if (modelMatch && !validModels.has(modelMatch[1].toLowerCase())) {
+        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Model "${modelMatch[1]}" (expected: sonnet, opus, haiku)`);
+      }
+
+      const effortMatch = section.match(/\*\*Effort\*\*:\s*(\S+)/i);
+      if (effortMatch && !validEfforts.has(effortMatch[1].toLowerCase())) {
+        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Effort "${effortMatch[1]}" (expected: low, medium, high)`);
+      }
+    }
+
     // Handoff — required except last phase
     if (phase.num < phases.length) {
       if (!/<handoff>[\s\S]*?<\/handoff>/i.test(phaseContent)) {

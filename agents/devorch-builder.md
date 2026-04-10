@@ -2,6 +2,7 @@
 name: devorch-builder
 description: "Executa 1 task. Escreve codigo, cria arquivos, roda comandos. Auto-commit por task."
 model: opus
+effort: medium
 color: cyan
 hooks:
   PostToolUse:

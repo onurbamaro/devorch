@@ -27,6 +27,8 @@ interface TaskInfo {
   repo: string;
   title: string;
   content: string;
+  model?: string;
+  effort?: string;
 }
 
 interface SatelliteInfo {
@@ -340,10 +342,19 @@ function parseTasks(phaseText: string): Record<string, TaskInfo> {
     const repoMatch = sectionContent.match(/\*\*Repo\*\*:\s*(\S+)/i);
     const repo = repoMatch ? repoMatch[1] : "primary";
 
+    const modelMatch = sectionContent.match(/\*\*Model\*\*:\s*(\S+)/i);
+    const model = modelMatch ? modelMatch[1].toLowerCase() : undefined;
+
+    const effortMatch = sectionContent.match(/\*\*Effort\*\*:\s*(\S+)/i);
+    const effort = effortMatch ? effortMatch[1].toLowerCase() : undefined;
+
     const fullContent = `#### ${taskHeaders[i][0].match(/\d+/)?.[0] || i + 1}. ${title}\n${sectionContent.trimEnd()}`;
 
     if (id) {
-      tasks[id] = { id, assignedTo, repo, title, content: fullContent };
+      const task: TaskInfo = { id, assignedTo, repo, title, content: fullContent };
+      if (model) task.model = model;
+      if (effort) task.effort = effort;
+      tasks[id] = task;
     }
   }
 

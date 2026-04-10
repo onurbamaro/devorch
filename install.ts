@@ -73,6 +73,32 @@ for (const { src, dest, label } of targets) {
   totalFiles += count;
 }
 
+// Install script dependencies (ts-morph) in the scripts directory
+const scriptsDest = join(CLAUDE_HOME, "devorch-scripts");
+const pkgPath = join(ROOT, "package.json");
+if (existsSync(pkgPath)) {
+  try {
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    const deps = pkg.dependencies || {};
+    if (Object.keys(deps).length > 0) {
+      const scriptsPkg = {
+        name: "devorch-scripts",
+        private: true,
+        dependencies: deps,
+      };
+      writeFileSync(join(scriptsDest, "package.json"), JSON.stringify(scriptsPkg, null, 2) + "\n");
+      const install = Bun.spawnSync(["bun", "install"], { cwd: scriptsDest, stderr: "pipe" });
+      if (install.exitCode === 0) {
+        console.log(`\n  deps: installed in ${scriptsDest}`);
+      } else {
+        console.log(`\n  deps: install failed (exit ${install.exitCode})`);
+      }
+    }
+  } catch {
+    console.log("\n  deps: skipped (could not parse package.json)");
+  }
+}
+
 // Configure statusline in settings.json
 const settingsPath = join(CLAUDE_HOME, "settings.json");
 let settings: Record<string, any> = {};

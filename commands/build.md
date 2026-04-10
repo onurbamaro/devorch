@@ -71,15 +71,20 @@ Parse JSON output. If `contentFile` field is present, read that file for full ph
 
 #### 2b. Explore
 
-Check the explore cache (included in init-phase output) for areas relevant to this phase's tasks. If the explore-cache contains sections that cover ALL files in `<relevant-files>` for this phase, do NOT launch Explore agents — the cache already provides sufficient context. Only launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) for areas with partial or missing coverage in cache. Append new summaries to explore-cache.
+Check the explore cache (included in init-phase output) for areas relevant to this phase's tasks. If the explore-cache contains sections that cover ALL files in `<relevant-files>` for this phase, do NOT launch Explore agents — the cache already provides sufficient context. Only launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`, `model="sonnet"`) for areas with partial or missing coverage in cache. Append new summaries to explore-cache.
 
-If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
+If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`, `model="sonnet"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
 
 #### 2c. Deploy builders
 
-For each wave from init-phase output, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders using the **Task tool call** (never Bash/CLI) with `subagent_type="devorch-builder"` as **foreground parallel** calls following the wave structure.
+For each wave from init-phase output, use `TaskCreate` with wave dependencies via `addBlockedBy`. Deploy builders using the **Task tool call** (never Bash/CLI) as **foreground parallel** calls following the wave structure.
 
 - For `"parallel"` and `"sequential"` type waves: launch all taskIds as parallel Task calls **in a single message** (do NOT use `run_in_background`). The Task calls block until all builders in the wave return — no polling needed.
+
+**Per-task model and effort**: Each task in the `tasks` map may have optional `model` and `effort` fields (set by the planner). Use them to select the builder agent and model override:
+
+- **`subagent_type`**: If `task.effort == "high"`, use `"devorch-builder-deep"` (runs at high effort). Otherwise use `"devorch-builder"` (runs at medium effort).
+- **`model` override**: If `task.model` is set (e.g., `"sonnet"`), pass it as the `model` parameter in the Agent/Task call. This overrides the agent definition's model for that invocation. If not set, omit the parameter (defaults to `opus` from the agent definition).
 
 Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
@@ -240,7 +245,7 @@ Collect results from: residual scan, adversarial reviewers.
 Classify each finding into one of three tiers:
 
 - **Trivial** (1-2 files, fix is self-evident, no ambiguity): fix directly with Edit tool. Examples: leftover TODO/FIXME, unused import, typo, formatting, missing semicolon.
-- **Fix-level** (well-defined fix, obvious approach, no design decisions, but touches 3+ files OR requires non-trivial logic): launch a devorch-builder Task agent (`subagent_type="devorch-builder"`) as a foreground call. The builder prompt includes: `Working directory: <projectRoot>`, finding description with file:line evidence from reviewers, affected files list, CONVENTIONS.md content, specific instruction to fix and commit. **Effort guidance for fix-level builders**: Debug thoroughly. Understand root cause before fixing. These are issues that reviewers caught — reason carefully about why they were missed. Examples: rename type across files, add missing error handling to multiple endpoints, fix consistent pattern violation across modules.
+- **Fix-level** (well-defined fix, obvious approach, no design decisions, but touches 3+ files OR requires non-trivial logic): launch a devorch-builder Task agent (`subagent_type="devorch-builder-deep"`) as a foreground call. Fix-level builders always use `devorch-builder-deep` (high effort) regardless of the original task's classification — debugging requires deeper reasoning. The builder prompt includes: `Working directory: <projectRoot>`, finding description with file:line evidence from reviewers, affected files list, CONVENTIONS.md content, specific instruction to fix and commit. **Effort guidance for fix-level builders**: Debug thoroughly. Understand root cause before fixing. These are issues that reviewers caught — reason carefully about why they were missed. Examples: rename type across files, add missing error handling to multiple endpoints, fix consistent pattern violation across modules.
 - **Talk-level** (requires design decisions, multiple valid approaches, architectural impact, or scope too large to fix without planning): do NOT fix. Generate a ready-to-paste prompt:
   ```
   /devorch:talk <detailed description including: what's wrong, which files are affected, what the reviewers found, why it needs planning>
@@ -412,6 +417,44 @@ Report: "Merged `<worktreeBranch>` into `<mainBranch>`. Worktree removed."
 If merge has conflicts: report the conflicting files and repo, and instruct the user to resolve manually. Do NOT force or auto-resolve.
 
 If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>`). Merge manually when ready: `git merge <worktreeBranch>`"
+
+## Feedback logging
+
+Log difficulties encountered during execution to `<mainRoot>/.devorch/feedback.md`. This file helps evolve devorch by capturing real friction points. **Append-only** — never overwrite or delete existing entries.
+
+### When to log
+
+Log a feedback entry when any of these occur:
+- **Builder failure**: a task fails and needs retry, or fails after retry
+- **Check-project failure**: lint/typecheck/build/test fails and needs manual fix
+- **Merge conflict**: dry-run merge fails due to conflicts
+- **Worktree issue**: setup-worktree.ts fails, satellite worktree not found, stash pop conflict
+- **Unexpected blocker**: anything that forces the orchestrator to stop or work around an issue
+
+Do NOT log routine successes or minor warnings.
+
+### Format
+
+Append each entry using this format (use Bash with `cat >> <mainRoot>/.devorch/feedback.md`):
+
+```markdown
+### <ISO date> — <short title>
+- **Phase**: <phase number or "merge" or "setup">
+- **Category**: <builder-failure | check-failure | merge-conflict | worktree-issue | blocker>
+- **What happened**: <1-2 sentences describing the issue>
+- **Workaround**: <what the orchestrator did to recover, or "none — build stopped">
+- **Suggestion**: <how devorch could handle this better in the future>
+```
+
+### Report integration
+
+After the verdict in step 3d, if `<mainRoot>/.devorch/feedback.md` exists and has entries from this build session, append to the report:
+
+```
+### Feedback devorch
+N dificuldades registradas nesta sessão. Para evoluir o devorch:
+/devorch:talk Evoluir o devorch baseado no feedback de dificuldades em .devorch/feedback.md — analisar padrões, priorizar melhorias e implementar as mais impactantes
+```
 
 ## Rules
 
