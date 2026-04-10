@@ -131,6 +131,8 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 
 **Ask in rounds.** Use up to 4 questions per `AskUserQuestion` call (tool limit). If more questions remain, make another call after the user answers. Continue until all ambiguity is resolved — there is no cap on rounds. The goal is **zero assumptions** in the plan.
 
+**High-confidence recommendations.** When the exploration provides clear evidence for an approach, present it as a RECOMMENDATION with opt-out (e.g., 'Recomendo X por causa de Y. Concordas?') instead of an open question. Reserve open questions for genuinely ambiguous decisions where exploration provides no clear basis to recommend.
+
 **Reflection pass (after all rounds complete).** Before moving on, step back and review the full picture: the original request, exploration findings, and all user answers so far. Consider what the user might want but didn't explicitly ask for — common causes:
 - **Short or vague prompt** — the user had a clear mental picture but described only part of it.
 - **Assumed obvious** — features or behaviors the user takes for granted but never stated (e.g., error feedback, loading states, undo, accessibility, mobile responsiveness).
@@ -210,6 +212,8 @@ After the solution design is complete, launch an adversarial challenge to surfac
 - **Spec gaps** — missing error cases, undefined edge behaviors, incomplete contracts
 - **Regression risks** — existing functionality that may break, with file evidence
 
+**Explore-cache constraint**: The DA must NOT contradict findings from the explore-cache without NEW code evidence not present in the cache. Findings confirmed by explore-cache with file evidence are established facts — accept them and focus on risks NOT already covered by the exploration. Before reporting a finding, verify it is not already confirmed or refuted by the explore-cache.
+
 **On no findings**: If the agent finds no significant issues in any category, report "No significant issues found" and proceed automatically to Step 7 (no user prompt needed). Do not fabricate findings.
 
 **On findings**: Display as structured report in chat using plain markdown (headers, lists, bold — no box-drawing):
@@ -275,10 +279,10 @@ Prefer **fewer, denser phases** over many thin ones. With 1M context, the orches
    - With sparse paths, no satellites: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --sparse-paths '<dirs>'`
    - No satellites, no sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>`
    - Parse the JSON output to get `worktreePath`. If `sparsePaths` is present, log the sparse-checkout paths. If `satellites` is present in output, report each satellite worktree path and any warnings.
-3. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
+3. Write the plan to `<worktreePath>/.devorch/plans/<name>.md` following the **Plan Format** below.
 4. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
 5. Do NOT copy `explore-cache-<name>.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
-6. Set `planPath = <worktreePath>/.devorch/plans/current.md` for subsequent steps.
+6. Set `planPath = <worktreePath>/.devorch/plans/<name>.md` for subsequent steps.
 
 ### 8. Validate
 
@@ -294,7 +298,7 @@ A new plan means fresh state. Previous plan's progress is irrelevant.
 
 Commit in the worktree's branch:
 ```bash
-git -C <worktreePath> add .devorch/plans/current.md .devorch/CONVENTIONS.md
+git -C <worktreePath> add .devorch/plans/<name>.md .devorch/CONVENTIONS.md
 git -C <worktreePath> commit -m "chore(devorch): plan — <descriptive plan name>"
 ```
 
@@ -324,20 +328,20 @@ Explain: planning consumed significant context — `/clear` frees it before buil
    - With sparse paths: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --sparse-paths '<dirs>'`
    - No sparse: Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>`
    - Parse the JSON output to get `worktreePath`. If `sparsePaths` is present, log the sparse-checkout paths.
-4. Write the plan to `<worktreePath>/.devorch/plans/current.md` following the **Plan Format** below.
+4. Write the plan to `<worktreePath>/.devorch/plans/<name>.md` following the **Plan Format** below.
 5. Copy `.devorch/CONVENTIONS.md` to `<worktreePath>/.devorch/CONVENTIONS.md` (if it exists or was just generated).
 6. Do NOT copy `explore-cache-<name>.md` — it stays in the main repo. Worktrees read cache from main via `--cache-root`.
-7. Validate: `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <worktreePath>/.devorch/plans/current.md`. Fix if blocked.
+7. Validate: `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <worktreePath>/.devorch/plans/<name>.md`. Fix if blocked.
 8. Delete `<worktreePath>/.devorch/state.md` if it exists.
 9. Commit plan in worktree:
    ```bash
-   git -C <worktreePath> add .devorch/plans/current.md .devorch/CONVENTIONS.md
+   git -C <worktreePath> add .devorch/plans/<name>.md .devorch/CONVENTIONS.md
    git -C <worktreePath> commit -m "chore(devorch): plan — <descriptive plan name>"
    ```
 10. Also commit any devorch files changed in the main repo (explore-cache, CONVENTIONS.md):
     - Stage `.devorch/explore-cache-<name>.md`, `.devorch/CONVENTIONS.md` (if created/updated)
     - Format: `chore(devorch): add inline worktree for <plan name>`
-11. Set `projectRoot = <worktreePath>`, `planPath = <worktreePath>/.devorch/plans/current.md`.
+11. Set `projectRoot = <worktreePath>`, `planPath = <worktreePath>/.devorch/plans/<name>.md`.
 
 All `git` and `bun` commands in subsequent steps must run with `cwd` set to `<projectRoot>` (or use `git -C <projectRoot>`).
 
@@ -487,7 +491,7 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
    Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, the journal was corrected — include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
 
 6. **Post-merge cleanup**:
-   - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/current.md` to archive the plan.
+   - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/<name>.md` to archive the plan.
    - Delete `.devorch/state.md` from the main repo if it exists.
    - Delete `.devorch/explore-cache-<name>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
    - Delete `.devorch/project-map.md` from the main repo if it exists.
@@ -680,6 +684,8 @@ Risk: <risk>
 - Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`. All names must be unique within a phase.
 - Task fields: `**ID**` (required), `**Assigned To**` (required), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
+- Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high.
+- Endpoint spec refs use the auto-generated `METHOD-/path` format (e.g., `GET-/api/health`) matching the `<endpoint path method>` tag attributes.
 
 ## Rules
 
