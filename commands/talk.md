@@ -367,7 +367,7 @@ Each builder receives:
 - `All file operations and git commands must use this directory as root`
 - Plan **Objective**, **Solution Approach** (if present), **Decisions** (if present) — from init output
 - Full task details from the `tasks` map
-- Convention sections from `conventionsByTask[taskId]`
+- Convention sections: read `conventions` (full string) from init-phase JSON root and `conventionSectionsByTask[taskId]` (array of section header names). If the array is empty or missing for the task, inject the full `conventions` text. Otherwise, split `conventions` by `## ` headers, match section names from the array, extract matching sections with their content, join them, and inject the result.
 - Spec contracts from `specsByTask[taskId]`
 - Code structure from `codeStructureByTask[taskId]` (if non-empty)
 - Cache sections from `cacheByTask[taskId]`
@@ -470,7 +470,7 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
 
 1. **Pre-flight stash**: Run `git -C <mainRoot> status --porcelain` and filter out lines starting with `??` (untracked files). If any tracked changes remain:
    ```bash
-   git -C <mainRoot> stash push -m "devorch-pre-merge"
+   git -C <mainRoot> stash push -m "devorch-pre-merge" -- ':!.devorch/'
    ```
    Record that the repo was stashed. If no tracked changes exist, skip stash and record as clean.
 
@@ -497,7 +497,7 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
    Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, the journal was corrected — include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
 
 6. **Post-merge cleanup**:
-   - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/<name>.md` to archive the plan.
+   - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/<name>.md --target-root <mainRoot>` to archive the plan.
    - Delete `.devorch/state.md` from the main repo if it exists.
    - Delete `.devorch/explore-cache-<name>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
    - Delete `.devorch/project-map.md` from the main repo if it exists.
@@ -505,7 +505,7 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
 
 7. **Remove worktree**:
    ```bash
-   git -C <mainRoot> worktree remove <projectRoot>
+   git -C <mainRoot> worktree remove --force <projectRoot>
    git -C <mainRoot> branch -d devorch/<name>
    ```
 
