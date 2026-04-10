@@ -42,6 +42,10 @@ If **FIX**: continue.
 
 ### 3. Investigate
 
+**Fast-path**: If the input contains a `file:line` pattern (e.g., `src/foo.ts:42`) AND an explicit action verb (`fix`, `change`, `rename`, `add`, `remove`) → skip Explore agents. Read the referenced file directly with the Read tool, then proceed to Step 4 (one confirmative clarification round) before executing. Do NOT launch Explore agents in this case.
+
+**Standard path** (no fast-path match):
+
 **Effort guidance for investigators**: Investigate systematically. Test your hypothesis against the code — don't speculate. Report concrete evidence.
 
 Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`) in parallel, each with a distinct focus:
