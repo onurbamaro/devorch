@@ -24,6 +24,127 @@ try {
 const errors: string[] = [];
 const warnings: string[] = [];
 
+// --- Spec concreteness detection ---
+const VAGUE_PATTERNS = [
+  /\bobject\b/i,
+  /\bdata\b/i,
+  /\bany\b/i,
+  /\bappropriate\b/i,
+  /\bcorrect(ly)?\b/i,
+  /\bproper(ly)?\b/i,
+  /\bas needed\b/i,
+  /\brelevant\b/i,
+  /\bhandle correctly\b/i,
+  /\bshould process\b/i,
+  /\bshould manage\b/i,
+  /\bshould handle\b/i,
+];
+
+const OBSERVABLE_PATTERNS = [
+  /\bstring\b/i,
+  /\bnumber\b/i,
+  /\bboolean\b/i,
+  /\bnull\b/i,
+  /\bundefined\b/i,
+  /[{}\[\]]/,
+  /\breturns?\b/i,
+  /\bcontains?\b/i,
+  /\bequals?\b/i,
+  /\bexists?\b/i,
+  /\bthrows?\b/i,
+  /\bstatus\b/i,
+  /\b\d{3}\b/,
+];
+
+function checkSpecConcreteness(specContent: string): string[] {
+  const found: string[] = [];
+
+  interface SpecElement {
+    label: string;
+    text: string;
+  }
+
+  const elements: SpecElement[] = [];
+
+  // interface input/output
+  const interfaceRegex = /<interface\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/interface>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = interfaceRegex.exec(specContent)) !== null) {
+    const iName = m[1];
+    const body = m[2];
+    const inputM = body.match(/<input[^>]*>([\s\S]*?)<\/input>/i);
+    if (inputM) elements.push({ label: `interface '${iName}' <input>`, text: inputM[1] });
+    const outputM = body.match(/<output[^>]*>([\s\S]*?)<\/output>/i);
+    if (outputM) elements.push({ label: `interface '${iName}' <output>`, text: outputM[1] });
+  }
+
+  // behavior precondition/postcondition
+  const behaviorRegex = /<behavior\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/behavior>/gi;
+  while ((m = behaviorRegex.exec(specContent)) !== null) {
+    const bName = m[1];
+    const body = m[2];
+    const preM = body.match(/<precondition[^>]*>([\s\S]*?)<\/precondition>/i);
+    if (preM) elements.push({ label: `behavior '${bName}' <precondition>`, text: preM[1] });
+    const postM = body.match(/<postcondition[^>]*>([\s\S]*?)<\/postcondition>/i);
+    if (postM) elements.push({ label: `behavior '${bName}' <postcondition>`, text: postM[1] });
+  }
+
+  // error-contract case trigger/handling
+  const ecRegex = /<error-contract\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/error-contract>/gi;
+  while ((m = ecRegex.exec(specContent)) !== null) {
+    const eName = m[1];
+    const body = m[2];
+    const caseRegex = /<case\s+[^>]*>([\s\S]*?)<\/case>/gi;
+    let cm: RegExpExecArray | null;
+    while ((cm = caseRegex.exec(body)) !== null) {
+      elements.push({ label: `error-contract '${eName}' <case>`, text: cm[1] });
+    }
+    // Also check case attributes (trigger text)
+    const caseTriggerRegex = /<case\s+([^>]*)>/gi;
+    let ct: RegExpExecArray | null;
+    while ((ct = caseTriggerRegex.exec(body)) !== null) {
+      elements.push({ label: `error-contract '${eName}' case trigger`, text: ct[1] });
+    }
+  }
+
+  // endpoint request/response
+  const endpointRegex = /<endpoint\s+([^>]*)>([\s\S]*?)<\/endpoint>/gi;
+  while ((m = endpointRegex.exec(specContent)) !== null) {
+    const attrs = m[1];
+    const body = m[2];
+    const pathM = attrs.match(/path="([^"]*)"/);
+    const epName = pathM ? pathM[1] : "unknown-endpoint";
+    const reqM = body.match(/<request[^>]*>([\s\S]*?)<\/request>/i);
+    if (reqM) elements.push({ label: `endpoint '${epName}' <request>`, text: reqM[1] });
+    const respRegex = /<response[^>]*>([\s\S]*?)<\/response>/gi;
+    let rm: RegExpExecArray | null;
+    while ((rm = respRegex.exec(body)) !== null) {
+      elements.push({ label: `endpoint '${epName}' <response>`, text: rm[1] });
+    }
+  }
+
+  for (const el of elements) {
+    const vagueCount = VAGUE_PATTERNS.filter((p) => p.test(el.text)).length;
+    const observableCount = OBSERVABLE_PATTERNS.filter((p) => p.test(el.text)).length;
+
+    if (vagueCount >= 2 && observableCount === 0) {
+      const vagueMatches = VAGUE_PATTERNS
+        .filter((p) => p.test(el.text))
+        .map((p) => {
+          const match = el.text.match(p);
+          return match ? match[0] : "";
+        })
+        .join(", ");
+      const specNameFromLabel = el.label.match(/'([^']+)'/)?.[1] ?? "unknown";
+      found.push(
+        `Spec '${specNameFromLabel}' has vague ${el.label}: '${vagueMatches}' — consider specifying concrete types/behaviors`
+      );
+    }
+  }
+
+  return found;
+}
+
 // --- Required top-level tags ---
 const requiredTags = [
   { pattern: /<description>[\s\S]*?<\/description>/i, name: "description" },
@@ -249,6 +370,9 @@ if (phases.length === 0) {
           }
         }
       }
+
+      // --- Spec concreteness warnings ---
+      warnings.push(...checkSpecConcreteness(specContent));
     }
 
     // --- Model and Effort validation ---
