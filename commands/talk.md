@@ -380,6 +380,7 @@ Each builder receives:
 - Code structure from `codeStructureByTask[taskId]` (if non-empty)
 - Cache sections from `cacheByTask[taskId]`
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
+- **Spec verification instruction**: "Verify your implementation satisfies all spec contracts before committing. Check: function signatures match `<interface>` specs, error handling matches `<error-contract>` cases, pre/postconditions from `<behavior>` specs are honored."
 - `commit with type(scope): description`
 - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
