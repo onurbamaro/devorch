@@ -114,6 +114,37 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 - If no `## Build Report` is found in a builder's output, skip silently (backward compatible with older builders).
 - Store the parsed report content keyed by task-id for aggregation in the final verification report (step 3d).
 
+**Per-task contract verification** — After Build Report extraction, verify each completed task's implementation against its spec contracts:
+
+1. For each completed task in the wave, check if the task body (from `tasks[taskId]` in init-phase output) contains an explicit `**Spec refs**:` field with a non-empty value. If absent or empty, log "No explicit spec refs for `<taskId>` — skipping contract verification" and skip to the next task.
+2. Find the builder's commit hash: run `git -C <projectRoot> log --oneline --format="%H %s" -20` and search for a commit message containing the task ID. Extract the hash. If no match found, log "No commit found for task `<taskId>` — skipping contract verification" and skip.
+3. Extract the diff: `git -C <projectRoot> show <commit-hash>` (full diff including stat).
+4. Launch a verification agent (`subagent_type="Explore"`, `model="sonnet"`) with a prompt that includes the exact verifier template below, followed by the git diff and spec contracts text from `specsByTask[taskId]`:
+
+```
+You are a contract verifier. Given a git diff and spec contracts, check whether the implementation satisfies each spec element.
+
+For each spec element (interface, error-contract, behavior, invariant, endpoint):
+1. Find the relevant changes in the diff
+2. Check if the implementation matches the spec requirements
+3. Report PASS or VIOLATION with specifics
+
+Output format (EXACTLY this structure):
+VERDICT: PASS | VIOLATION
+- <spec-name>: PASS | VIOLATION — <one-line details if violation>
+```
+
+5. Parse the verifier output: search for the line starting with `VERDICT:` — extract `PASS` or `VIOLATION`.
+6. On **PASS**: log "Contract verification PASS for `<taskId>`" and continue to the next task.
+7. On **VIOLATION**: run `git -C <projectRoot> revert --no-commit <commit-hash>` then `git -C <projectRoot> reset HEAD`. Re-launch the builder with the original task context plus an appended section:
+   ```
+   ## Contract Violation
+   The following spec violations were found in your previous implementation:
+   <verifier output>
+   Fix all violations listed above.
+   ```
+   This counts as a retry — increment the existing per-task retry counter. If 3 retries are exhausted, stop the phase with the same structured failure format described below.
+
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
 
 Track retries **per task ID** (not per wave). Each task has an independent retry counter starting at 0, max 3 retries.
