@@ -262,6 +262,8 @@ Prefer **fewer, denser phases** over many thin ones. With 1M context, the orches
 - Shared file modifications across phases — two builders in the same wave cannot edit the same file
 - Phase A's checks must pass before phase B's work begins (e.g., migrations must succeed before seeding)
 
+When splitting a task creates additional tasks that fit in the same wave without file conflicts, consolidation into the same phase adds zero overhead — only phase boundaries (not wave boundaries) incur pipeline overhead.
+
 **Examples**:
 - Two phases of 2 tasks each, no shared files → merge into one phase of 4 tasks in 2 waves
 - Phase 1 creates a new module, Phase 2 imports it → keep separate (producer/consumer dependency)
@@ -387,6 +389,37 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 - Use regex: from `## Build Report` to the next `##` header or end of text.
 - If no `## Build Report` is found in a builder's output, skip silently (backward compatible with older builders).
 - Store the parsed report content keyed by task-id for aggregation in the final verification report (step 10i).
+
+**Per-task contract verification** — After Build Report extraction, verify each completed task's implementation against its spec contracts:
+
+1. For each completed task in the wave, check if the task body (from `tasks[taskId]` in init-phase output) contains an explicit `**Spec refs**:` field with a non-empty value. If absent or empty, log "No explicit spec refs for `<taskId>` — skipping contract verification" and skip to the next task.
+2. Find the builder's commit hash: run `git -C <projectRoot> log --oneline --format="%H %s" -20` and search for a commit message containing the task ID. Extract the hash. If no match found, log "No commit found for task `<taskId>` — skipping contract verification" and skip.
+3. Extract the diff: `git -C <projectRoot> show <commit-hash>` (full diff including stat).
+4. Launch a verification agent (`subagent_type="Explore"`, `model="sonnet"`) with a prompt that includes the exact verifier template below, followed by the git diff and spec contracts text from `specsByTask[taskId]`:
+
+```
+You are a contract verifier. Given a git diff and spec contracts, check whether the implementation satisfies each spec element.
+
+For each spec element (interface, error-contract, behavior, invariant, endpoint):
+1. Find the relevant changes in the diff
+2. Check if the implementation matches the spec requirements
+3. Report PASS or VIOLATION with specifics
+
+Output format (EXACTLY this structure):
+VERDICT: PASS | VIOLATION
+- <spec-name>: PASS | VIOLATION — <one-line details if violation>
+```
+
+5. Parse the verifier output: search for the line starting with `VERDICT:` — extract `PASS` or `VIOLATION`.
+6. On **PASS**: log "Contract verification PASS for `<taskId>`" and continue to the next task.
+7. On **VIOLATION**: run `git -C <projectRoot> revert --no-commit <commit-hash>` then `git -C <projectRoot> reset HEAD`. Re-launch the builder with the original task context plus an appended section:
+   ```
+   ## Contract Violation
+   The following spec violations were found in your previous implementation:
+   <verifier output>
+   Fix all violations listed above.
+   ```
+   This counts as a retry — increment the existing per-task retry counter. If 3 retries are exhausted, stop the phase with the same structured failure format described below.
 
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
 
@@ -590,6 +623,10 @@ Quality guardrails:
 ## Sizing Rules
 
 - Max **5 tasks** per phase. Tasks can span multiple related files when the changes are cohesive. Each completable by one builder.
+- **1 task = 1 responsibility** — a task should address one cohesive concern. "Cohesive" means single responsibility: one logical change, one module boundary, one spec contract family. When in doubt, split.
+  - Recommend splitting when a task's **Spec refs** point to specs operating on clearly different components or modules (semantic judgment by the planner, not a computable rule).
+  - When a task is classified `opus`/`high` and the complexity comes from volume rather than reasoning depth, consider splitting into 2 tasks at `sonnet`/`medium` IF the resulting tasks are parallelizable (no producer/consumer dependency).
+  - Prefer wider waves with focused tasks over narrower waves with complex tasks — 4 focused tasks in 1 parallel wave beats 2 complex tasks in 1 wave.
 - Each phase MUST fit in 1 phase execution without context compaction.
 - Prefer fewer phases with well-scoped tasks. Each builder now has ample context (1M tokens) — use it by including more relevant explore-cache and conventions per task.
 - Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused.
