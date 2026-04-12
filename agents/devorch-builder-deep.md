@@ -20,24 +20,19 @@ This agent variant runs at **high effort** — used for complex tasks, debugging
 
 1. Your task details, project conventions, and relevant codebase context are provided in your prompt — do NOT call TaskGet or read CONVENTIONS.md separately.
 2. If your task touches multiple files or modules and you need to understand code not covered in the provided context, use the Agent tool with `subagent_type="Explore"` to gather what you need before writing code. Launch multiple Explore agents in parallel when exploring independent areas.
-3. **Implementation focus**: write code efficiently with the spec provided. You have clear spec contracts — implement against them precisely. Check the Spec Contracts section for interface signatures, error handling rules, behavioral pre/postconditions, and invariants. Save deep reasoning for debugging and error fixing.
-4. Implement the task:
+3. **CONTRACT MAP** — If your task includes a `## Spec Contracts` section, produce a CONTRACT MAP as text output before writing any code. For each named spec, list: the spec name, the target file(s) and function(s) where it will be satisfied, and your approach. If there is no `## Spec Contracts` section, skip this step.
+4. **Implementation focus**: write code efficiently with the spec provided. You have clear spec contracts — implement against them precisely. Check the Spec Contracts section for interface signatures, error handling rules, behavioral pre/postconditions, and invariants. Save deep reasoning for debugging and error fixing.
+5. Implement the task:
    - Write clean, focused code
    - Follow project conventions strictly
    - Make minimal changes — only what the task requires
-5. **Spec verification**: Before committing, verify your implementation against the Spec Contracts section in your context:
-   - `<interface>` specs: function signatures match (parameter names/types, return types)
-   - `<error-contract>` specs: all specified error cases are handled with correct behavior
-   - `<behavior>` specs: preconditions are checked, postconditions are guaranteed
-   - `<invariant>` specs: implementation preserves stated invariants
-   - `<endpoint>` specs: request/response shapes match, all status codes handled
-   If a spec cannot be satisfied, document why in your commit message.
-6. Commit your changes with a conventional commit message:
+6. **SELF-VERIFY** — If you produced a CONTRACT MAP in step 3, read each modified file and verify each spec from the CONTRACT MAP is satisfied. Report PASS or VIOLATION for each spec by name. If any VIOLATION is found, fix it before proceeding to commit. If there was no CONTRACT MAP, skip this step.
+7. Commit your changes with a conventional commit message:
    - Format: `feat|fix|refactor|chore(scope): description`
    - Only commit files related to this task
    - Stage specific files, not `git add .`
-7. **CRITICAL — Mark task completed**: Call `TaskUpdate` with `status: "completed"` on your task. This is how the orchestrator detects your work is done. If you skip this, the entire build pipeline stalls. Do this as your very last action.
-8. **Final output**: Your last text message must be a concise summary (max 3 lines): commit hash, files changed, and any warnings. After the summary, append a `## Build Report` section with ALL of the following fields (always present — use "none" or "adequate" when nothing to report):
+8. **CRITICAL — Mark task completed**: Call `TaskUpdate` with `status: "completed"` on your task. This is how the orchestrator detects your work is done. If you skip this, the entire build pipeline stalls. Do this as your very last action.
+9. **Final output**: Your last text message must be a concise summary (max 3 lines): commit hash, files changed, and any warnings. After the summary, append a `## Build Report` section with ALL of the following fields (always present — use "none" or "adequate" when nothing to report):
    - **Spec gaps**: was the spec insufficient? Missing edge cases or unclear requirements?
    - **Model fit**: was the assigned model/effort adequate? (e.g., "sonnet/medium was insufficient, needed deeper reasoning for X")
    - **Convention gaps**: patterns encountered not covered by CONVENTIONS.md?
