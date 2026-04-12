@@ -88,7 +88,7 @@ export interface SecondaryRepo {
 
 // --- Spec parsing ---
 
-export type SpecType = "interface" | "error-contract" | "behavior" | "invariant" | "endpoint";
+export type SpecType = "interface" | "error-contract" | "behavior" | "invariant" | "endpoint" | "entity";
 
 export function extractPhaseSpec(phaseContent: string): string | null {
   const match = phaseContent.match(/<spec>([\s\S]*?)<\/spec>/i);
@@ -98,8 +98,8 @@ export function extractPhaseSpec(phaseContent: string): string | null {
 export function parseSpecNames(specContent: string): string[] {
   const names: string[] = [];
 
-  // Named tags: interface, error-contract, behavior — extract name="..."
-  const namedTagRegex = /<(?:interface|error-contract|behavior)\s+[^>]*name="([^"]+)"[^>]*>/gi;
+  // Named tags: interface, error-contract, behavior, entity — extract name="..."
+  const namedTagRegex = /<(?:interface|error-contract|behavior|entity)\s+[^>]*name="([^"]+)"[^>]*>/gi;
   let m: RegExpExecArray | null;
   while ((m = namedTagRegex.exec(specContent)) !== null) {
     names.push(m[1]);
@@ -129,8 +129,8 @@ export function filterSpecsByRefs(specContent: string, refs: string[]): string {
   const refsSet = new Set(refs);
   const matched: string[] = [];
 
-  // Named tags: interface, error-contract, behavior
-  const namedRegex = /<(interface|error-contract|behavior)\s+[^>]*name="([^"]+)"[^>]*>[\s\S]*?<\/\1>/gi;
+  // Named tags: interface, error-contract, behavior, entity
+  const namedRegex = /<(interface|error-contract|behavior|entity)\s+[^>]*name="([^"]+)"[^>]*>[\s\S]*?<\/\1>/gi;
   let m: RegExpExecArray | null;
   while ((m = namedRegex.exec(specContent)) !== null) {
     if (refsSet.has(m[2])) {

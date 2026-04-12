@@ -107,6 +107,30 @@ function checkSpecConcreteness(specContent: string): string[] {
     }
   }
 
+  // entity field descriptions and constraint text
+  const entityRegex2 = /<entity\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/entity>/gi;
+  while ((m = entityRegex2.exec(specContent)) !== null) {
+    const eName = m[1];
+    const body = m[2];
+    // Field descriptions (text after attributes in self-closing tags, or type attribute value)
+    const fieldDescRegex = /<field\s+([^>]*)\/?>/gi;
+    let fm: RegExpExecArray | null;
+    while ((fm = fieldDescRegex.exec(body)) !== null) {
+      const fieldAttrs = fm[1];
+      const fieldName = fieldAttrs.match(/name="([^"]+)"/)?.[1] || "unknown";
+      const typeVal = fieldAttrs.match(/type="([^"]+)"/)?.[1] || "";
+      if (typeVal) {
+        elements.push({ label: `entity '${eName}' field '${fieldName}' type`, text: typeVal });
+      }
+    }
+    // Constraint text
+    const conRegex = /<constraint(?:\s[^>]*)?>([^<]*)<\/constraint>/gi;
+    let cm2: RegExpExecArray | null;
+    while ((cm2 = conRegex.exec(body)) !== null) {
+      elements.push({ label: `entity '${eName}' <constraint>`, text: cm2[1] });
+    }
+  }
+
   // endpoint request/response
   const endpointRegex = /<endpoint\s+([^>]*)>([\s\S]*?)<\/endpoint>/gi;
   while ((m = endpointRegex.exec(specContent)) !== null) {
@@ -265,7 +289,17 @@ if (phases.length === 0) {
     // --- Spec validation ---
     const specContent = extractPhaseSpec(phaseContent);
     if (specContent === null) {
-      warnings.push(`Phase ${phase.num} has no <spec> section`);
+      const typeMatch = classBlock.match(/Type:\s*(\S+)/i);
+      const complexityMatch = classBlock.match(/Complexity:\s*(\S+)/i);
+      const planType = typeMatch ? typeMatch[1].toLowerCase() : "";
+      const planComplexity = complexityMatch ? complexityMatch[1].toLowerCase() : "";
+      const promotableTypes = ["feature", "migration", "enhancement"];
+      const promotableComplexities = ["medium", "complex"];
+      if (promotableTypes.includes(planType) && promotableComplexities.includes(planComplexity)) {
+        errors.push(`Phase ${phase.num} has no <spec> section (required for ${planType}/${planComplexity} plans)`);
+      } else {
+        warnings.push(`Phase ${phase.num} has no <spec> section`);
+      }
     } else {
       // Structural validation for each sub-tag type
       const interfaceRegex = /<interface\s+([^>]*)>([\s\S]*?)<\/interface>/gi;
@@ -340,6 +374,62 @@ if (phases.length === 0) {
         }
         if (!/<response[\s>]/i.test(body)) {
           errors.push(`Phase ${phase.num}: <endpoint> must contain at least 1 <response>`);
+        }
+
+        // Auth warning for mutating endpoints
+        const methodMatch = attrs.match(/method="([^"]+)"/i);
+        if (methodMatch) {
+          const method = methodMatch[1].toUpperCase();
+          if (/^(POST|DELETE|PATCH|PUT)$/.test(method)) {
+            const requestMatch = body.match(/<request[^>]*>([\s\S]*?)<\/request>/i);
+            const authKeywords = /jwt|auth|token|public|internal|network|api-key/i;
+            const pathAttr = attrs.match(/path="([^"]+)"/)?.[1] || "unknown";
+            if (!requestMatch) {
+              warnings.push(`Phase ${phase.num}: mutating endpoint ${method} ${pathAttr} has no <request> — consider specifying auth requirements`);
+            } else if (!authKeywords.test(requestMatch[1])) {
+              warnings.push(`Phase ${phase.num}: mutating endpoint ${method} ${pathAttr} <request> has no auth annotation — consider specifying auth requirements`);
+            }
+          }
+        }
+      }
+
+      // Entity validation
+      const entityRegex = /<entity\s+([^>]*)>([\s\S]*?)<\/entity>/gi;
+      while ((specMatch = entityRegex.exec(specContent)) !== null) {
+        const attrs = specMatch[1];
+        const body = specMatch[2];
+        const entityNameMatch = attrs.match(/name="([^"]+)"/);
+        if (!entityNameMatch) {
+          errors.push(`Phase ${phase.num}: <entity> missing name attribute`);
+        }
+        const entityLabel = entityNameMatch ? entityNameMatch[1] : "unknown";
+
+        // Count children: field, relationship, constraint
+        const fields = [...body.matchAll(/<field\s+([^>]*)\/?>/gi)];
+        const relationships = [...body.matchAll(/<relationship\s+([^>]*)\/?>/gi)];
+        const constraints = [...body.matchAll(/<constraint(?:\s[^>]*)?>[\s\S]*?<\/constraint>/gi)];
+
+        if (fields.length + relationships.length + constraints.length === 0) {
+          errors.push(`Phase ${phase.num}: <entity> '${entityLabel}' has no children (needs field, relationship, or constraint)`);
+        }
+
+        for (const field of fields) {
+          if (!/name="[^"]+"/.test(field[1])) {
+            errors.push(`Phase ${phase.num}: <entity> '${entityLabel}' has <field> missing name attribute`);
+          }
+        }
+
+        for (const rel of relationships) {
+          if (!/target="[^"]+"/.test(rel[1])) {
+            errors.push(`Phase ${phase.num}: <entity> '${entityLabel}' has <relationship> missing target attribute`);
+          }
+        }
+
+        for (const con of constraints) {
+          const conBody = con[0].replace(/<\/?constraint[^>]*>/gi, "").trim();
+          if (!conBody) {
+            errors.push(`Phase ${phase.num}: <entity> '${entityLabel}' has <constraint> with empty body`);
+          }
         }
       }
 
@@ -476,6 +566,29 @@ if (phases.length === 0) {
         }
       }
     }
+  }
+}
+
+// --- Semantic warnings: cross-reference relevant-files with spec coverage ---
+const relevantFilesContent = extractTagContent(content, "relevant-files") || "";
+if (relevantFilesContent && phases.length > 0) {
+  const hasEntitySpec = phases.some((p) => {
+    const spec = extractPhaseSpec(p.content);
+    return spec ? /<entity\s/i.test(spec) : false;
+  });
+  const hasEndpointSpec = phases.some((p) => {
+    const spec = extractPhaseSpec(p.content);
+    return spec ? /<endpoint\s/i.test(spec) : false;
+  });
+
+  const schemaPatterns = /schema|migration|\.sql|db\/schema/i;
+  if (schemaPatterns.test(relevantFilesContent) && !hasEntitySpec) {
+    warnings.push("Relevant files reference schema/migration paths but no <entity> spec found in any phase");
+  }
+
+  const routePatterns = /\/routes\/|\/handlers\/|\/api\/|\/endpoints\//i;
+  if (routePatterns.test(relevantFilesContent) && !hasEndpointSpec) {
+    warnings.push("Relevant files reference route/handler/API paths but no <endpoint> spec found in any phase");
   }
 }
 
