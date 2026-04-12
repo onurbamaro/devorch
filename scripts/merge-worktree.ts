@@ -168,8 +168,8 @@ function doMerge(mainRoot: string, originalBranch: string, worktreeBranch: strin
   return true;
 }
 
-function detectSelfBuild(mainRoot: string, originalBranch: string): boolean {
-  const diff = git(mainRoot, ["diff", "--name-only", `${originalBranch}..HEAD`]);
+function detectSelfBuild(mainRoot: string, preMergeHash: string): boolean {
+  const diff = git(mainRoot, ["diff", "--name-only", `${preMergeHash}..HEAD`]);
   if (diff.exitCode !== 0 || !diff.stdout) return false;
 
   const selfBuildPrefixes = ["scripts/", "agents/", "commands/", "hooks/"];
@@ -274,10 +274,19 @@ function commitCleanup(mainRoot: string, planName: string): void {
 }
 
 function removeWorktree(mainRoot: string, worktreePath: string, branchName: string): { removed: boolean; branchDeleted: boolean } {
-  const remove = git(mainRoot, ["worktree", "remove", "--force", worktreePath]);
-  const removed = remove.exitCode === 0;
+  let removed = false;
+  let lastStderr = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) Bun.sleepSync(500);
+    const remove = git(mainRoot, ["worktree", "remove", "--force", worktreePath]);
+    if (remove.exitCode === 0) {
+      removed = true;
+      break;
+    }
+    lastStderr = remove.stderr;
+  }
   if (!removed) {
-    log(`Failed to remove worktree: ${remove.stderr}`);
+    log(`Failed to remove worktree after 3 attempts: ${lastStderr}`);
   }
 
   const branchDel = git(mainRoot, ["branch", "-d", branchName]);
@@ -412,6 +421,7 @@ async function main(): Promise<void> {
   log("All dry-runs passed.");
 
   // 4. Merge all repos (primary first, then satellites)
+  const preMergeHash = git(mainRoot, ["rev-parse", "HEAD"]).stdout.trim();
   const mergedRepos: string[] = [];
   for (const repo of allRepos) {
     const ok = doMerge(repo.mainRoot, originalBranch, repo.branch);
@@ -469,7 +479,7 @@ async function main(): Promise<void> {
   const filesChanged = diffResult.stdout ? diffResult.stdout.split("\n").filter(Boolean) : [];
 
   // 7. Self-build detection
-  const selfBuildNeeded = detectSelfBuild(mainRoot, originalBranch);
+  const selfBuildNeeded = detectSelfBuild(mainRoot, preMergeHash);
   if (selfBuildNeeded) {
     log("devorch scripts updated — running install");
     const installProc = Bun.spawnSync(["bun", "run", "install"], {
