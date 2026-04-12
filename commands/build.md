@@ -375,21 +375,13 @@ bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts \
 
 Parse the JSON output and route by `status` field:
 
-- **`"success"`**: Log merged repos from `mergedRepos`. If `selfBuildNeeded == true` AND `<mainRoot>/install.ts` exists: log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If `migrationJournalFixed == true`: log "Migration journal fixed". Run post-merge cleanup (step 6 below). Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All worktrees removed." (or "Worktree removed." if no satellites).
+- **`"success"`**: Log merged repos from `mergedRepos`. If `migrationJournalFixed == true`: log "Migration journal fixed". Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All worktrees removed." (or "Worktree removed." if no satellites). The script handles self-build reinstall, plan archival, state file cleanup, and cleanup commit internally — no additional cleanup steps needed.
 
 - **`"conflict"`**: Report to the user: "Merge conflict in `<conflictRepo>`: `<conflictFiles>`. Resolve manually and retry." Do NOT continue cleanup.
 
 - **`"stash-conflict"`**: Report to the user: "Stash pop conflict in `<conflictRepo>`: `<conflictFiles>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Do NOT continue cleanup.
 
 - **`"error"`**: Report the `error` field to the user and stop.
-
-6. **Post-merge cleanup** (only on `"success"`) — Archive the plan and remove stale devorch files:
-
-   1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <mainRoot>` to archive the plan.
-   2. Delete `.devorch/state.md` from the main repo if it exists.
-   3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
-   4. Delete `.devorch/project-map.md` from the main repo if it exists.
-   5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
 
 If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>`). Merge manually when ready: `git merge <worktreeBranch>`"
 
