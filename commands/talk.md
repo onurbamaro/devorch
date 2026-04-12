@@ -723,7 +723,7 @@ Validated structurally but not yet delivered per-task to builders.
 
 ### Plan Format Rules
 
-- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only), `<global-invariants>` (optional — cross-cutting invariants that apply to all phases, validated structurally but not yet delivered per-task to builders)
+- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only), `<global-invariants>` (optional — cross-cutting invariants that apply to all phases; not yet validated or delivered per-task to builders)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
 - Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`, `<entity name>`. All names must be unique within a phase.
