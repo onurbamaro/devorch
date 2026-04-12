@@ -116,6 +116,10 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 
 **Per-task contract verification** — After Build Report extraction, verify each completed task's implementation against its spec contracts:
 
+**Classification gate**: Before running the verification loop, parse the plan's `<classification>` section from `<planPath>` (extract `Complexity:` and `Risk:` values). If `complexity == "simple" AND risk == "low"`, skip the entire contract verification loop and log: "Contract verification skipped — simple/low plan". For all other classifications, proceed with verification as below.
+
+> **Note**: init-phase.ts does not currently expose classification in its JSON output. The orchestrator must read and parse the `<classification>` tag from the plan file directly. A follow-up task should add classification to init-phase.ts output to avoid this extra file read.
+
 1. For each completed task in the wave, check if the task body (from `tasks[taskId]` in init-phase output) contains an explicit `**Spec refs**:` field with a non-empty value. If absent or empty, log "No explicit spec refs for `<taskId>` — skipping contract verification" and skip to the next task.
 2. Find the builder's commit hash: run `git -C <projectRoot> log --oneline --format="%H %s" -20` and search for a commit message containing the task ID. Extract the hash. If no match found, log "No commit found for task `<taskId>` — skipping contract verification" and skip.
 3. Extract the diff: `git -C <projectRoot> show <commit-hash>` (full diff including stat).
@@ -351,139 +355,33 @@ After a successful build:
 
 1. Detect the worktree branch name: `git -C <projectRoot> branch --show-current` → e.g., `devorch/feature-b`.
 2. Detect the main branch: use the branch the worktree was created from (typically `master` or `main`). Run `git log --oneline <mainBranch>..<worktreeBranch>` to show what will be merged.
-3. **Detect satellites**: Read the plan file and parse `<secondary-repos>`. For each secondary repo, resolve its worktree path: `<repoPath>/.worktrees/<worktreeName>` (where `worktreeName` is the last segment of `<projectRoot>`). Verify each satellite worktree exists via `git -C <repoPath> worktree list`.
+3. **Build satellites JSON**: Read the plan file and parse `<secondary-repos>`. For each secondary repo, resolve its worktree path: `<repoPath>/.worktrees/<worktreeName>` (where `worktreeName` is the last segment of `<projectRoot>`). Build a JSON array: `[{"name":"<name>","worktreePath":"<worktreePath>","mainRoot":"<repoPath>","branch":"<worktreeBranch>"}]`. If no `<secondary-repos>`, the satellites JSON is omitted from the script call.
 4. Ask the user via `AskUserQuestion`:
    - **"Merge now"** — Merge the worktree branch into the main branch and clean up (all repos).
    - **"Keep worktree"** — Leave the worktree and branch for manual merge later.
 
 If **merge**:
 
-5. **Pre-flight: stash dirty repos** — For each repo (primary + all satellites detected in step 3), check for uncommitted tracked changes and stash them before merging:
+5. **Run merge script**:
 
-   For each repo, run `git -C <repoMainPath> status --porcelain` and filter out lines starting with `??` (untracked files). If any tracked changes remain:
-   ```bash
-   git -C <repoMainPath> stash push -m "devorch-pre-merge" -- ':!.devorch/'
-   ```
-   Record that this repo was stashed. If no tracked changes exist, skip stash and record the repo as clean.
-
-   Report: "Stashed changes in N repos: `<list>`" or "All repos clean, proceeding."
-
-**With satellites (coordinated merge)**:
-
-a. **Untracked file guard** — Before dry-running, detect untracked files in the primary repo that would conflict with the incoming branch:
 ```bash
-git -C <primaryMainPath> diff --name-only <mainBranch>..<worktreeBranch>
-git -C <primaryMainPath> ls-files --others --exclude-standard
-```
-Compute the intersection of both lists. If the intersection is non-empty:
-```bash
-git -C <primaryMainPath> add <conflicting-files>
-git -C <primaryMainPath> commit -m "chore: track files before devorch merge"
-```
-If the intersection is empty, skip this step and proceed directly to the dry-run.
-
-b. **Dry-run all repos first** — For each repo (primary + all satellites), run:
-```bash
-git -C <repoMainPath> merge --no-commit --no-ff <worktreeBranch>
-git -C <repoMainPath> merge --abort
-```
-If any dry-run fails: restore stashed changes in all repos that were stashed before reporting the conflict:
-```bash
-git -C <repoMainPath> stash pop
-```
-Report which repo has conflicts between branches and stop. Do NOT merge any repo.
-
-c. **Merge sequentially** (only if all dry-runs pass) — Primary first, then satellites in order:
-```bash
-git checkout <mainBranch>
-git merge <worktreeBranch>
+bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts \
+  --worktree-path <projectRoot> \
+  --main-root <mainRoot> \
+  --original-branch <mainBranch> \
+  --branch-name <worktreeBranch> \
+  [--satellites '<satellitesJson>']
 ```
 
-c2. **Restore stashed changes** — After all merges succeed, for each repo that was stashed in step 5:
-```bash
-git -C <repoMainPath> stash pop
-```
-If `stash pop` fails (exit code != 0): run `git -C <repoMainPath> status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict in `<repo>`: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup or pop stash in remaining repos.
+Parse the JSON output and route by `status` field:
 
-If `stash pop` succeeds: the stash is auto-removed, continue to next repo.
+- **`"success"`**: Log merged repos from `mergedRepos`. If `migrationJournalFixed == true`: log "Migration journal fixed". Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All worktrees removed." (or "Worktree removed." if no satellites). The script handles self-build reinstall, plan archival, state file cleanup, and cleanup commit internally — no additional cleanup steps needed.
 
-d. **Self-build reinstall** — Run `git -C <primaryMainPath> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<primaryMainPath>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<primaryMainPath>`. If no match or `install.ts` doesn't exist, skip this step.
+- **`"conflict"`**: Report to the user: "Merge conflict in `<conflictRepo>`: `<conflictFiles>`. Resolve manually and retry." Do NOT continue cleanup.
 
-e. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <primaryMainPath>`. If `fixed > 0`, include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
+- **`"stash-conflict"`**: Report to the user: "Stash pop conflict in `<conflictRepo>`: `<conflictFiles>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Do NOT continue cleanup.
 
-f. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
-
-1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <repoMainPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback). The `--target-root` flag writes the archive to the main repo instead of inside the worktree.
-2. Delete `.devorch/state.md` from the main repo if it exists.
-3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
-4. Delete `.devorch/project-map.md` from the main repo if it exists.
-5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
-
-g. **Cleanup all repos** — For each repo (primary + satellites):
-```bash
-git -C <repoMainPath> worktree remove --force <worktreePath>
-git -C <repoMainPath> branch -d <worktreeBranch>
-```
-
-Report: "Merged `<worktreeBranch>` into `<mainBranch>` across N repos. All worktrees removed."
-
-**Without satellites** (standard merge):
-
-Run pre-flight stash for the primary repo as described in step 5 above.
-
-a. **Untracked file guard** — Before dry-running, detect untracked files in the primary repo that would conflict with the incoming branch:
-```bash
-git -C <mainRoot> diff --name-only <mainBranch>..<worktreeBranch>
-git -C <mainRoot> ls-files --others --exclude-standard
-```
-Compute the intersection of both lists. If the intersection is non-empty:
-```bash
-git -C <mainRoot> add <conflicting-files>
-git -C <mainRoot> commit -m "chore: track files before devorch merge"
-```
-If the intersection is empty, skip this step and proceed directly to the dry-run.
-
-b. **Dry-run**:
-```bash
-git merge --no-commit --no-ff <worktreeBranch>
-git merge --abort
-```
-If dry-run fails and the repo was stashed: run `git stash pop` to restore changes. Report the conflict between branches and stop.
-
-c. **Merge**:
-```bash
-git checkout <mainBranch>
-git merge <worktreeBranch>
-```
-
-c2. **Restore stashed changes** — If the primary repo was stashed in step 5:
-```bash
-git stash pop
-```
-If `stash pop` fails (exit code != 0): run `git status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
-
-If `stash pop` succeeds: the stash is auto-removed, continue.
-
-d. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <mainBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<mainRoot>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match or `install.ts` doesn't exist, skip this step.
-
-e. **Fix migration journal** (Drizzle projects only) — Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, include the journal file in the cleanup commit.
-
-f. **Post-merge cleanup** — Archive the plan and remove stale devorch files from the main repo:
-
-1. Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath> --target-root <repoMainPath>` to archive the plan (use the resolved `planPath` from step 0, which already points to the correct `<name>.md` or `current.md` fallback). The `--target-root` flag writes the archive to the main repo instead of inside the worktree.
-2. Delete `.devorch/state.md` from the main repo if it exists.
-3. Delete `.devorch/explore-cache-<cacheName>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
-4. Delete `.devorch/project-map.md` from the main repo if it exists.
-5. Run `git status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <planName>`.
-
-g. **Cleanup**:
-```bash
-git worktree remove --force <projectRoot>
-git branch -d <worktreeBranch>
-```
-Report: "Merged `<worktreeBranch>` into `<mainBranch>`. Worktree removed."
-
-If merge has conflicts: report the conflicting files and repo, and instruct the user to resolve manually. Do NOT force or auto-resolve.
+- **`"error"`**: Report the `error` field to the user and stop.
 
 If **keep**: Report: "Worktree kept at `<projectRoot>` (branch `<worktreeBranch>`). Merge manually when ready: `git merge <worktreeBranch>`"
 

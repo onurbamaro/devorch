@@ -52,30 +52,9 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
 **Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
-- **If missing**: Generate it now. Launch 1-2 Explore agents (Agent tool with `subagent_type="Explore"`, `model="sonnet"`, thoroughness "very thorough") to investigate:
-  - **Architectural patterns** — how services/modules are structured, DI, middleware chains, state management, error handling patterns
-  - **Active workarounds** — patterns builders must preserve and why (e.g., "json-bigint used because IDs exceed MAX_SAFE_INTEGER")
-  - **Gotchas** — things a builder needs to know to avoid mistakes
+- **If missing** (first-time generation): Run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts <project-root>`. Write the output to `.devorch/CONVENTIONS.md`. Then launch 1 Explore agent (`subagent_type="Explore"`, `model="sonnet"`, thoroughness "quick") to enrich with semantic context the script cannot capture: architectural patterns rationale, active workaround explanations, non-obvious gotchas. Merge the Explore findings into the generated CONVENTIONS.md. Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save initial hashes.
 
-  Write `.devorch/CONVENTIONS.md` from Explore findings using this format:
-
-  ```markdown
-  # Code Conventions
-
-  ## Patterns
-  <component structure, service patterns, state management, error handling — from Explore findings>
-
-  ## Active Workarounds
-  <workarounds builders must preserve, and why they exist>
-  (skip section if none found)
-
-  ## Gotchas
-  <things a builder needs to know to avoid mistakes>
-  ```
-
-  **Sampling rule:** When a section has many files (50+ components, 20+ routes), read 3-5 representative files to identify the pattern. Stop when the pattern is clear.
-
-- **If exists**: Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts`. Parse the JSON output. If `stale` is `false` → skip regeneration, use the existing CONVENTIONS.md as-is. If `stale` is `true` → regenerate CONVENTIONS.md using the process above, then run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save the new hashes.
+- **If exists**: Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts`. Parse the JSON output. If `stale` is `false` → skip regeneration, use the existing CONVENTIONS.md as-is. If `stale` is `true` → regenerate: run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts <project-root>`, overwrite `.devorch/CONVENTIONS.md` with the output (no Explore agents for staleness regeneration), then run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save the new hashes.
 
 **Legacy plan migration**: If `.devorch/plans/current.md` exists in the main repo, archive it silently: run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan .devorch/plans/current.md`. Report: "Migrated legacy plan to archive." Plans now always live in worktrees — this path only triggers once during migration.
 
@@ -144,17 +123,6 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 
 If this reflection surfaces new questions or suggestions, present them in a final `AskUserQuestion` round framed as: "Revisando tudo que discutimos, pensei em mais algumas coisas que podem ser relevantes:" — with options including "Já está bom, seguir em frente" as the last choice. If nothing new surfaces, proceed silently.
 
-### 3b. Propose specs
-
-Based on exploration findings and user answers, draft spec contracts for each planned phase. **Display the specs as formatted text directly in the chat** — do NOT put them inside `AskUserQuestion`. Group specs by phase using markdown headers and code blocks. Include concrete examples derived from the exploration (real function names, real error cases discovered).
-
-After displaying all specs, use `AskUserQuestion` with a simple confirmation prompt: options like "Aprovado — seguir com essas specs", "Quero ajustar algumas specs (vou detalhar)", "Rejeitar e repensar". If the user wants adjustments, apply them and re-display only the changed specs for a second confirmation.
-
-**Guidelines:**
-- Ground specs in what the exploration found — reference real files, patterns, or constraints discovered.
-- Don't spec what the codebase or conventions already define.
-- Don't ask the user to make decisions you're better equipped to make (pure implementation details).
-
 ### 4. Deep exploration (conditional)
 
 If user answers revealed new areas to explore, launch additional Explore agents targeted by the user's choices. Append findings to `.devorch/explore-cache-<name>.md`.
@@ -166,6 +134,8 @@ Use the Agent tool with `subagent_type="Explore"`, `model="sonnet"` for all code
 ### 5. Propose plan
 
 Count total tasks across all phases in the designed plan. Show summary: "Plano: N fases, M tasks, K waves."
+
+**Display specs within the plan**: Include the drafted spec contracts for each phase inline with the plan summary. Group specs by phase using markdown headers and code blocks. The user approves plan + specs together in a single confirmation — no separate spec approval round.
 
 Use `AskUserQuestion` with options based on plan characteristics:
 
@@ -193,7 +163,7 @@ Use `AskUserQuestion` with options based on plan characteristics:
 
 Think through: core problem, approach, alternatives considered, risks and mitigations.
 
-Include `<spec>` section design as part of solution design. Each phase should have specs that define the contracts builders must implement. Prefer fewer, more precise specs over many vague ones.
+**Spec drafting**: Design `<spec>` contracts as part of the solution. Each phase should have specs that define the contracts builders must implement. Prefer fewer, more precise specs over many vague ones. Ground specs in what the exploration found — reference real files, patterns, or constraints discovered. Don't spec what the codebase or conventions already define. Don't spec pure implementation details the builder is better equipped to decide. Include concrete examples derived from the exploration (real function names, real error cases discovered). These specs will be displayed within the plan proposal (Step 5) for unified approval.
 
 When the design identifies areas that will need deeper exploration during build (complex modules the builder hasn't seen, third-party API patterns), add `<explore-queries>` to the relevant phase with directed queries targeting specific knowledge artifacts.
 
@@ -201,11 +171,11 @@ When the design identifies areas that will need deeper exploration during build 
 
 After the solution design is complete, launch an adversarial challenge to surface risks before committing to a plan.
 
-**DA auto-skip**: Before launching the DA agent, check if ALL of the following hold: `classification.complexity == "simple"`, `classification.risk == "low"`, total tasks across all phases ≤ 2, total phases == 1, and no `<secondary-repos>` in the plan. If ALL conditions hold → skip the DA entirely, log "DA skipped — simple/low-risk plan", and proceed directly to Step 7 (or Step 7i for inline path). If any condition fails → run DA normally as described below.
+**DA auto-skip**: Before launching the DA agent, check: if `(complexity == "simple") OR (risk == "low" AND total tasks across all phases ≤ 3)` → skip the DA, log "DA skipped — simple plan" or "DA skipped — low-risk plan with ≤3 tasks" (as appropriate), and proceed directly to Step 7 (or Step 7i for inline path). **Exception**: plans with `<secondary-repos>` always get DA regardless of classification. If the skip condition does not hold → run DA normally as described below.
 
 **Launch**: 1 Explore agent (Agent tool with `subagent_type="Explore"`, thoroughness "very thorough") with adversarial mandate. The agent receives:
 - Solution approach from Step 6
-- Proposed specs from Step 3b
+- Proposed specs from Step 6
 - `<relevant-files>` list from the emerging plan
 - Explore-cache content from `.devorch/explore-cache-<name>.md`
 - CONVENTIONS.md content (if exists)
@@ -391,7 +361,7 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 - If no `## Build Report` is found in a builder's output, skip silently (backward compatible with older builders).
 - Store the parsed report content keyed by task-id for aggregation in the final verification report (step 10i).
 
-**Per-task contract verification** — After Build Report extraction, verify each completed task's implementation against its spec contracts:
+**Per-task contract verification** — After Build Report extraction, check the plan classification. If `complexity == "simple" AND risk == "low"`, skip the entire verification block and log: "Contract verification skipped — simple/low plan". Otherwise, verify each completed task's implementation against its spec contracts:
 
 1. For each completed task in the wave, check if the task body (from `tasks[taskId]` in init-phase output) contains an explicit `**Spec refs**:` field with a non-empty value. If absent or empty, log "No explicit spec refs for `<taskId>` — skipping contract verification" and skip to the next task.
 2. Find the builder's commit hash: run `git -C <projectRoot> log --oneline --format="%H %s" -20` and search for a commit message containing the task ID. Extract the hash. If no match found, log "No commit found for task `<taskId>` — skipping contract verification" and skip.
@@ -512,62 +482,17 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
 
 **On SUCCESS** (all checks pass, no talk-level issues):
 
-1. **Pre-flight stash**: Run `git -C <mainRoot> status --porcelain` and filter out lines starting with `??` (untracked files). If any tracked changes remain:
+1. **Merge via script**: Run:
    ```bash
-   git -C <mainRoot> stash push -m "devorch-pre-merge" -- ':!.devorch/'
+   bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts --worktree-path <projectRoot> --main-root <mainRoot> --original-branch <originalBranch> --branch-name devorch/<name>
    ```
-   Record that the repo was stashed. If no tracked changes exist, skip stash and record as clean.
+   Parse the JSON output. Route by `status`:
+   - **`"success"`**: Report merged repos from `mergedRepos`. If `selfBuildNeeded` is `true` AND `<mainRoot>/install.ts` exists: log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`.
+   - **`"conflict"`**: Report conflict in `conflictRepo` with files from `conflictFiles`. Stop — do NOT continue.
+   - **`"stash-conflict"`**: Report conflicting files from `conflictFiles`. Instruct user: "Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue.
+   - **`"error"`**: Report `error` message. Stop — do NOT continue.
 
-2. **Untracked file guard** — Before dry-running, detect untracked files in the main repo that would conflict with the incoming branch:
-   ```bash
-   git -C <mainRoot> diff --name-only <originalBranch>..devorch/<name>
-   git -C <mainRoot> ls-files --others --exclude-standard
-   ```
-   Compute the intersection of both lists. If the intersection is non-empty:
-   ```bash
-   git -C <mainRoot> add <conflicting-files>
-   git -C <mainRoot> commit -m "chore: track files before devorch merge"
-   ```
-   If the intersection is empty, skip this step and proceed directly to the dry-run.
-
-3. **Dry-run merge**:
-   ```bash
-   git -C <mainRoot> merge --no-commit --no-ff devorch/<name>
-   git -C <mainRoot> merge --abort
-   ```
-   If dry-run fails and the repo was stashed: run `git -C <mainRoot> stash pop` to restore changes. Report the conflict between branches and stop.
-
-4. **Merge**:
-   ```bash
-   git -C <mainRoot> checkout <originalBranch>
-   git -C <mainRoot> merge devorch/<name>
-   ```
-
-5. **Restore stash**: If the repo was stashed:
-   ```bash
-   git -C <mainRoot> stash pop
-   ```
-   If `stash pop` fails (exit code != 0): run `git -C <mainRoot> status --porcelain` to list conflicting files. Report to the user: "Stash pop conflict: `<file list>`. Resolve manually with `git mergetool` or edit the files, then `git add` and `git stash drop`." Stop — do NOT continue cleanup.
-
-6. **Self-build reinstall** — Run `git -C <mainRoot> diff --name-only <originalBranch>..HEAD` and check if any changed file path starts with `scripts/`, `agents/`, `commands/`, or `hooks/`. If a match is found AND `<mainRoot>/install.ts` exists (confirms this is the devorch repo): log "devorch scripts updated — running install" and run `bun run install` in `<mainRoot>`. If no match or `install.ts` doesn't exist, skip this step.
-
-7. **Fix migration journal** (Drizzle projects only):
-   Run `bun $CLAUDE_HOME/devorch-scripts/fix-migration-journal.ts --root <mainRoot>`. If `fixed > 0`, the journal was corrected — include the journal file in the cleanup commit. This prevents silent migration skips when worktrees generate migrations with out-of-order timestamps.
-
-8. **Post-merge cleanup**:
-   - Run `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <worktreePath>/.devorch/plans/<name>.md --target-root <mainRoot>` to archive the plan.
-   - Delete `.devorch/state.md` from the main repo if it exists.
-   - Delete `.devorch/explore-cache-<name>.md` from the main repo if it exists. Also delete `.devorch/explore-cache.md` if it exists (backward compat cleanup).
-   - Delete `.devorch/project-map.md` from the main repo if it exists.
-   - Run `git -C <mainRoot> status --porcelain .devorch/`. If there are changes, commit: `chore(devorch): cleanup post-merge <plan name>`
-
-9. **Remove worktree**:
-   ```bash
-   git -C <mainRoot> worktree remove --force <projectRoot>
-   git -C <mainRoot> branch -d devorch/<name>
-   ```
-
-10. Report verdict using the same format as build command step 3d:
+2. Report verdict using the same format as build command step 3d:
    ```
    ## Verificação Final: <plan name>
 
