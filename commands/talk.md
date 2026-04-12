@@ -107,6 +107,8 @@ Use `AskUserQuestion` to eliminate **every** ambiguity, gray area, and open ques
 - **Naming / conventions** — When the codebase doesn't have a clear precedent for something, ask.
 - **Contracts & specs** — What are the input/output contracts? What error cases must be handled? What invariants must hold? What API shapes are needed?
 - **Edge cases** — Anything the exploration revealed that has no obvious right answer.
+- **Security** — Para endpoints que criam, atualizam ou deletam dados: quem pode chamar cada um? O que acontece se um usuário não autorizado chamar? Ownership check necessário? Ask this whenever plan relevant-files include route/API/middleware files OR the plan type is feature/enhancement touching data mutations.
+- **Shared types** — When Explore agents detect a shared types directory (`shared/`, `shared/api/`, etc.) AND the plan involves a sibling/satellite repo: ask whether builders should import from shared types instead of creating local definitions. Include as plan invariant if user confirms.
 - **Multi-repo** — When the task involves or mentions multiple projects/repos, ask which secondary repos should be included as satellites. Present discovered repo paths as options. Each satellite gets its own worktree with the same branch name.
 - **Sibling repos (automatic)** — If the map-project.ts output from Step 1 contains a "## Sibling Repos" section, include a question asking which of those repos should be satellites for this plan. List each detected repo as an option (name + relative path). Always include the option "Nenhum — só o repo principal" as the last choice. This question should appear even if the user did not explicitly mention multi-repo.
 
@@ -185,6 +187,10 @@ After the solution design is complete, launch an adversarial challenge to surfac
 - **Wave/task conflicts** — shared file risks, hidden dependencies between parallel tasks
 - **Spec gaps** — missing error cases, undefined edge behaviors, incomplete contracts
 - **Regression risks** — existing functionality that may break, with file evidence
+
+**Additional mandate items** (include when applicable):
+- **Auth coverage** — For every mutating endpoint (POST/DELETE/PATCH/PUT) found in `<relevant-files>`, verify an auth `<error-contract>` exists in the specs. Report as spec gap if missing.
+- **Shared type shadows** — If the plan has `<secondary-repos>`, verify satellite tasks reference shared types from the primary repo rather than defining local shadow types. Report as spec gap if local definitions duplicate shared schemas.
 
 **Explore-cache constraint**: The DA must NOT contradict findings from the explore-cache without NEW code evidence not present in the cache. Findings confirmed by explore-cache with file evidence are established facts — accept them and focus on risks NOT already covered by the exploration. Before reporting a finding, verify it is not already confirmed or refuted by the explore-cache.
 
@@ -633,6 +639,13 @@ Risk: <risk>
 </secondary-repos>
 </relevant-files>
 
+<!-- optional — cross-cutting invariants: -->
+<global-invariants>
+Cross-cutting invariants that apply to all phases (e.g., API envelope format, auth patterns, error code registry).
+Validated structurally but not yet delivered per-task to builders.
+- invariant description
+</global-invariants>
+
 <phase1 name="Name">
 <goal>one sentence</goal>
 
@@ -654,6 +667,11 @@ Risk: <risk>
   <request>schema or description</request>
   <response status="NNN">schema or description</response>
 </endpoint>
+<entity name="EntityName">
+  <field name="fieldName" type="string" />
+  <relationship target="OtherEntity" type="belongs-to" />
+  <constraint>business rule or validation that must hold</constraint>
+</entity>
 </spec>
 
 <!-- optional — directed exploration for build phase: -->
@@ -705,10 +723,11 @@ Risk: <risk>
 
 ### Plan Format Rules
 
-- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only)
+- Tags used at top-level: `<description>`, `<objective>`, `<classification>`, `<decisions>`, `<problem-statement>` (medium/complex), `<solution-approach>` (medium/complex), `<relevant-files>`, `<new-files>` (nested in relevant-files), `<secondary-repos>` (nested in relevant-files, optional — multi-repo plans only), `<global-invariants>` (optional — cross-cutting invariants that apply to all phases, validated structurally but not yet delivered per-task to builders)
 - Phase tags: `<phaseN name="...">` where N is sequential integer
 - Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
-- Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`. All names must be unique within a phase.
+- Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`, `<entity name>`. All names must be unique within a phase.
+- Entity element: `<entity name="...">` requires `name` attribute and at least one child element (`<field>`, `<relationship>`, or `<constraint>`). `<field>` requires `name` attribute. `<relationship>` requires `target` attribute. `<constraint>` requires non-empty body text.
 - Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (optional — `sonnet` or `opus`, default: `opus`), `**Effort**` (optional — `low`, `medium`, or `high`, default: `medium`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
 - Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high.
 - Endpoint spec refs use the auto-generated `METHOD-/path` format (e.g., `GET-/api/health`) matching the `<endpoint path method>` tag attributes.
