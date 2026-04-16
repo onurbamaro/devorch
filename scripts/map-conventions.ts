@@ -7,7 +7,7 @@
  */
 import { existsSync, readFileSync } from "fs";
 import { join, extname, relative } from "path";
-import { Project, SyntaxKind } from "ts-morph";
+import { Project } from "ts-morph";
 import { collectSampleFiles, LINES_TO_READ } from "./lib/fs-utils";
 
 // Positional arg (shared lib doesn't handle positional args)
@@ -202,14 +202,10 @@ for (const file of samples) {
 
 // --- ts-morph AST analysis ---
 interface TsMorphFindings {
-  functionSignatures: { file: string; name: string; signature: string }[];
-  importClusters: Map<string, number>;
   moduleExports: { file: string; exportCount: number }[];
 }
 
 const tsMorphFindings: TsMorphFindings = {
-  functionSignatures: [],
-  importClusters: new Map(),
   moduleExports: [],
 };
 
@@ -227,53 +223,6 @@ function runTsMorphAnalysis() {
     const rel = relative(cwd, file);
     try {
       const sourceFile = project.addSourceFileAtPath(file);
-
-      // Extract function signatures
-      for (const fn of sourceFile.getFunctions()) {
-        const name = fn.getName() ?? "(anonymous)";
-        const params = fn.getParameters().map((p) => {
-          const typeText = p.getTypeNode()?.getText() ?? p.getType().getText();
-          return `${p.getName()}: ${typeText}`;
-        }).join(", ");
-        const ret = fn.getReturnTypeNode()?.getText() ?? fn.getReturnType().getText();
-        const asyncPrefix = fn.isAsync() ? "async " : "";
-        tsMorphFindings.functionSignatures.push({
-          file: rel,
-          name,
-          signature: `${asyncPrefix}${name}(${params}): ${ret}`,
-        });
-      }
-
-      // Extract arrow function signatures from variable declarations
-      for (const stmt of sourceFile.getVariableStatements()) {
-        if (!stmt.isExported()) continue;
-        for (const decl of stmt.getDeclarations()) {
-          const init = decl.getInitializerIfKind(SyntaxKind.ArrowFunction);
-          if (!init) continue;
-          const name = decl.getName();
-          const params = init.getParameters().map((p) => {
-            const typeText = p.getTypeNode()?.getText() ?? p.getType().getText();
-            return `${p.getName()}: ${typeText}`;
-          }).join(", ");
-          const ret = init.getReturnTypeNode()?.getText() ?? init.getReturnType().getText();
-          const asyncPrefix = init.isAsync() ? "async " : "";
-          tsMorphFindings.functionSignatures.push({
-            file: rel,
-            name,
-            signature: `${asyncPrefix}${name}(${params}): ${ret}`,
-          });
-        }
-      }
-
-      // Import clusters
-      for (const imp of sourceFile.getImportDeclarations()) {
-        const from = imp.getModuleSpecifierValue();
-        const key = from.startsWith(".") ? "(relative)" : from.split("/")[0];
-        tsMorphFindings.importClusters.set(
-          key,
-          (tsMorphFindings.importClusters.get(key) || 0) + 1
-        );
-      }
 
       // Module export count
       const exportCount = sourceFile.getExportedDeclarations().size;
@@ -369,56 +318,20 @@ if (errorStats.tryCatch > 0 || errorStats.processExit > 0) {
   push("- No explicit error handling detected in sampled files");
 }
 
-// --- Patterns section (enhanced with ts-morph) ---
+// --- Patterns section ---
 heading("Patterns");
 
-// Import clusters from ts-morph
-if (tsMorphFindings.importClusters.size > 0) {
-  const sorted = [...tsMorphFindings.importClusters.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-  push("**Import clusters** (most frequent):");
-  for (const [mod, count] of sorted) {
-    push(`- \`${mod}\`: ${count} imports`);
-  }
-  push("");
-}
-
-// Function signatures by pattern
-if (tsMorphFindings.functionSignatures.length > 0) {
-  const asyncFns = tsMorphFindings.functionSignatures.filter((f) => f.signature.startsWith("async"));
-  const syncFns = tsMorphFindings.functionSignatures.filter((f) => !f.signature.startsWith("async"));
-
-  push("**Function signatures** (from AST):");
-  const showSigs = tsMorphFindings.functionSignatures.slice(0, 15);
-  for (const sig of showSigs) {
-    push(`- \`${sig.signature}\` (\`${sig.file}\`)`);
-  }
-  if (tsMorphFindings.functionSignatures.length > 15) {
-    push(`- ... and ${tsMorphFindings.functionSignatures.length - 15} more`);
-  }
-  push("");
-  push(`Async/sync ratio: ${asyncFns.length} async, ${syncFns.length} sync`);
-  push("");
-}
-
-// Module boundaries
+// Module boundaries (top 5)
 if (tsMorphFindings.moduleExports.length > 0) {
   const sorted = tsMorphFindings.moduleExports
     .sort((a, b) => b.exportCount - a.exportCount)
-    .slice(0, 8);
+    .slice(0, 5);
   push("**Module boundaries** (exports per file):");
   for (const mod of sorted) {
     push(`- \`${mod.file}\`: ${mod.exportCount} exports`);
   }
   push("");
-}
-
-// Fallback if no ts-morph findings
-if (
-  tsMorphFindings.importClusters.size === 0 &&
-  tsMorphFindings.functionSignatures.length === 0
-) {
+} else {
   push("- No AST-level patterns extracted (ts-morph analysis unavailable or no TS files)");
 }
 
