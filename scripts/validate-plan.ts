@@ -198,6 +198,15 @@ if (classBlock) {
   if (!/Risk:\s*(low|medium|high)/i.test(classBlock)) {
     errors.push("Classification: missing or invalid Risk. Must be one of: low, medium, high");
   }
+
+  // Optional Fast-path field: true | false | absent (treated as false)
+  const fastPathMatch = classBlock.match(/^\s*Fast-path:\s*(\S+)\s*$/im);
+  if (fastPathMatch) {
+    const value = fastPathMatch[1];
+    if (value !== "true" && value !== "false") {
+      errors.push(`Invalid Fast-path value in classification: expected 'true' or 'false', got '${value}'`);
+    }
+  }
 }
 
 // --- Check conditional sections for medium/complex ---
