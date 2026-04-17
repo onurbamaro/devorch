@@ -64,6 +64,7 @@ if (!targetPhase) {
 }
 
 const planTitle = extractPlanTitle(content);
+const planFastPath = parseFastPath(content);
 
 // --- Extract plan-level fields ---
 const objective = extractTagContent(content, "objective") || "";
@@ -246,7 +247,7 @@ function parseConventionSections(conventionsText: string): Array<{ header: strin
 
 // --- Extension-to-convention matching map ---
 const EXT_KEYWORDS: Record<string, string[]> = {
-  ".ts": ["typescript", "ts", "script", "naming", "export", "import", "style", "error", "pattern", "async", "bun", "testing", "gotcha", "workaround"],
+  ".ts": ["typescript", "ts", "script", "naming", "export", "import", "style", "error", "pattern", "async", "bun", "workaround"],
   ".tsx": ["typescript", "ts", "tsx", "react", "component", "style", "jsx", "naming", "export", "import", "pattern"],
   ".js": ["javascript", "js", "script", "naming", "export", "import", "style", "pattern"],
   ".jsx": ["javascript", "js", "jsx", "react", "component", "style"],
@@ -255,6 +256,21 @@ const EXT_KEYWORDS: Record<string, string[]> = {
   ".scss": ["style", "scss", "css"],
   ".json": ["json", "package", "config"],
 };
+
+const FAST_PATH_WHITELIST = ["## Naming", "## Exports & Imports", "## Style", "## Error Handling", "## Patterns"];
+
+function shouldIncludeTesting(taskContent: string, taskRefs: Set<string>): boolean {
+  for (const ref of taskRefs) {
+    if (/\.(test|spec)\.[tj]sx?$/i.test(ref)) return true;
+  }
+  return /\btest\b|\bspec\b/i.test(taskContent);
+}
+
+function parseFastPath(planContent: string): boolean {
+  const classBlock = extractTagContent(planContent, "classification") || "";
+  const match = classBlock.match(/^\s*Fast-path:\s*(true|false)\s*$/im);
+  return match ? match[1].toLowerCase() === "true" : false;
+}
 
 function filterConventionsForTask(conventionsText: string, taskExts: Set<string>): string[] {
   if (!conventionsText || taskExts.size === 0) return [];
@@ -418,8 +434,10 @@ async function runMapProject(): Promise<string> {
   if (isProjectMapFresh()) {
     return safeReadFile(projectMapPath);
   }
+  const mapArgs = ["bun", resolve(scriptDir, "map-project.ts"), projectRoot];
+  if (planFastPath) mapArgs.push("--compact");
   const mapProc = Bun.spawn(
-    ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
+    mapArgs,
     { cwd: projectRoot, stderr: "pipe" }
   );
   const exitCode = await mapProc.exited;
@@ -542,12 +560,37 @@ const cacheByTask: Record<string, string> = {};
 const specsByTask: Record<string, string> = {};
 const codeStructureByTask: Record<string, string> = {};
 
+const conventionSectionHeaders = new Set(
+  parseConventionSections(conventions)
+    .map((s) => s.header)
+    .filter(Boolean)
+    .map((h) => `## ${h}`),
+);
+
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskExts = extractExtensions(task.content);
-  conventionSectionsByTask[taskId] = filterConventionsForTask(conventions, taskExts);
+  let taskSections = filterConventionsForTask(conventions, taskExts);
 
   const taskRefs = extractFileRefs(task.content);
   cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
+
+  // Contextual Testing re-inclusion (after tightened EXT_KEYWORDS)
+  if (
+    conventionSectionHeaders.has("## Testing") &&
+    !taskSections.includes("## Testing") &&
+    shouldIncludeTesting(task.content, taskRefs)
+  ) {
+    taskSections.push("## Testing");
+  }
+
+  // Fast-path whitelist: intersection with filtered set AND sections present in conventionsText
+  if (planFastPath) {
+    taskSections = FAST_PATH_WHITELIST.filter(
+      (h) => taskSections.includes(h) && conventionSectionHeaders.has(h),
+    );
+  }
+
+  conventionSectionsByTask[taskId] = taskSections;
 
   // Extract **Spec refs** from task content; if present, filter specs; otherwise include full spec section
   const specRefsMatch = task.content.match(/\*\*Spec refs\*\*:\s*(.+)/);

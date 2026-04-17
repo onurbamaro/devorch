@@ -15,6 +15,8 @@ Conversation, exploration, and structured planning for devorch projects.
 
 **Project data**: Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect tech stack, folder structure, dependencies, and scripts. Use this output as inline context — do not save it to a file. If the script fails (no Bun, etc.), gather equivalent data via an Explore agent.
 
+**Fast-path compact invocation**: If the fast-path condition (defined in Step 2 — specific file paths, explicit action, sufficient context) will be triggered by $ARGUMENTS, invoke map-project.ts with the additional argument `--compact` (e.g., `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --compact`). This reduces tree depth to 3 levels, omits Recent Commits, and limits Dependencies to top-5 — cutting injected context significantly while preserving actionable signal. When fast-path is not triggered, invoke map-project.ts without the flag (standard output).
+
 **New project detection**: If map-project.ts output shows no source code files and no dependencies (empty or scaffold-only project), enter discovery mode:
 
 1. **Product discovery** — Use `AskUserQuestion` (2-3 questions at a time, adaptive):
@@ -69,6 +71,8 @@ Store this as `<name>` for all subsequent steps.
 ### 2. Explore
 
 **Fast-path condition**: If $ARGUMENTS contains ALL of: (1) specific file path references, (2) an explicit action (fix, change, update, rename, add, remove), and (3) sufficient context to implement without discovery — reduce this step to 1 Explore agent at "medium" thoroughness (not "very thorough") with a single combined focus. Also reduce Step 3 (Clarify) to 1 confirmative round. Otherwise, proceed with the standard exploration below.
+
+**Fast-path classification marker**: When the fast-path condition is triggered, the orchestrator MUST include the line `Fast-path: true` inside the `<classification>` block of the plan emitted in Step 7/7i. This marker is how downstream consumers (validate-plan, init-phase) detect fast-path sessions and apply propagated context reductions. When fast-path is not triggered, omit the `Fast-path` line entirely (validate-plan accepts absence as equivalent to `false`) or emit `Fast-path: false` explicitly.
 
 **Standard exploration**: Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
 
@@ -588,6 +592,7 @@ Plans use XML tags for structure. The format below is the **complete specificati
 Type: <type>
 Complexity: <complexity>
 Risk: <risk>
+Fast-path: <true|false>  <!-- optional — include only when fast-path condition was triggered in Step 2 -->
 </classification>
 
 <decisions>
@@ -708,7 +713,7 @@ Validated structurally but not yet delivered per-task to builders.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`, `<entity name>`. All names must be unique within a phase.
 - Entity element: `<entity name="...">` requires `name` attribute and at least one child element (`<field>`, `<relationship>`, or `<constraint>`). `<field>` requires `name` attribute. `<relationship>` requires `target` attribute. `<constraint>` requires non-empty body text.
 - Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (always `opus`), `**Effort**` (always `high`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
-- Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high.
+- Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high. Fast-path: optional | true | false | when omitted, treated as false.
 - Endpoint spec refs use the auto-generated `METHOD-/path` format (e.g., `GET-/api/health`) matching the `<endpoint path method>` tag attributes.
 
 ## Feedback logging (INLINE PATH only)

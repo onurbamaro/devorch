@@ -1,7 +1,8 @@
 /**
  * map-project.ts — Collects project info and outputs ~80 lines of Markdown.
- * Usage: bun ~/.claude/devorch-scripts/map-project.ts [project-dir] [--persist]
+ * Usage: bun ~/.claude/devorch-scripts/map-project.ts [project-dir] [--persist] [--compact]
  * --persist: writes output to .devorch/project-map.md in addition to stdout.
+ * --compact: reduces context for fast-path (3-level tree, no Recent Commits, top-5 deps).
  */
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { join, basename, dirname, resolve, relative } from "path";
@@ -9,15 +10,22 @@ import { join, basename, dirname, resolve, relative } from "path";
 // Positional + flag args (shared lib doesn't handle positional args)
 let cwd = process.cwd();
 let persist = false;
+let compact = false;
 
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === "--persist") {
     persist = true;
+  } else if (argv[i] === "--compact") {
+    compact = true;
   } else if (!argv[i].startsWith("--")) {
     cwd = argv[i];
   }
 }
+
+const MAX_TREE_DEPTH = compact ? 3 : Infinity;
+const DEP_LIMIT = compact ? 5 : 15;
+const DEV_DEP_LIMIT = compact ? 5 : 10;
 
 const lines: string[] = [];
 const push = (s: string) => lines.push(s);
@@ -106,6 +114,8 @@ const IGNORE = new Set([
 ]);
 
 function listDir(dir: string, depth: number, prefix: string): void {
+  if (depth > MAX_TREE_DEPTH) return;
+
   let entries: import("fs").Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true }).filter(
@@ -133,27 +143,27 @@ push(`${basename(cwd)}/`);
 listDir(cwd, 1, "  ");
 push("```");
 
-// --- Dependencies (top 15, using cached pkg) ---
+// --- Dependencies (top N, using cached pkg) ---
 if (pkg) {
-  heading("Dependencies (top 15)");
+  heading(`Dependencies (top ${DEP_LIMIT})`);
   const deps = Object.keys(pkg.dependencies || {});
   const devDeps = Object.keys(pkg.devDependencies || {});
 
   if (deps.length > 0) {
     push("**Production:**");
-    for (const d of deps.slice(0, 15)) {
+    for (const d of deps.slice(0, DEP_LIMIT)) {
       push(`- ${d}: ${pkg.dependencies[d]}`);
     }
-    if (deps.length > 15) push(`- ... +${deps.length - 15} more`);
+    if (deps.length > DEP_LIMIT) push(`- ... +${deps.length - DEP_LIMIT} more`);
   }
 
   if (devDeps.length > 0) {
     push("");
     push("**Dev:**");
-    for (const d of devDeps.slice(0, 10)) {
+    for (const d of devDeps.slice(0, DEV_DEP_LIMIT)) {
       push(`- ${d}: ${pkg.devDependencies[d]}`);
     }
-    if (devDeps.length > 10) push(`- ... +${devDeps.length - 10} more`);
+    if (devDeps.length > DEV_DEP_LIMIT) push(`- ... +${devDeps.length - DEV_DEP_LIMIT} more`);
   }
 }
 
@@ -194,24 +204,26 @@ if (existsSync(makefilePath)) {
   }
 }
 
-// --- Git log (last 10 commits) ---
-heading("Recent Commits");
+// --- Git log (last 10 commits) — omitted in compact mode ---
+if (!compact) {
+  heading("Recent Commits");
 
-try {
-  const result = Bun.spawnSync(
-    ["git", "log", "--oneline", "-10", "--no-decorate"],
-    { cwd, stderr: "pipe" }
-  );
-  const output = result.stdout.toString().trim();
-  if (output) {
-    push("```");
-    push(output);
-    push("```");
-  } else {
-    push("(no git history or not a git repo)");
+  try {
+    const result = Bun.spawnSync(
+      ["git", "log", "--oneline", "-10", "--no-decorate"],
+      { cwd, stderr: "pipe" }
+    );
+    const output = result.stdout.toString().trim();
+    if (output) {
+      push("```");
+      push(output);
+      push("```");
+    } else {
+      push("(no git history or not a git repo)");
+    }
+  } catch {
+    push("(git not available)");
   }
-} catch {
-  push("(git not available)");
 }
 
 // --- Sibling repos detection ---
