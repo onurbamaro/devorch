@@ -474,7 +474,11 @@ if (phases.length === 0) {
       warnings.push(...checkSpecConcreteness(specContent));
     }
 
-    // --- Model and Effort validation ---
+    // --- Assigned To, Model, and Effort validation ---
+    // Allowlist mirrors the two builder variants documented in docs/PLAN-FORMAT.md § Model/Effort policy.
+    // Kept as a warning (not error) so plans can experiment with custom builder agents — runtime dispatch
+    // in /devorch F3c falls back to devorch-builder-deep when an agent fails to resolve.
+    const validAgents = new Set(["devorch-builder-deep", "devorch-builder-mech"]);
     const validModels = new Set(["sonnet", "opus", "haiku"]);
     const validEfforts = new Set(["low", "medium", "high", "xhigh"]);
 
@@ -482,6 +486,11 @@ if (phases.length === 0) {
     for (const section of taskSectionsForME.slice(1)) {
       const taskIdMatchME = section.match(/\*\*ID\*\*:\s*(\S+)/i);
       const tid = taskIdMatchME ? taskIdMatchME[1] : "unknown";
+
+      const assignedMatch = section.match(/\*\*Assigned To\*\*:\s*(\S+)/i);
+      if (assignedMatch && !validAgents.has(assignedMatch[1])) {
+        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Assigned To "${assignedMatch[1]}" (expected: ${[...validAgents].join(", ")})`);
+      }
 
       const modelMatch = section.match(/\*\*Model\*\*:\s*(\S+)/i);
       if (modelMatch && !validModels.has(modelMatch[1].toLowerCase())) {

@@ -254,6 +254,8 @@ After each wave returns: verify task completion via `TaskList`, extract `## Buil
 
 **On builder escalation** (build report contains `Model fit: wrong agent — needs builder-deep`, and no commit was made): do not count as a failure. Re-dispatch the same task to `devorch-builder-deep` immediately (no `## Previous Failure Context` — the task was not attempted). If `devorch-builder-deep` also escalates, treat as a failure and follow the 3-attempt retry rule on `devorch-builder-deep`.
 
+**On agent resolution failure** (Task tool returns `Agent type ... not found` or equivalent for the chosen `subagent_type`, and no commit was made): the agent is not registered in the current Claude Code session — typically because the agent was installed after the session started and agent registration is session-scoped. Do not count as a task failure or consume a retry slot. Log one line (`dispatcher: <agent> unresolvable in session — falling back to devorch-builder-deep`) and immediately re-dispatch the same task to `devorch-builder-deep`. If `devorch-builder-deep` itself fails to resolve, stop the phase and surface the session-registration issue to the user (suggest restarting Claude Code after `bun install.ts`).
+
 #### F3d. Per-phase check
 If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
 
