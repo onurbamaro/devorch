@@ -46,7 +46,7 @@ Field semantics:
 - **Correção sugerida** — one line, direction not prescription.
 - **Ação** — three checkboxes, exactly one checked by the user:
   - `fix-now` — include in current plan's follow-up commit
-  - `new-plan` — spawn a new plan via `/d "fix flag: <title>"`
+  - `new-plan` — spawn a new plan via `/devorch "fix flag: <title>"`
   - `ciente-deixar` — acknowledge and leave; counts toward silence
 
 ## Lifecycle
@@ -55,15 +55,15 @@ Field semantics:
    final adversarial review, even if empty (file contains only the
    header). `scoped` and `quick` modes create the file lazily, the first
    time the guardian detects an adjacent item.
-2. **Append-only during execution** — if a later phase or a later `/d`
+2. **Append-only during execution** — if a later phase or a later `/devorch`
    invocation against the same plan detects new items, entries are
    appended. Existing entries with user-checked actions are not rewritten.
 3. **User edits actions** — the user opens the file and checks one box
    per entry. No orchestrator intervention required.
-4. **Next `/d` run reads actions** — on startup, the orchestrator scans
+4. **Next `/devorch` run reads actions** — on startup, the orchestrator scans
    `.devorch/flags-*.md` for checked boxes:
    - `fix-now` → queues the fix into the current request's task list
-   - `new-plan` → shells out to `/d "fix flag: <title>"` after confirmation
+   - `new-plan` → shells out to `/devorch "fix flag: <title>"` after confirmation
    - `ciente-deixar` → increments silence counter for the pattern
 5. **Archival** — when the plan is merged via `/devorch:worktrees merge`,
    its flags file is moved to `.devorch/archive/flags-<plan>-<date>.md`
@@ -115,7 +115,7 @@ times unless they actively fix or reactivate.
 
 Two entry points:
 
-- `/d --flags` — lists pending flags across all plans in the project,
+- `/devorch --flags` — lists pending flags across all plans in the project,
   grouped by severity. Read-only; does not modify files.
 - Direct file read — `.devorch/flags-*.md` is plain markdown, greppable.
   CI can parse it for dashboard metrics if desired.

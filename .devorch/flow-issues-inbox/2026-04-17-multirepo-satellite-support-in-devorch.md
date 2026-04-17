@@ -1,4 +1,4 @@
-# Flow issue: Multi-repo satellite support missing in /d --full
+# Flow issue: Multi-repo satellite support missing in /devorch --full
 
 **Captured**: 2026-04-17
 **Origin session**: v3 design + implementation
@@ -8,15 +8,15 @@
 ## Ready-to-paste prompt
 
 ```
-/d --full "Add satellite-repo support to /d --full (Phase 1 only). Detect <secondary-repos> in the drafted plan, create satellite worktrees via setup-worktree.ts (use existing --secondary or --add-secondary API), pass --satellites '<json>' to phase-summary.ts (already supported), and extend merge-worktree.ts to accept --satellites '<json>' with sequential merge across repos (adopt the dry-run-all-first pattern from commands/worktrees.md § 3a). Do NOT implement proactive multi-repo detection (Phase 2) or atomic coordinated rollback (Phase 3) in this task — they are follow-ups."
+/devorch --full "Add satellite-repo support to /devorch --full (Phase 1 only). Detect <secondary-repos> in the drafted plan, create satellite worktrees via setup-worktree.ts (use existing --secondary or --add-secondary API), pass --satellites '<json>' to phase-summary.ts (already supported), and extend merge-worktree.ts to accept --satellites '<json>' with sequential merge across repos (adopt the dry-run-all-first pattern from commands/worktrees.md § 3a). Do NOT implement proactive multi-repo detection (Phase 2) or atomic coordinated rollback (Phase 3) in this task — they are follow-ups."
 ```
 
 ## Context
 
-- **Where**: `commands/d.md § F1` + `§ F7` + `scripts/merge-worktree.ts`
-- **What happened**: `/d --full` does not create satellite worktrees and does not pass the `--satellites` JSON to downstream scripts. If a plan declares `<secondary-repos>`, `init-phase.ts` exits with `Satellite worktree for '<name>' not found at ...`.
-- **Expected**: `/d --full` should match the v2 multi-repo flow (`/devorch:talk` → `/devorch:build` → `/devorch:worktrees merge` coordinated).
-- **Workaround used**: documented explicitly in `commands/d.md § F7` — users route multi-repo through `/devorch:worktrees` (v2) for now.
+- **Where**: `commands/devorch.md § F1` + `§ F7` + `scripts/merge-worktree.ts`
+- **What happened**: `/devorch --full` does not create satellite worktrees and does not pass the `--satellites` JSON to downstream scripts. If a plan declares `<secondary-repos>`, `init-phase.ts` exits with `Satellite worktree for '<name>' not found at ...`.
+- **Expected**: `/devorch --full` should match the v2 multi-repo flow (`/devorch:talk` → `/devorch:build` → `/devorch:worktrees merge` coordinated).
+- **Workaround used**: documented explicitly in `commands/devorch.md § F7` — users route multi-repo through `/devorch:worktrees` (v2) for now.
 
 ## Phased approach
 

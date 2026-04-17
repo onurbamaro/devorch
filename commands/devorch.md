@@ -249,7 +249,7 @@ Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single me
 Classify each finding:
 - **Trivial** (1–2 files, obvious fix) → apply inline with Edit.
 - **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder-deep` agents in parallel.
-- **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested `/d --full` prompt.
+- **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested `/devorch --full` prompt.
 
 Skip review execution entirely if all reviewers and residual scan reported zero findings. After fixes, run `check-project.ts <projectRoot>` (full if fix-level launched, `--quick` if trivial only). One retry on failure.
 
@@ -274,7 +274,7 @@ Flags: <count — ver .devorch/flags-<name>.md ou "nenhuma">
 Lint / Typecheck / Build / Tests: status
 
 ### Issues Pendentes
-<talk-level items com prompt /d --full sugerido ou "Nenhum">
+<talk-level items com prompt /devorch --full sugerido ou "Nenhum">
 
 ### Verdict: PASS / PASS com N pendências / FAIL
 ```
@@ -291,13 +291,13 @@ Optional flags: `--squash` (orchestrator must commit manually after), `--keep-br
 
 Parse JSON output and route by `ok`:
 - `ok: true` → report `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`, `planArchivedTo`. Done.
-- `ok: false` with conflict details → surface the conflicting files; worktree is preserved. Suggest manual resolution or `/d --resume`.
+- `ok: false` with conflict details → surface the conflicting files; worktree is preserved. Suggest manual resolution or `/devorch --resume`.
 
-**Multi-repo limitation**: `/d --full` does not orchestrate satellite-repo merges in this iteration. If the plan declared `<secondary-repos>`, the v3 merge-worktree script handles only the primary. Use `/devorch:worktrees` (v2 command) for the coordinated multi-repo merge flow.
+**Multi-repo limitation**: `/devorch --full` does not orchestrate satellite-repo merges in this iteration. If the plan declared `<secondary-repos>`, the v3 merge-worktree script handles only the primary. Use `/devorch:worktrees` (v2 command) for the coordinated multi-repo merge flow.
 
 Plan archival is done inside `merge-worktree.ts`. Self-build install (when the project is devorch itself) is also handled inside the script. Nothing extra to run.
 
-On FAIL → do not merge, preserve worktree, suggest `/d --resume` to retry or `/d --full "<fix description>"` for a new attempt.
+On FAIL → do not merge, preserve worktree, suggest `/devorch --resume` to retry or `/devorch --full "<fix description>"` for a new attempt.
 
 ### F8. Feedback (user preferences)
 
@@ -305,7 +305,7 @@ If `<mainRoot>/.devorch/feedback.md` gained entries in this session, append:
 ```
 ### Feedback devorch
 N dificuldades registradas. Para evoluir:
-/d --full Evoluir o devorch baseado em .devorch/feedback.md
+/devorch --full Evoluir o devorch baseado em .devorch/feedback.md
 ```
 
 ### F9. Flow friction capture (all modes — not just full)
@@ -333,17 +333,17 @@ For each friction observed this session, write one file to the inbox directory:
 # Flow issue: <title>
 
 **Captured**: <ISO timestamp>
-**Origin session**: /d <original $ARGUMENTS>
+**Origin session**: /devorch <original $ARGUMENTS>
 **Mode**: quick | scoped | full
 **Severity**: blocker | gap | nit
 
 ## Ready-to-paste prompt
 
-/d <--quick|--full|nothing> "<concrete fix description>"
+/devorch <--quick|--full|nothing> "<concrete fix description>"
 
 ## Context
 
-- Where: <file>:<section> (e.g. commands/d.md § F3b)
+- Where: <file>:<section> (e.g. commands/devorch.md § F3b)
 - What happened: <1-2 lines>
 - Expected: <1 line>
 - Workaround used: <if any>
@@ -359,7 +359,7 @@ For each friction observed this session, write one file to the inbox directory:
 ```
 ### Flow friction capture
 N item(s) registrado(s) em <inbox-path>/.
-Copie os prompts para /d quando for evoluir o devorch.
+Copie os prompts para /devorch quando for evoluir o devorch.
 ```
 
 Keep entries surgical — one friction per file, each readable standalone. The inbox accumulates over time; periodic sweep from the devorch repo clears backlog.

@@ -1,10 +1,10 @@
 ---
-description: "[LEGACY v2] Fix/debug pontual com investigação — prefer /d"
+description: "[LEGACY v2] Fix/debug pontual com investigação — prefer /devorch"
 argument-hint: "<descrição do bug ou tarefa pontual>"
 model: opus
 ---
 
-**LEGACY (v2).** This command is preserved for continuity. For new work, use `/d` — its triage classifies fix-sized tasks into `quick` or `scoped` automatically and runs the same targeted investigation with less ceremony.
+**LEGACY (v2).** This command is preserved for continuity. For new work, use `/devorch` — its triage classifies fix-sized tasks into `quick` or `scoped` automatically and runs the same targeted investigation with less ceremony.
 
 Targeted fix/debug with investigation. Classifies the task, investigates with parallel agents, executes the fix directly, and verifies in parallel.
 

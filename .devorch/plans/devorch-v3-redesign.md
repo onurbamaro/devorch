@@ -51,7 +51,7 @@ final do novo documento.
    `scoped` pula plan formal, mantém enumeração. `full` faz tudo. Custo
    proporcional ao tamanho da tarefa.
 
-## Comando unificado `/d`
+## Comando unificado `/devorch`
 
 Substitui conceitualmente `/devorch:talk` + `/devorch:build` + `/devorch:fix`.
 Mantém `/devorch:worktrees` (list/merge/delete — útil independente).
@@ -59,10 +59,10 @@ Mantém `/devorch:worktrees` (list/merge/delete — útil independente).
 ### Invocação
 
 ```
-/d "<descrição do que fazer>"
-/d --quick "<...>"    # força quick, override
-/d --full "<...>"     # força full, override
-/d --resume           # retoma worktree ativo
+/devorch "<descrição do que fazer>"
+/devorch --quick "<...>"    # força quick, override
+/devorch --full "<...>"     # força full, override
+/devorch --resume           # retoma worktree ativo
 ```
 
 ### Fluxo por modo
@@ -263,12 +263,12 @@ Guardião consulta antes de emitir heads-up — items silenciados passam batido.
 
 ## Migração: v3 alongside v2
 
-Durante transição, `/d` coexiste com `/devorch:talk|build|fix`. Critérios:
+Durante transição, `/devorch` coexiste com `/devorch:talk|build|fix`. Critérios:
 
-- `/d` é o comando novo recomendado para tarefas diárias
+- `/devorch` é o comando novo recomendado para tarefas diárias
 - `/devorch:talk|build|fix` ficam funcionais para retomar plans v2 existentes
 - README documenta os dois e sinaliza qual usar quando
-- Quando `/d` estabilizar, v2 pode ser deprecado em versão major futura
+- Quando `/devorch` estabilizar, v2 pode ser deprecado em versão major futura
 
 Não deletar arquivos v2 nesta iteração.
 
@@ -276,7 +276,7 @@ Não deletar arquivos v2 nesta iteração.
 
 Entregáveis:
 
-1. **`commands/d.md`** — novo comando unificado. Inclui todos os blocos
+1. **`commands/devorch.md`** — novo comando unificado. Inclui todos os blocos
    descritos acima (triage inline, guardião, modos, gate UX, worktree
    policy). Target: ~300-400 linhas (vs 742 de talk.md — enxuto).
 
@@ -290,12 +290,12 @@ Entregáveis:
 4. **`docs/FLAGS.md`** — spec do `.devorch/flags-<plan>.md` e
    `.devorch/standards-silenced.md` com formatos e lifecycle.
 
-5. **`README.md`** — atualização sinalizando coexistência `/d` vs v2,
+5. **`README.md`** — atualização sinalizando coexistência `/devorch` vs v2,
    novo fluxo recomendado, preservação de plans v2 ativos.
 
 Fora do escopo (próximas iterações):
 
-- Implementação de `/d` executando end-to-end (precisa ajustes em scripts)
+- Implementação de `/devorch` executando end-to-end (precisa ajustes em scripts)
 - Deprecação final de `/devorch:talk|build|fix`
 - Changes em `init-phase.ts` para suportar gates de filtro
 - Changes em `validate-plan.ts` para formato v3

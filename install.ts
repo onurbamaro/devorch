@@ -47,14 +47,22 @@ for (const { src, dest, label } of targets) {
   const claudeHomeFwd = CLAUDE_HOME.replaceAll("\\", "/");
   let count = 0;
 
-  function copyDir(srcDir: string, destDir: string) {
+  // For the commands target, `devorch.md` at the root of `commands/` is the
+  // v3 unified entry and must be installed as a top-level slash command at
+  // `~/.claude/commands/devorch.md` — not namespaced under `devorch/`.
+  const isCommands = label === "commands";
+
+  function copyDir(srcDir: string, destDir: string, atRoot = false) {
     mkdirSync(destDir, { recursive: true });
     const entries = readdirSync(srcDir);
     for (const entry of entries) {
+      // Skip the top-level devorch.md inside commands/ — copied separately below.
+      if (atRoot && isCommands && entry === "devorch.md") continue;
+
       const srcEntry = join(srcDir, entry);
       const destEntry = join(destDir, entry);
       if (statSync(srcEntry).isDirectory()) {
-        copyDir(srcEntry, destEntry);
+        copyDir(srcEntry, destEntry, false);
       } else if (entry.endsWith(".md")) {
         const content = readFileSync(srcEntry, "utf-8");
         const processed = content.replaceAll("$CLAUDE_HOME", claudeHomeFwd);
@@ -67,7 +75,20 @@ for (const { src, dest, label } of targets) {
     }
   }
 
-  copyDir(src, dest);
+  copyDir(src, dest, true);
+
+  // Install the v3 top-level /devorch command outside the namespaced folder.
+  if (isCommands) {
+    const topSrc = join(src, "devorch.md");
+    if (existsSync(topSrc)) {
+      const topDest = join(CLAUDE_HOME, "commands", "devorch.md");
+      const content = readFileSync(topSrc, "utf-8");
+      const processed = content.replaceAll("$CLAUDE_HOME", claudeHomeFwd);
+      writeFileSync(topDest, processed);
+      count++;
+      console.log(`  commands/devorch.md -> ${topDest} (top-level /devorch)`);
+    }
+  }
 
   console.log(`  ${label}: ${count} files -> ${dest}`);
   totalFiles += count;
@@ -178,4 +199,4 @@ writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
 
 console.log(`\nInstalled ${totalFiles} files.`);
 console.log("Restart Claude Code for the statusline to take effect.");
-console.log("Run /devorch:talk in any project to get started.");
+console.log("Run /devorch in any project to get started.");

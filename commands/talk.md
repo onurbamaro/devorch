@@ -1,11 +1,11 @@
 ---
-description: "[LEGACY v2] Conversa + exploração + plano estruturado — prefer /d"
+description: "[LEGACY v2] Conversa + exploração + plano estruturado — prefer /devorch"
 argument-hint: "<o que quer fazer, explorar ou discutir>"
 model: opus
 disallowed-tools: EnterPlanMode
 ---
 
-**LEGACY (v2).** This command is preserved for resuming in-flight v2 plans. For new work, use `/d` — it triages, runs the guardian pass, and executes at scope-appropriate ceremony. `/d --full` produces an equivalent plan when a multi-phase effort is actually warranted. Multi-repo satellite merging still routes through `/devorch:worktrees`.
+**LEGACY (v2).** This command is preserved for resuming in-flight v2 plans. For new work, use `/devorch` — it triages, runs the guardian pass, and executes at scope-appropriate ceremony. `/devorch --full` produces an equivalent plan when a multi-phase effort is actually warranted. Multi-repo satellite merging still routes through `/devorch:worktrees`.
 
 Conversation, exploration, and structured planning for devorch projects.
 

@@ -49,7 +49,7 @@ from the global file. No file at either level means defaults apply.
 
 ## Integration with guardian
 
-The `/d` command reads both files at start, merges them, and injects the
+The `/devorch` command reads both files at start, merges them, and injects the
 result into the guardian prompt as structured context. The guardian uses
 it during bucketization:
 

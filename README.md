@@ -24,14 +24,14 @@ Stop feeding Claude Code one prompt at a time. devorch breaks your work into pha
 
 ## v3 (recommended): one command, right-sized ceremony
 
-Starting in v3, the primary entry point is a single command: **`/d`**. It classifies the request (quick / scoped / full), applies an inline senior-guardian pass against industry standards, and executes at the ceremony level the scope actually deserves. Trivial edits skip planning entirely; multi-module features still get full phased execution with waves.
+Starting in v3, the primary entry point is a single command: **`/devorch`**. It classifies the request (quick / scoped / full), applies an inline senior-guardian pass against industry standards, and executes at the ceremony level the scope actually deserves. Trivial edits skip planning entirely; multi-module features still get full phased execution with waves.
 
 ```
-/d "fix the login redirect bug"              # triaged to quick — direct edit
-/d "add POST /orders/bulk endpoint"           # triaged to scoped — single gate, targeted explore
-/d "add real-time order dashboard"            # triaged to full — worktree, phases, waves
-/d --full "<...>"                             # override classification
-/d --resume                                   # resume an active worktree
+/devorch "fix the login redirect bug"              # triaged to quick — direct edit
+/devorch "add POST /orders/bulk endpoint"           # triaged to scoped — single gate, targeted explore
+/devorch "add real-time order dashboard"            # triaged to full — worktree, phases, waves
+/devorch --full "<...>"                             # override classification
+/devorch --resume                                   # resume an active worktree
 ```
 
 The guardian is active in every mode. Security (OWASP), performance, architecture, and operations patterns are checked inline — heads-up redirects surface when there's a known-right answer, bifurcations only surface when the trade-off is legitimate. Personal priorities live in `.devorch/profile.yml`.
@@ -45,7 +45,7 @@ The guardian is active in every mode. Security (OWASP), performance, architectur
 - Single gate UX: `[Nenhum / Todos / Números]` instead of question chains
 - Profile-driven priorities (performance, security, cost, dx) weight bifurcations
 
-**v2 commands remain functional** for resuming in-flight plans — `/devorch:talk`, `/devorch:build`, `/devorch:fix`, `/devorch:worktrees` all continue to work unchanged. New work should prefer `/d`.
+**v2 commands remain functional** for resuming in-flight plans — `/devorch:talk`, `/devorch:build`, `/devorch:fix`, `/devorch:worktrees` all continue to work unchanged. New work should prefer `/devorch`.
 
 Philosophy, profile format, and flag handling are documented in `docs/PHILOSOPHY.md`, `docs/PROFILE.md`, and `docs/FLAGS.md`.
 
@@ -161,7 +161,7 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 
 | Command | What it does | Uses agents |
 |---------|-------------|-------------|
-| `/d` (v3, recommended) | Unified entry. Triages to quick/scoped/full, applies guardian pass, executes at scope-appropriate ceremony. | Explore, Builder |
+| `/devorch` (v3, recommended) | Unified entry. Triages to quick/scoped/full, applies guardian pass, executes at scope-appropriate ceremony. | Explore, Builder |
 | `/devorch:talk` (v2) | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore |
 | `/devorch:fix` (v2) | Targeted fix with investigation. Classifies, investigates, implements, validates. | Explore |
 | `/devorch:build` (v2) | Executes all remaining phases + adversarial final verification. Supports `--no-tests` to skip test suite. | Explore, Builder |
@@ -201,7 +201,7 @@ Installed to `~/.claude/` (commands, agents, scripts, hooks). Per-project state 
 project:
   name: devorch
   version: 3.0.0
-  description: Multi-agent orchestration framework for Claude Code (v3: unified /d command, scope-proportional ceremony, guardian-by-default)
+  description: Multi-agent orchestration framework for Claude Code (v3: unified /devorch command, scope-proportional ceremony, guardian-by-default)
   license: MIT
   runtime: Bun
   language: TypeScript
@@ -219,7 +219,7 @@ capabilities:
 
 commands:
   - name: d
-    signature: /d [--quick|--full|--resume|--worktree] "<description>"
+    signature: /devorch [--quick|--full|--resume|--worktree] "<description>"
     purpose: v3 unified entry — triage (quick/scoped/full), guardian pass, execute at scope-appropriate ceremony
     status: recommended
   - name: talk
