@@ -69,7 +69,9 @@ Before proposing execution, apply this role internally:
 >
 > 4. Do NOT teach. Redirect. Senior pair tone: "by here, not by there". Explain only if the user asks.
 >
-> Domain checklist (mnemonic): auth · rate-limiting · input validation · error boundaries · caching · indexing · N+1 · pagination · realtime strategy · upload path · async/queue · observability · idempotency · secrets handling · cross-tenant isolation.
+> Domain checklist (mnemonic): auth · rate-limiting · input validation · error boundaries · caching · indexing · N+1 · pagination · realtime strategy · upload path · async/queue · observability · idempotency · secrets handling · cross-tenant isolation · multi-repo scope.
+>
+> **Multi-repo detection**: if `$ARGUMENTS` mentions multiple repo names (e.g. "sync between dochron and dochron-mobile"), or the Step 1 `map-project.ts` output included a `## Sibling Repos` section, or the task implies cross-repo coordination (shared types, API contract changes across client+server), flag this as a real bifurcation with the sibling repos as selectable options. Selected satellites flow into `<secondary-repos>` in the drafted plan and are created as satellite worktrees in F1 Step 8.
 >
 > If `<profile>` is set: `priorities` ordering breaks bifurcation ties; `biases` are additional hints. On performance-vs-simplicity trade-offs, show cost and let the user choose — do not assume simplicity.
 >
@@ -205,10 +207,15 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 1. Launch 2–3 Explore agents (`subagent_type="Explore"`, thoroughness **very thorough**) in parallel with distinct focuses (architecture, risks/edges, existing patterns). Write combined findings to `<mainRoot>/.devorch/explore-cache-<name>.md`.
 2. Re-run the guardian pass with full exploration context. Enumerate edge cases into the same 3 buckets as scoped mode.
 3. Emit the same transparency block (Step S3) and a single `AskUserQuestion` gate with `Nenhum / Todos / Números`. Resolve bifurcations in follow-up rounds if needed.
-4. Draft the plan following the Plan Format specified in `commands/talk.md` (description, objective, classification, decisions, problem-statement, solution-approach, relevant-files, phases with `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>`). Write it to `<projectRoot>/.devorch/plans/<name>.md`.
+4. Draft the plan following the canonical format in `docs/PLAN-FORMAT.md`: `<description>`, `<objective>`, `<classification>`, `<decisions>`, optional `<problem-statement>` + `<solution-approach>` (medium/complex), `<relevant-files>` with optional `<secondary-repos>` for multi-repo, and numbered `<phaseN>` blocks containing `<goal>`, `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>`. Write it to `<projectRoot>/.devorch/plans/<name>.md`.
+
+   **Multi-repo detection**: If the Step 1 `map-project.ts` output contained a `## Sibling Repos` section, OR `$ARGUMENTS` explicitly mentions more than one repo, OR the guardian pass flagged multi-repo intent, include `<secondary-repos>` in the plan with the chosen sibling paths. The user should have confirmed sibling selection in the gate (Step 5). Siblings are typically at `../<name>/` relative to `<mainRoot>` or absolute paths under `~/dev/`.
+
 5. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked.
 6. Commit the plan in the worktree: `git -C <projectRoot> add .devorch/plans/<name>.md .devorch/CONVENTIONS.md && git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`. Also commit explore-cache changes in `<mainRoot>` with `chore(devorch): add worktree for <name>`.
 7. Set `planPath = <projectRoot>/.devorch/plans/<name>.md`.
+
+8. **Satellite worktree setup** (only when plan includes `<secondary-repos>`): parse the list of sibling repos from the plan. Build a JSON array `[{name, path}, ...]` with resolved absolute paths. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --add-secondary '<json>'`. Parse the returned `satellites` array and store it as `<satellites>` for F3e and F7. If any satellite fails to create (missing repo, uncommitted changes, branch collision), stop and surface the error — do not proceed to F3.
 
 ### F3. Phase loop
 
@@ -223,14 +230,18 @@ Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: 
 #### F3c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool with `subagent_type="devorch-builder-deep"`. Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Conventions` (filtered by `conventionSectionsByTask[taskId]`), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Conventions → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
 
-After each wave returns: verify task completion, extract `## Build Report` blocks keyed by task-id, `TaskUpdate` completed tasks. On builder failure → per-task retry (max 3) with error context; on 3 retries exhausted → stop the phase and report structured failure (same template as `commands/build.md` § 2c).
+After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id for aggregation. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
+
+**Multi-repo tasks**: when `<satellites>` is non-empty and a task has `Repo: <name>` matching a satellite, prepend to the builder prompt: `Working directory: <satellite.worktreePath>` and `Use git -C <satellite.worktreePath> for all git commands`. Tasks without `Repo:` (or with `Repo: primary`) use `<projectRoot>` as their working directory.
+
+**On builder failure** (no matching commit or reported failure): retry per task (max 3 attempts). Each retry appends a `## Previous Failure Context` section to the builder prompt containing: retry count, last 50 lines of prior output, git diff from the failed attempt (or "no commits"), and an instruction to diagnose the root cause rather than repeat the approach. On retry exhaustion (3/3): stop the phase, emit a structured failure report with the error timeline and suggest `/devorch --full` re-planning.
 
 #### F3d. Per-phase check
 If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
 
 #### F3e. Phase summary + commit + cache trim
-- `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>"`
-- Commit with the returned message if there are changes.
+- `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>" [--satellites '<json>']` — include `--satellites` only when `<satellites>` is non-empty (build JSON as `[{name, path}, ...]` from the F2.8 output).
+- Commit with the returned message if there are changes in the primary worktree. For each satellite, also commit phase progress if it has changes: `git -C <satellite.worktreePath> add -A && git -C <satellite.worktreePath> commit -m "<phase-summary-message>"`.
 - `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot> --cache-name <name>`
 
 ### F4. Categorized adversarial review
@@ -281,23 +292,27 @@ Lint / Typecheck / Build / Tests: status
 
 ### F7. Merge flow
 
-If verdict is PASS (or PASS with pendencies that are non-blocking), run the v3 merge-worktree script from `<mainRoot>`:
+If verdict is PASS (or PASS with pendencies that are non-blocking), run the merge-worktree script from `<mainRoot>`:
 
 ```
-bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts --worktree <name>
+bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts --worktree <name> [--satellites '<json>']
 ```
 
-Optional flags: `--squash` (orchestrator must commit manually after), `--keep-branch`, `--no-rebase`, `--dry-run`. The script auto-detects main branch, rebases the worktree onto `origin/<mainBranch>`, runs `check-project --quick`, merges with `--no-ff` by default, archives the plan, removes the worktree, and deletes the branch. All in one call.
+Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON shape built in F3e). The script rebases the primary worktree onto `origin/<mainBranch>`, runs `check-project --quick`, dry-runs merges across primary + all satellites BEFORE committing anything (atomicity guard), then merges sequentially with `--no-ff`, archives the plan, removes each worktree, and deletes each branch. Single call covers the full lifecycle.
+
+Optional flags: `--squash`, `--keep-branch`, `--no-rebase`, `--dry-run`.
 
 Parse JSON output and route by `ok`:
-- `ok: true` → report `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`, `planArchivedTo`. Done.
-- `ok: false` with conflict details → surface the conflicting files; worktree is preserved. Suggest manual resolution or `/devorch --resume`.
+- `ok: true` → iterate `repos[]`: for each entry report `role` (primary / satellite), `name`, `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`. Also surface `planArchivedTo`. Done.
+- `ok: false` → route by `phase`:
+  - `"rebase"` → rebase conflict in a specific repo; surface `failedRepos[].conflictFiles` and instruct manual resolution.
+  - `"dry-run"` → one or more repos' merge dry-run failed; list them with conflict files. No repo was merged (atomicity guard). Preserve all worktrees.
+  - `"merge"` → a merge failed after dry-run passed (rare: concurrent writes to main); surface `okRepos[]` (already merged) and `failedRepos[]` (pending). Prompt user to resolve.
+  - `"cleanup"` → merge succeeded but worktree/branch removal failed; surface for manual cleanup.
 
-**Multi-repo limitation**: `/devorch --full` does not orchestrate satellite-repo merges in this iteration. If the plan declared `<secondary-repos>`, the v3 merge-worktree script handles only the primary. Use `/devorch:worktrees` (v2 command) for the coordinated multi-repo merge flow.
+Plan archival is done inside `merge-worktree.ts`. Self-build install (when editing devorch itself) is also handled inside the script. Nothing extra to run.
 
-Plan archival is done inside `merge-worktree.ts`. Self-build install (when the project is devorch itself) is also handled inside the script. Nothing extra to run.
-
-On FAIL → do not merge, preserve worktree, suggest `/devorch --resume` to retry or `/devorch --full "<fix description>"` for a new attempt.
+On FAIL → do not merge, preserve worktrees, suggest `/devorch --resume` to retry or `/devorch --full "<fix description>"` for a new attempt.
 
 ### F8. Feedback (user preferences)
 
