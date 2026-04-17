@@ -1,15 +1,17 @@
 # devorch Philosophy
 
-> This document captures the core principles behind devorch v3.
+> This document captures the core principles behind devorch.
 > Use it as a litmus test when evaluating new Claude Code features:
 > if a native feature honors these principles, adopt it.
 > If it violates them, keep the devorch approach.
 
-devorch v3 operates on nine principles. The framing reflects a year of
-running earlier iterations against real work and learning where the
-original framing created friction that wasn't earning quality. The
-"Changes from v2" section near the end preserves the historical delta
-from the seven-principle v2 set for reference.
+Nine principles, each paired with a validation question that tells you
+when you are violating it. The principles are descriptive of what the
+current implementation commits to; if the code drifts from a principle,
+one of the two is wrong and needs explicit reconciliation. The
+"Changes from v2" section near the end preserves the delta from the
+earlier seven-principle set, so the lineage stays legible to anyone
+inheriting this project.
 
 ---
 
@@ -203,7 +205,7 @@ top of undetected breakage.
 **How devorch enforces this:**
 - Post-edit lint hook catches syntax and style on every Write/Edit
 - `check-project.ts --quick` runs between phases
-- Builders get one local retry loop before escalating
+- Builders get up to 3 local retry attempts with error context before escalating
 - Final adversarial review splits into security, performance, completeness, flags
 - Each reviewer is scoped so findings come with context, not with ambiguity
 
