@@ -11,27 +11,28 @@ import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
+import {
+  FAST_PATH_WHITELIST,
+  extractFileRefs,
+  extractExtensions,
+  filterCacheByRefs,
+  parseConventionSections,
+  shouldIncludeTesting,
+  parseFastPath,
+  filterConventionsForTask,
+} from "./lib/task-filter";
+import {
+  type ParsedWave,
+  type ParsedTask,
+  TOKEN_GATE_UNDER,
+  TOKEN_GATE_OVER,
+  filterCache,
+  parseWaves,
+  parseTasks,
+} from "./lib/slice-builder";
 
 const CONTENT_THRESHOLD = 50000;
 const CONTEXT_FILE = ".devorch/.phase-context.md";
-
-interface WaveInfo {
-  wave: number;
-  taskIds: string[];
-  type: "parallel" | "sequential";
-}
-
-interface TaskInfo {
-  id: string;
-  assignedTo: string;
-  repo: string;
-  title: string;
-  content: string;
-  model?: string;
-  effort?: string;
-  exemplars: string[];
-  nonGoals: string;
-}
 
 interface SatelliteInfo {
   name: string;
@@ -119,275 +120,10 @@ const cacheFileName = cacheName ? `explore-cache-${cacheName}.md` : "explore-cac
 const cacheSource = resolve(cacheRootDir, ".devorch", cacheFileName);
 const cacheRaw = safeReadFile(cacheSource);
 
-// --- Filter explore-cache by phase file paths ---
-function filterCache(cache: string, phaseText: string): string {
-  if (!cache) return "";
-
-  const tasksContent = extractTagContent(phaseText, "tasks") || "";
-  const fileRefs = new Set<string>();
-  const filePatterns = [...tasksContent.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)];
-  for (const match of filePatterns) {
-    const ref = match[1];
-    if (/\.\w{1,5}$/.test(ref) || ref.includes("/")) {
-      fileRefs.add(ref);
-    }
-  }
-
-  if (fileRefs.size === 0) return cache;
-
-  const sections = cache.split(/(?=^## )/m);
-  const matched: string[] = [];
-
-  for (const section of sections) {
-    if (!section.startsWith("## ")) {
-      matched.push(section);
-      continue;
-    }
-    let sectionMatches = false;
-    for (const ref of fileRefs) {
-      if (section.includes(ref)) {
-        sectionMatches = true;
-        break;
-      }
-    }
-    if (!sectionMatches) {
-      for (const ref of fileRefs) {
-        const dir = ref.split("/")[0];
-        if (dir && section.toLowerCase().includes(dir.toLowerCase())) {
-          sectionMatches = true;
-          break;
-        }
-      }
-    }
-    if (sectionMatches) {
-      matched.push(section);
-    }
-  }
-
-  return matched.join("").trim();
-}
-
 const filteredCache = filterCache(cacheRaw, phaseContent);
 
-// --- Extract file refs from arbitrary text (for per-task filtering) ---
-function extractFileRefs(text: string): Set<string> {
-  const refs = new Set<string>();
-  const patterns = [...text.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)];
-  for (const match of patterns) {
-    const ref = match[1];
-    if (/\.\w{1,5}$/.test(ref) || ref.includes("/")) {
-      refs.add(ref);
-    }
-  }
-  return refs;
-}
-
-// --- Filter cache sections by file refs (reusable for per-task) ---
-function filterCacheByRefs(cache: string, fileRefs: Set<string>): string {
-  if (!cache || fileRefs.size === 0) return cache;
-
-  const sections = cache.split(/(?=^## )/m);
-  const matched: string[] = [];
-
-  for (const section of sections) {
-    if (!section.startsWith("## ")) {
-      matched.push(section);
-      continue;
-    }
-    let sectionMatches = false;
-    for (const ref of fileRefs) {
-      if (section.includes(ref)) {
-        sectionMatches = true;
-        break;
-      }
-    }
-    if (!sectionMatches) {
-      for (const ref of fileRefs) {
-        const dir = ref.split("/")[0];
-        if (dir && section.toLowerCase().includes(dir.toLowerCase())) {
-          sectionMatches = true;
-          break;
-        }
-      }
-    }
-    if (sectionMatches) {
-      matched.push(section);
-    }
-  }
-
-  return matched.join("").trim();
-}
-
-// --- Extract file extensions from task content ---
-function extractExtensions(text: string): Set<string> {
-  const exts = new Set<string>();
-  const refs = extractFileRefs(text);
-  for (const ref of refs) {
-    const extMatch = ref.match(/\.(\w{1,5})$/);
-    if (extMatch) {
-      exts.add(`.${extMatch[1]}`);
-    }
-  }
-  return exts;
-}
-
-// --- Parse conventions into sections by ## headers ---
-function parseConventionSections(conventionsText: string): Array<{ header: string; content: string }> {
-  if (!conventionsText) return [];
-  const sections: Array<{ header: string; content: string }> = [];
-  const parts = conventionsText.split(/(?=^## )/m);
-  for (const part of parts) {
-    const headerMatch = part.match(/^## (.+)$/m);
-    if (headerMatch) {
-      sections.push({ header: headerMatch[1], content: part });
-    } else if (part.trim()) {
-      sections.push({ header: "", content: part });
-    }
-  }
-  return sections;
-}
-
-// --- Extension-to-convention matching map ---
-const EXT_KEYWORDS: Record<string, string[]> = {
-  ".ts": ["typescript", "ts", "script", "naming", "export", "import", "style", "error", "pattern", "async", "bun", "workaround"],
-  ".tsx": ["typescript", "ts", "tsx", "react", "component", "style", "jsx", "naming", "export", "import", "pattern"],
-  ".js": ["javascript", "js", "script", "naming", "export", "import", "style", "pattern"],
-  ".jsx": ["javascript", "js", "jsx", "react", "component", "style"],
-  ".md": ["markdown", "md", "command", "documentation", "template"],
-  ".css": ["style", "css"],
-  ".scss": ["style", "scss", "css"],
-  ".json": ["json", "package", "config"],
-};
-
-const FAST_PATH_WHITELIST = ["## Naming", "## Exports & Imports", "## Style", "## Error Handling", "## Patterns"];
-
-function shouldIncludeTesting(taskContent: string, taskRefs: Set<string>): boolean {
-  for (const ref of taskRefs) {
-    if (/\.(test|spec)\.[tj]sx?$/i.test(ref)) return true;
-  }
-  const sanitized = taskContent.replace(/^\s*\*\*Spec refs\*\*:.*$/gmi, "");
-  return /\btest\b|\bspec\b/i.test(sanitized);
-}
-
-function parseFastPath(planContent: string): boolean {
-  const classBlock = extractTagContent(planContent, "classification") || "";
-  const match = classBlock.match(/^\s*Fast-path:\s*(true|false)\s*$/im);
-  return match ? match[1].toLowerCase() === "true" : false;
-}
-
-function filterConventionsForTask(conventionsText: string, taskExts: Set<string>): string[] {
-  if (!conventionsText || taskExts.size === 0) return [];
-
-  const sections = parseConventionSections(conventionsText);
-  const matched: string[] = [];
-
-  for (const section of sections) {
-    if (!section.header) {
-      continue;
-    }
-    const headerLower = section.header.toLowerCase();
-    const contentLower = section.content.toLowerCase();
-
-    let sectionMatches = false;
-    for (const ext of taskExts) {
-      const keywords = EXT_KEYWORDS[ext] || [ext.slice(1)];
-      for (const kw of keywords) {
-        if (headerLower.includes(kw) || contentLower.includes(kw)) {
-          sectionMatches = true;
-          break;
-        }
-      }
-      if (sectionMatches) break;
-    }
-    if (sectionMatches) {
-      matched.push(`## ${section.header}`);
-    }
-  }
-
-  return matched;
-}
-
-// --- Parse waves from <execution> block ---
-function parseWaves(phaseText: string): WaveInfo[] {
-  const executionContent = extractTagContent(phaseText, "execution");
-  if (!executionContent) return [];
-
-  const waves: WaveInfo[] = [];
-  const waveRegex = /\*\*Wave\s+(\d+)\*\*\s*(?:\(([^)]*)\))?\s*:\s*(.+)/gi;
-  let waveMatch: RegExpExecArray | null;
-
-  while ((waveMatch = waveRegex.exec(executionContent)) !== null) {
-    const waveNum = parseInt(waveMatch[1], 10);
-    const annotation = (waveMatch[2] || "").trim().toLowerCase();
-    const taskIdStr = waveMatch[3];
-
-    let type: "parallel" | "sequential" = "parallel";
-    if (annotation === "sequential") {
-      type = "sequential";
-    }
-
-    const taskIds = taskIdStr
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    waves.push({ wave: waveNum, taskIds, type });
-  }
-
-  return waves;
-}
-
-// --- Parse tasks from <tasks> block ---
-function parseTasks(phaseText: string): Record<string, TaskInfo> {
-  const tasksContent = extractTagContent(phaseText, "tasks") || "";
-  const tasks: Record<string, TaskInfo> = {};
-
-  const taskHeaderRegex = /^####\s+\d+\.\s+/m;
-  const taskSections = tasksContent.split(taskHeaderRegex);
-  const taskHeaders = [...tasksContent.matchAll(/^####\s+\d+\.\s+(.+)$/gm)];
-
-  for (let i = 0; i < taskHeaders.length; i++) {
-    const title = taskHeaders[i][1].trim();
-    const sectionContent = taskSections[i + 1] || "";
-
-    const idMatch = sectionContent.match(/\*\*ID\*\*:\s*(\S+)/i);
-    const id = idMatch ? idMatch[1] : "";
-
-    const assignedMatch = sectionContent.match(/\*\*Assigned To\*\*:\s*(\S+)/i);
-    const assignedTo = assignedMatch ? assignedMatch[1] : "";
-
-    const repoMatch = sectionContent.match(/\*\*Repo\*\*:\s*(\S+)/i);
-    const repo = repoMatch ? repoMatch[1] : "primary";
-
-    const modelMatch = sectionContent.match(/\*\*Model\*\*:\s*(\S+)/i);
-    const model = modelMatch ? modelMatch[1].toLowerCase() : undefined;
-
-    const effortMatch = sectionContent.match(/\*\*Effort\*\*:\s*(\S+)/i);
-    const effort = effortMatch ? effortMatch[1].toLowerCase() : undefined;
-
-    const exemplarsMatch = sectionContent.match(/^\s*\*\*Exemplars\*\*:\s*(.+)$/im);
-    const exemplars = exemplarsMatch
-      ? exemplarsMatch[1].split(",").map((e) => e.trim()).filter(Boolean)
-      : [];
-
-    const nonGoalsMatch = sectionContent.match(/^\s*\*\*Non-goals\*\*:\s*(.+)$/im);
-    const nonGoals = nonGoalsMatch ? nonGoalsMatch[1].trim() : "";
-
-    const fullContent = `#### ${taskHeaders[i][0].match(/\d+/)?.[0] || i + 1}. ${title}\n${sectionContent.trimEnd()}`;
-
-    if (id) {
-      const task: TaskInfo = { id, assignedTo, repo, title, content: fullContent, exemplars, nonGoals };
-      if (model) task.model = model;
-      if (effort) task.effort = effort;
-      tasks[id] = task;
-    }
-  }
-
-  return tasks;
-}
-
-const waves = parseWaves(phaseContent);
-const tasks = parseTasks(phaseContent);
+const waves: ParsedWave[] = parseWaves(phaseContent);
+const tasks: Record<string, ParsedTask> = parseTasks(phaseContent);
 
 // --- Validate task repo fields against satellites ---
 const repoRefs = new Map<string, string[]>();
@@ -643,8 +379,6 @@ for (const [taskId, task] of Object.entries(tasks)) {
  * uses `Math.ceil(charCount / 4)` — good enough to triage; exact counts are not
  * worth a tiktoken dependency here.
  */
-const TOKEN_GATE_UNDER = 3000;
-const TOKEN_GATE_OVER = 30000;
 
 // Resolve convention header list → full section content for accurate size measurement.
 const conventionSectionByHeader = new Map<string, string>();
@@ -785,8 +519,8 @@ const result: {
   totalPhases: number;
   planTitle: string;
   satellites: SatelliteInfo[];
-  waves: WaveInfo[];
-  tasks: Record<string, TaskInfo>;
+  waves: ParsedWave[];
+  tasks: Record<string, ParsedTask>;
   conventions?: string;
   conventionSectionsByTask?: Record<string, string[]>;
   cacheByTask: Record<string, string>;
