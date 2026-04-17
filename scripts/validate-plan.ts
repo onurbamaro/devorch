@@ -476,7 +476,7 @@ if (phases.length === 0) {
 
     // --- Model and Effort validation ---
     const validModels = new Set(["sonnet", "opus", "haiku"]);
-    const validEfforts = new Set(["low", "medium", "high"]);
+    const validEfforts = new Set(["low", "medium", "high", "xhigh"]);
 
     const taskSectionsForME = tasksContent.split(/####\s+\d+\.\s+/);
     for (const section of taskSectionsForME.slice(1)) {
@@ -490,7 +490,7 @@ if (phases.length === 0) {
 
       const effortMatch = section.match(/\*\*Effort\*\*:\s*(\S+)/i);
       if (effortMatch && !validEfforts.has(effortMatch[1].toLowerCase())) {
-        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Effort "${effortMatch[1]}" (expected: low, medium, high)`);
+        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Effort "${effortMatch[1]}" (expected: low, medium, high, xhigh)`);
       }
 
       // Recognized optional fields: Exemplars, Non-goals.
