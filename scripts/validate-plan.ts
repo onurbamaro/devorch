@@ -492,6 +492,19 @@ if (phases.length === 0) {
       if (effortMatch && !validEfforts.has(effortMatch[1].toLowerCase())) {
         warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Effort "${effortMatch[1]}" (expected: low, medium, high)`);
       }
+
+      // Recognized optional fields: Exemplars, Non-goals.
+      // Both accept any non-empty value; absence is also valid. No error either way.
+      // Explicit recognition here documents them as supported task-level fields.
+      const exemplarsMatch = section.match(/\*\*Exemplars\*\*:\s*(.+)/i);
+      if (exemplarsMatch && !exemplarsMatch[1].trim()) {
+        warnings.push(`Phase ${phase.num}: task "${tid}" has empty Exemplars field — omit the line or provide paths`);
+      }
+
+      const nonGoalsMatch = section.match(/\*\*Non-goals\*\*:\s*(.+)/i);
+      if (nonGoalsMatch && !nonGoalsMatch[1].trim()) {
+        warnings.push(`Phase ${phase.num}: task "${tid}" has empty Non-goals field — omit the line or provide a description`);
+      }
     }
 
     // Handoff — required except last phase
