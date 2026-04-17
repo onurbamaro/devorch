@@ -89,13 +89,15 @@ Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
 - Full task details inline from the `tasks` map (builders skip TaskGet)
 - Convention sections filtered from the init-phase output: read `conventions` (full text) from the JSON root and `conventionSectionsByTask[taskId]` (array of section header names like `"## Naming"`, `"## Patterns"`). If the array is empty or missing, send the full `conventions` text. Otherwise, split `conventions` by `## ` headers, match the section names from the array, extract the content of matching sections, join them, and inject into the builder prompt
-- Code structure from `codeStructureByTask[taskId]` — labeled as "## Code Structure" in the builder prompt. Only include if non-empty. Contains TLDR structural analysis (exports, imports, functions, types) of TS/TSX files relevant to the task. Place AFTER conventions and BEFORE cache sections.
-- Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task
-- Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
+- Code structure from `codeStructureByTask[taskId]` — labeled as "## Code Structure" in the builder prompt. Only include if non-empty. Contains TLDR structural analysis (exports, imports, functions, types) of TS/TSX files relevant to the task.
+- Exemplars from `exemplarsByTask[taskId]` — labeled as "## Exemplars" in the builder prompt. Inject `## Exemplars` from `exemplarsByTask[taskId]` when non-empty. Format as a bulleted list, one file path per line: `- path/to/file.ext`. Omit the section entirely when the array is empty or missing.
+- Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task. Only include if non-empty.
+- Non-goals from `nonGoalsByTask[taskId]` — labeled as "## Non-goals" in the builder prompt. Inject `## Non-goals` from `nonGoalsByTask[taskId]` when non-empty. Format as a single bullet or short paragraph. Omit the section entirely when the string is empty or missing.
+- Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task.
+- **Section order** (must match `commands/talk.md` INLINE PATH Step 8i-b exactly — no divergence between build.md and talk.md): `## Conventions` → `## Code Structure` (if non-empty) → `## Exemplars` (only if `exemplarsByTask[taskId]` non-empty) → `## Spec Contracts` (if non-empty) → `## Non-goals` (only if `nonGoalsByTask[taskId]` non-empty) → cache sections. Empty optional sections are omitted entirely.
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
 - **Spec verification instruction**: "Write type signatures and interfaces matching `<interface>` specs BEFORE implementing logic — typecheck enforces shape. After implementation, SELF-VERIFY each spec with file:line evidence (PASS/VIOLATION). No unverified specs."
 - `commit with type(scope): description`
-- `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
 **Multi-repo tasks**: When init-phase output includes a `satellites` array (non-empty), check each task's `repo` field:
 - If `repo` == `"primary"` (or absent): builder uses `<projectRoot>` as working directory (default behavior).
@@ -105,6 +107,8 @@ Each builder prompt includes:
   - `Use git -C <satellite.worktreePath> for all git commands`
 
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
+
+**Orchestrator-side TaskUpdate**: For each task in the wave whose Agent call returned with a matching commit in `git log` (success), the orchestrator calls `TaskUpdate` with `status: "completed"` on that task's id. Builders no longer self-mark completion. On builder failure (no matching commit or reported failure), do NOT call `TaskUpdate` to `"completed"` — follow the existing retry flow below instead.
 
 **Build Report extraction** — After verifying task completion for a wave, extract the `## Build Report` block from each completed builder's text output (the text returned by the Task/Agent call):
 - Use regex: from `## Build Report` to the next `##` header or end of text.
