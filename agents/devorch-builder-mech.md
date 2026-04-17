@@ -22,7 +22,7 @@ agent for it.
 ## When to refuse and escalate
 
 If any of these are true, stop before any Edit/Write and emit a `## Build Report` with
-`Model fit: wrong agent — needs builder-spec or builder-deep` and an explanation. Commit nothing.
+`Model fit: wrong agent — needs builder-deep` and an explanation. Commit nothing.
 
 - The task touches more than 2 files and they are not trivially parallel (same rename repeated).
 - You encounter an ambiguity the prompt doesn't resolve.
