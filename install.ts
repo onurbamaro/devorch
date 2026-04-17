@@ -88,6 +88,17 @@ for (const { src, dest, label } of targets) {
       count++;
       console.log(`  commands/devorch.md -> ${topDest} (top-level /devorch)`);
     }
+
+    // Remove the namespaced commands/devorch/ folder if nothing was copied
+    // there (happens when the only file in commands/ is devorch.md itself).
+    try {
+      const leftovers = readdirSync(dest);
+      if (leftovers.length === 0) {
+        rmSync(dest, { recursive: true });
+      }
+    } catch {
+      // folder already gone — fine
+    }
   }
 
   console.log(`  ${label}: ${count} files -> ${dest}`);
