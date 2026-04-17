@@ -7,7 +7,7 @@
 
 ## 1. Replace manual Explore dispatch with native Agent Teams
 
-**Current:** `/devorch:talk` manually launches 2-4 Explore agents with role-specific
+**Current:** `/devorch` (full mode) manually launches 2-4 Explore agents with role-specific
 prompts (architecture-explorer, risk-assessor, pattern-analyst) using individual
 `Agent(subagent_type="Explore")` calls.
 
@@ -16,7 +16,7 @@ provide built-in parallel agent coordination with session isolation, idle detect
 (`TeammateIdle` hook), and completion tracking (`TaskCompleted` hook).
 
 **What changes:**
-- Replace manual Explore agent dispatch in `talk.md` with Agent Teams invocation
+- Replace manual Explore agent dispatch in `devorch.md` with Agent Teams invocation
 - Use `TeammateIdle` and `TaskCompleted` hooks for progress tracking
 - Remove manual agent result aggregation -- Agent Teams handles coordination
 

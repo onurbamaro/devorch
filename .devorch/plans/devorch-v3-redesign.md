@@ -263,6 +263,12 @@ Guardião consulta antes de emitir heads-up — items silenciados passam batido.
 
 ## Migração: v3 alongside v2
 
+> **Nota histórica:** Esta seção descrevia a coexistência transitória
+> entre v3 e v2. v2 foi removido no commit
+> `chore(v2): remove talk/build/fix commands, purge user-facing v2
+> references` — `/devorch` é agora o único entry point. O texto
+> original abaixo fica preservado como referência de design.
+
 Durante transição, `/devorch` coexiste com `/devorch:talk|build|fix`. Critérios:
 
 - `/devorch` é o comando novo recomendado para tarefas diárias

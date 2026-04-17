@@ -1,5 +1,11 @@
 # V3 `/devorch` Command — Dry-Run Test Plan
 
+> **Historical note:** Originally written when v2 (`/devorch:talk`,
+> `/devorch:build`, `/devorch:fix`) still shipped alongside v3. v2 was
+> removed in `chore(v2): remove talk/build/fix commands, purge
+> user-facing v2 references`; cross-references to v2 commands in this
+> document are historical and retained for context.
+
 Static walkthrough of `commands/devorch.md` (335 lines, unified v3 entry) against the
 actual scripts under `scripts/`, the referenced agents under `agents/`, and the
 spec in `.devorch/plans/devorch-v3-redesign.md`. No execution. Goal: surface

@@ -5,10 +5,11 @@
 > if a native feature honors these principles, adopt it.
 > If it violates them, keep the devorch approach.
 
-v3 replaces the seven principles of v2 with nine. The shift is not cosmetic:
-it reflects a year of running devorch against real work and learning where
-v2's framing created friction that wasn't earning quality. The explicit
-delta lives in the "Changes from v2" section near the end.
+devorch v3 operates on nine principles. The framing reflects a year of
+running earlier iterations against real work and learning where the
+original framing created friction that wasn't earning quality. The
+"Changes from v2" section near the end preserves the historical delta
+from the seven-principle v2 set for reference.
 
 ---
 
@@ -252,10 +253,10 @@ runs the full pipeline with worktree, phases, waves, and adversarial
 review. The mode is chosen by triage, not by ritual.
 
 **Why this matters:** Ceremony for small tasks is not rigor -- it is
-theater that trains the user to route around the tool. If
-`/devorch:build` takes ten minutes to rename a variable, the user will
-rename the variable by hand and the guardian never sees the session.
-The tool that survives is the one whose cost is shaped to the task.
+theater that trains the user to route around the tool. If `/devorch`
+takes ten minutes to rename a variable, the user will rename the
+variable by hand and the guardian never sees the session. The tool
+that survives is the one whose cost is shaped to the task.
 
 **How devorch enforces this:**
 - Triage classifies every invocation into quick/scoped/full with a one-line justification
