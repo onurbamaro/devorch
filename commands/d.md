@@ -13,21 +13,28 @@ Unified entry point for devorch v3. Replaces talk+build+fix conceptually: classi
 - `--worktree` — force worktree for scoped mode (opt-in)
 - `--resume` — resume an active worktree (no description needed)
 
-If `$ARGUMENTS` is empty and `--resume` is not set, stop and ask the user.
+After stripping known flags (`--quick`, `--full`, `--resume`, `--worktree`), if the remaining `$ARGUMENTS` is empty and `--resume` is not set, stop and ask the user.
 
 ## Step 0 — Resume short-circuit
 
 If `--resume` is present:
 1. Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON.
 2. If `count == 0` → report "Nenhum worktree ativo para retomar." and stop.
-3. If `count == 1` → resume that worktree directly: set `projectRoot = .worktrees/<name>`, set `planPath` to the first `.md` under `<projectRoot>/.devorch/plans/` (excluding `archive/`), and jump to full-mode Step F3 (phase loop).
-4. If `count > 1` → `AskUserQuestion` presenting each worktree (name + plan title). Then jump to full-mode Step F3.
+3. If `count == 1` → resume that worktree directly. If `count > 1` → `AskUserQuestion` presenting each worktree (name + plan title) and pick one.
+4. Once a worktree is chosen, establish the full resume context before jumping to F3:
+   - `mainRoot = <cwd>` (the main repo root where `.worktrees/` lives)
+   - `projectRoot = .worktrees/<name>`
+   - `<name> = basename(projectRoot)`
+   - `cacheName = <name>`
+   - `planPath` = the first `.md` under `<projectRoot>/.devorch/plans/` (excluding `archive/`)
+   - `originalBranch` = run `git -C <mainRoot> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo main` and strip `origin/` prefix; fall back to `main` or `master` as available.
+5. Jump to full-mode Step F3 (phase loop) with these bindings.
 
 ## Step 1 — Load minimal context
 
-Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --compact` to collect tech stack and folder structure inline. Read `.devorch/CONVENTIONS.md` if it exists. Read `.devorch/profile.yml` if it exists and keep its content as `<profile>` for the guardian prompt (priorities + biases).
+Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --compact` to collect tech stack and folder structure inline. Read `.devorch/CONVENTIONS.md` if it exists. Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
 
-Also clean up stale cache: delete any `.devorch/explore-cache-*.md` files older than 7 days.
+Also clean up stale cache: `find .devorch -maxdepth 1 -name 'explore-cache-*.md' -mtime +7 -delete 2>/dev/null || true`.
 
 ## Step 2 — Triage (Opus inline, short thinking)
 
@@ -211,7 +218,7 @@ For each phase N sequentially:
 Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <name>`. Parse JSON. If `contentFile` is present, read it for full context.
 
 #### F3b. Filter size gate
-For each task, inspect the combined injection size (conventions slice + code structure + specs + cache slice). If any task comes back with **<3K or >30K tokens**, pause and show the user: which task, which slice is out of bounds, and offer to continue / split / re-curate. Do not dispatch builders until resolved.
+Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). If the array is non-empty, pause and show the user: task id, direction, approximate token count. Offer: continue / split the task / re-curate the slice (manually edit cache or conventions scope). Do not dispatch builders until the array is empty or the user explicitly accepts the warnings.
 
 #### F3c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool with `subagent_type="devorch-builder-deep"`. Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Conventions` (filtered by `conventionSectionsByTask[taskId]`), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Conventions → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
@@ -274,22 +281,21 @@ Lint / Typecheck / Build / Tests: status
 
 ### F7. Merge flow
 
-If verdict is PASS (or PASS with pendencies that are non-blocking), call `/devorch:worktrees merge <name>` conceptually:
+If verdict is PASS (or PASS with pendencies that are non-blocking), run the v3 merge-worktree script from `<mainRoot>`:
 
 ```
-bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts \
-  --worktree-path <projectRoot> \
-  --main-root <mainRoot> \
-  --original-branch <originalBranch> \
-  --branch-name devorch/<name>
+bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts --worktree <name>
 ```
 
-Parse JSON output and route by `status`:
-- `success` → report merged branch, removed worktree. If `selfBuildNeeded` and `<mainRoot>/install.ts` exists, run `bun run install` in `<mainRoot>`.
-- `conflict` / `stash-conflict` → report conflict files, do not continue cleanup.
-- `error` → report error message.
+Optional flags: `--squash` (orchestrator must commit manually after), `--keep-branch`, `--no-rebase`, `--dry-run`. The script auto-detects main branch, rebases the worktree onto `origin/<mainBranch>`, runs `check-project --quick`, merges with `--no-ff` by default, archives the plan, removes the worktree, and deletes the branch. All in one call.
 
-After merge, archive the plan: `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` (runs from `<mainRoot>` against the archived copy if the script copies it out of the worktree pre-removal; otherwise skip if the merge script already archived).
+Parse JSON output and route by `ok`:
+- `ok: true` → report `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`, `planArchivedTo`. Done.
+- `ok: false` with conflict details → surface the conflicting files; worktree is preserved. Suggest manual resolution or `/d --resume`.
+
+**Multi-repo limitation**: `/d --full` does not orchestrate satellite-repo merges in this iteration. If the plan declared `<secondary-repos>`, the v3 merge-worktree script handles only the primary. Use `/devorch:worktrees` (v2 command) for the coordinated multi-repo merge flow.
+
+Plan archival is done inside `merge-worktree.ts`. Self-build install (when the project is devorch itself) is also handled inside the script. Nothing extra to run.
 
 On FAIL → do not merge, preserve worktree, suggest `/d --resume` to retry or `/d --full "<fix description>"` for a new attempt.
 
