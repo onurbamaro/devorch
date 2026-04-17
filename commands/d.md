@@ -112,7 +112,7 @@ git commit -m "type(scope): description"
 
 ### Q5. Report
 
-One-line report: what changed, commit hash. Stop.
+One-line report: what changed, commit hash. Run the flow-friction capture (§ F9) — typically nothing to log for a clean quick edit. Stop.
 
 ---
 
@@ -184,7 +184,7 @@ Conventional commit in `<projectRoot>`, stage only touched files.
 
 ### S8. Report
 
-Concise summary: edge cases count, bifurcations resolved, files changed, check result. Stop.
+Concise summary: edge cases count, bifurcations resolved, files changed, check result. Run the flow-friction capture (§ F9). Stop.
 
 ---
 
@@ -299,7 +299,7 @@ Plan archival is done inside `merge-worktree.ts`. Self-build install (when the p
 
 On FAIL → do not merge, preserve worktree, suggest `/d --resume` to retry or `/d --full "<fix description>"` for a new attempt.
 
-### F8. Feedback
+### F8. Feedback (user preferences)
 
 If `<mainRoot>/.devorch/feedback.md` gained entries in this session, append:
 ```
@@ -307,6 +307,62 @@ If `<mainRoot>/.devorch/feedback.md` gained entries in this session, append:
 N dificuldades registradas. Para evoluir:
 /d --full Evoluir o devorch baseado em .devorch/feedback.md
 ```
+
+### F9. Flow friction capture (all modes — not just full)
+
+This step runs in **every mode** (quick / scoped / full) right before the final report. It captures frictions in the devorch flow itself — not in user code. Examples of what counts:
+
+- Script errored, returned malformed JSON, or was missing a field d.md expected
+- A retry loop needed more than 1 attempt to recover
+- `AskUserQuestion` had to be re-invoked because the first gate didn't cover a case
+- A hook didn't fire when d.md said it should
+- You (the orchestrator) had to improvise a step because d.md was ambiguous
+- A bifurcation had no precedent and no industry answer — clear gap
+
+For each friction observed this session, write one file to the inbox directory:
+
+**Inbox path resolution**:
+1. If env `DEVORCH_REPO` is set and `<DEVORCH_REPO>/.devorch/flow-issues-inbox/` exists → use it.
+2. Else if a sibling devorch repo exists at `../devorch/.devorch/flow-issues-inbox/` → use it.
+3. Else → `<mainRoot>/.devorch/flow-issues-inbox/` (project-local, user will copy later).
+
+**File naming**: `<YYYY-MM-DD>-<slug>.md` (slug is 3-5 words from the friction title).
+
+**File format**:
+```markdown
+# Flow issue: <title>
+
+**Captured**: <ISO timestamp>
+**Origin session**: /d <original $ARGUMENTS>
+**Mode**: quick | scoped | full
+**Severity**: blocker | gap | nit
+
+## Ready-to-paste prompt
+
+/d <--quick|--full|nothing> "<concrete fix description>"
+
+## Context
+
+- Where: <file>:<section> (e.g. commands/d.md § F3b)
+- What happened: <1-2 lines>
+- Expected: <1 line>
+- Workaround used: <if any>
+
+## Related
+
+- <link to docs/V3-TEST-PLAN.md issue if applicable, or "new">
+```
+
+**If zero frictions were observed**, write nothing and output one line: "Flow friction capture: nenhum item registrado." Do not create empty files.
+
+**If one or more frictions were captured**, output a summary at the end of the report:
+```
+### Flow friction capture
+N item(s) registrado(s) em <inbox-path>/.
+Copie os prompts para /d quando for evoluir o devorch.
+```
+
+Keep entries surgical — one friction per file, each readable standalone. The inbox accumulates over time; periodic sweep from the devorch repo clears backlog.
 
 ---
 
