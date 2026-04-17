@@ -29,6 +29,8 @@ interface TaskInfo {
   content: string;
   model?: string;
   effort?: string;
+  exemplars: string[];
+  nonGoals: string;
 }
 
 interface SatelliteInfo {
@@ -263,7 +265,8 @@ function shouldIncludeTesting(taskContent: string, taskRefs: Set<string>): boole
   for (const ref of taskRefs) {
     if (/\.(test|spec)\.[tj]sx?$/i.test(ref)) return true;
   }
-  return /\btest\b|\bspec\b/i.test(taskContent);
+  const sanitized = taskContent.replace(/^\s*\*\*Spec refs\*\*:.*$/gmi, "");
+  return /\btest\b|\bspec\b/i.test(sanitized);
 }
 
 function parseFastPath(planContent: string): boolean {
@@ -362,10 +365,18 @@ function parseTasks(phaseText: string): Record<string, TaskInfo> {
     const effortMatch = sectionContent.match(/\*\*Effort\*\*:\s*(\S+)/i);
     const effort = effortMatch ? effortMatch[1].toLowerCase() : undefined;
 
+    const exemplarsMatch = sectionContent.match(/^\s*\*\*Exemplars\*\*:\s*(.+)$/im);
+    const exemplars = exemplarsMatch
+      ? exemplarsMatch[1].split(",").map((e) => e.trim()).filter(Boolean)
+      : [];
+
+    const nonGoalsMatch = sectionContent.match(/^\s*\*\*Non-goals\*\*:\s*(.+)$/im);
+    const nonGoals = nonGoalsMatch ? nonGoalsMatch[1].trim() : "";
+
     const fullContent = `#### ${taskHeaders[i][0].match(/\d+/)?.[0] || i + 1}. ${title}\n${sectionContent.trimEnd()}`;
 
     if (id) {
-      const task: TaskInfo = { id, assignedTo, repo, title, content: fullContent };
+      const task: TaskInfo = { id, assignedTo, repo, title, content: fullContent, exemplars, nonGoals };
       if (model) task.model = model;
       if (effort) task.effort = effort;
       tasks[id] = task;
@@ -559,6 +570,8 @@ const conventionSectionsByTask: Record<string, string[]> = {};
 const cacheByTask: Record<string, string> = {};
 const specsByTask: Record<string, string> = {};
 const codeStructureByTask: Record<string, string> = {};
+const exemplarsByTask: Record<string, string[]> = {};
+const nonGoalsByTask: Record<string, string> = {};
 
 const conventionSectionHeaders = new Set(
   parseConventionSections(conventions)
@@ -573,6 +586,9 @@ for (const [taskId, task] of Object.entries(tasks)) {
 
   const taskRefs = extractFileRefs(task.content);
   cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
+
+  exemplarsByTask[taskId] = task.exemplars;
+  nonGoalsByTask[taskId] = task.nonGoals;
 
   // Contextual Testing re-inclusion (after tightened EXT_KEYWORDS)
   if (
@@ -729,6 +745,10 @@ const result: {
   specsByTask: Record<string, string>;
   /** Per-task TLDR code structure analysis. Markdown-formatted summaries of exports, imports, functions, types. */
   codeStructureByTask: Record<string, string>;
+  /** Per-task exemplar file paths parsed from `**Exemplars**:` line. Empty array when absent. Every task id has an entry. */
+  exemplarsByTask: Record<string, string[]>;
+  /** Per-task non-goals text parsed from `**Non-goals**:` line. Empty string when absent. Every task id has an entry. */
+  nonGoalsByTask: Record<string, string>;
   /** Directed explore queries extracted from phase content. Each has a query text and associated taskId. */
   exploreQueries: Array<{ query: string; taskId: string }>;
   /** Whether all phase relevant-files appear in at least one filtered cache section. */
@@ -748,6 +768,8 @@ const result: {
   cacheByTask,
   specsByTask,
   codeStructureByTask,
+  exemplarsByTask,
+  nonGoalsByTask,
   exploreQueries,
   cacheCoversPhase,
   uncoveredFiles,
