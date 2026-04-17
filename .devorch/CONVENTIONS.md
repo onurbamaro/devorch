@@ -29,16 +29,7 @@
 
 ## Patterns
 
-**Import clusters** (most frequent):
-- `fs`: 2 imports
-- `path`: 2 imports
-
-**Function signatures** (from AST):
-- `findRoot(start: string): string | null` (`hooks/post-edit-lint.ts`)
-- `detect(): LintCmd | null` (`hooks/post-edit-lint.ts`)
-
-Async/sync ratio: 0 async, 2 sync
-
+- No AST-level patterns extracted (ts-morph analysis unavailable or no TS files)
 
 ## Testing
 
