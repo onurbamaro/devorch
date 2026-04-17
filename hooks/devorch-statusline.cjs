@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // devorch statusline for Claude Code
-// Shows: project name (bold) | context usage bar
+// Shows: project name | model | effort | context usage bar
 
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -19,6 +21,19 @@ process.stdin.on('end', () => {
     // Project name (bold bright white)
     parts.push(`\x1b[1;97m${dirname}\x1b[0m`);
 
+    // Model name (cyan, short form)
+    const modelName = shortModel(data.model?.display_name || data.model?.id);
+    if (modelName) {
+      parts.push(`\x1b[36m${modelName}\x1b[0m`);
+    }
+
+    // Effort level (yellow for high, dim for others)
+    const effort = getEffort(data);
+    if (effort) {
+      const effortColor = effort === 'high' ? '33' : '2;37';
+      parts.push(`\x1b[${effortColor}m${effort}\x1b[0m`);
+    }
+
     // Context bar
     const ctx = contextBar(remaining);
     if (ctx) {
@@ -30,6 +45,31 @@ process.stdin.on('end', () => {
     // silent fail
   }
 });
+
+function shortModel(name) {
+  if (!name) return null;
+  // "Claude Opus 4.6 (1M context)" -> "Opus 4.6 1M"
+  // "Claude Sonnet 4.6" -> "Sonnet 4.6"
+  let short = name.replace(/^Claude\s+/i, '');
+  const ctxMatch = short.match(/\((\d+[KkMm])\s*context\)/);
+  short = short.replace(/\s*\(.*?\)/, '');
+  if (ctxMatch) short += ' ' + ctxMatch[1];
+  return short;
+}
+
+function getEffort(data) {
+  // Try from stdin JSON first
+  if (data.effortLevel) return data.effortLevel;
+  if (data.effort_level) return data.effort_level;
+  // Fallback: read from settings.json
+  try {
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    return settings.effortLevel || null;
+  } catch {
+    return null;
+  }
+}
 
 function contextBar(remaining) {
   if (remaining == null) return null;

@@ -73,9 +73,9 @@ Parse JSON output. If `contentFile` field is present, read that file for full ph
 
 **Cache covers check**: Read `cacheCoversPhase` from the init-phase JSON output.
 - If `cacheCoversPhase == true` → skip all Explore agents for this phase. Log: "Cache covers phase N". Proceed directly to 2c.
-- If `cacheCoversPhase == false` → check `uncoveredFiles` from init-phase output. Launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`, `model="sonnet"`) only for areas with partial or missing coverage in cache (using `uncoveredFiles` as the guide). Append new summaries to explore-cache.
+- If `cacheCoversPhase == false` → check `uncoveredFiles` from init-phase output. Launch Explore agents (use the **Task tool call** with `subagent_type="Explore"`) only for areas with partial or missing coverage in cache (using `uncoveredFiles` as the guide). Append new summaries to explore-cache.
 
-If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`, `model="sonnet"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
+If init-phase output includes `exploreQueries` (non-empty array), launch directed Explore agents using each query's text as the agent prompt. Each query becomes a focused Explore agent prompt (via Task tool call with `subagent_type="Explore"`). Append results to `explore-cache-<cacheName>.md` with headers matching query subjects. Directed queries are launched in parallel alongside any gap-coverage Explore agents above.
 
 #### 2c. Deploy builders
 
@@ -83,10 +83,7 @@ For each wave from init-phase output, use `TaskCreate` with wave dependencies vi
 
 - For `"parallel"` and `"sequential"` type waves: launch all taskIds as parallel Task calls **in a single message** (do NOT use `run_in_background`). The Task calls block until all builders in the wave return — no polling needed.
 
-**Per-task model and effort**: Each task in the `tasks` map may have optional `model` and `effort` fields (set by the planner). Use them to select the builder agent and model override:
-
-- **`subagent_type`**: If `task.effort == "high"`, use `"devorch-builder-deep"` (runs at high effort). Otherwise use `"devorch-builder"` (runs at medium effort).
-- **`model` override**: If `task.model` is set (e.g., `"sonnet"`), pass it as the `model` parameter in the Agent/Task call. This overrides the agent definition's model for that invocation. If not set, omit the parameter (defaults to `opus` from the agent definition).
+**Builder selection**: All tasks use `subagent_type="devorch-builder-deep"` (opus/high effort). No per-task model or effort overrides — every builder runs at maximum reasoning depth.
 
 Each builder prompt includes:
 - Plan's **Objective** (from init-phase output), **Solution Approach** (if present), **Decisions** (if present)
@@ -96,7 +93,7 @@ Each builder prompt includes:
 - Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Pre-filtered by init-phase.ts based on **Spec refs** in the task
 - Cache sections from `cacheByTask[taskId]` — pre-filtered by init-phase.ts based on file refs in the task
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
-- **Spec verification instruction**: "Verify your implementation satisfies all spec contracts before committing. Check: function signatures match `<interface>` specs, error handling matches `<error-contract>` cases, pre/postconditions from `<behavior>` specs are honored."
+- **Spec verification instruction**: "Write type signatures and interfaces matching `<interface>` specs BEFORE implementing logic — typecheck enforces shape. After implementation, SELF-VERIFY each spec with file:line evidence (PASS/VIOLATION). No unverified specs."
 - `commit with type(scope): description`
 - `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
@@ -113,41 +110,6 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 - Use regex: from `## Build Report` to the next `##` header or end of text.
 - If no `## Build Report` is found in a builder's output, skip silently (backward compatible with older builders).
 - Store the parsed report content keyed by task-id for aggregation in the final verification report (step 3d).
-
-**Per-task contract verification** — After Build Report extraction, verify each completed task's implementation against its spec contracts:
-
-**Classification gate**: Before running the verification loop, parse the plan's `<classification>` section from `<planPath>` (extract `Complexity:` and `Risk:` values). If `complexity == "simple" AND risk == "low"`, skip the entire contract verification loop and log: "Contract verification skipped — simple/low plan". For all other classifications, proceed with verification as below.
-
-> **Note**: init-phase.ts does not currently expose classification in its JSON output. The orchestrator must read and parse the `<classification>` tag from the plan file directly. A follow-up task should add classification to init-phase.ts output to avoid this extra file read.
-
-1. For each completed task in the wave, check if the task body (from `tasks[taskId]` in init-phase output) contains an explicit `**Spec refs**:` field with a non-empty value. If absent or empty, log "No explicit spec refs for `<taskId>` — skipping contract verification" and skip to the next task.
-2. Find the builder's commit hash: run `git -C <projectRoot> log --oneline --format="%H %s" -20` and search for a commit message containing the task ID. Extract the hash. If no match found, log "No commit found for task `<taskId>` — skipping contract verification" and skip.
-3. Extract the diff: `git -C <projectRoot> show <commit-hash>` (full diff including stat).
-4. Launch a verification agent (`subagent_type="Explore"`, `model="sonnet"`) with a prompt that includes the exact verifier template below, followed by the git diff and spec contracts text from `specsByTask[taskId]`:
-
-```
-You are a contract verifier. Given a git diff and spec contracts, check whether the implementation satisfies each spec element.
-
-For each spec element (interface, error-contract, behavior, invariant, endpoint):
-1. Find the relevant changes in the diff
-2. Check if the implementation matches the spec requirements
-3. Report PASS or VIOLATION with specifics
-
-Output format (EXACTLY this structure):
-VERDICT: PASS | VIOLATION
-- <spec-name>: PASS | VIOLATION — <one-line details if violation>
-```
-
-5. Parse the verifier output: search for the line starting with `VERDICT:` — extract `PASS` or `VIOLATION`.
-6. On **PASS**: log "Contract verification PASS for `<taskId>`" and continue to the next task.
-7. On **VIOLATION**: run `git -C <projectRoot> revert --no-commit <commit-hash>` then `git -C <projectRoot> reset HEAD`. Re-launch the builder with the original task context plus an appended section:
-   ```
-   ## Contract Violation
-   The following spec violations were found in your previous implementation:
-   <verifier output>
-   Fix all violations listed above.
-   ```
-   This counts as a retry — increment the existing per-task retry counter. If 3 retries are exhausted, stop the phase with the same structured failure format described below.
 
 **On builder failure** (task not marked completed after Task call returned, or no matching commit in `git log`):
 
@@ -260,9 +222,9 @@ Use the Grep tool to search for `TODO|FIXME|HACK|XXX` across the changed files f
 
 Count total tasks across all phases in the plan. Launch reviewers as Task foreground calls (`subagent_type="Explore"`), all parallel in a single message:
 
-- **1-2 tasks** → **1 combined reviewer** (security + quality + completeness + cross-phase integration in one prompt)
-- **3-5 tasks** → **2 reviewers**: security-reviewer + quality-completeness-reviewer (quality, completeness, and cross-phase integration combined)
-- **6+ tasks** → **3 reviewers**: security-reviewer + quality-reviewer + completeness-reviewer
+- **1-2 tasks** → **2 reviewers**: combined-reviewer (security + quality + completeness) + contracts-reviewer
+- **3-5 tasks** → **3 reviewers**: security-reviewer + quality-completeness-reviewer + contracts-reviewer
+- **6+ tasks** → **4 reviewers**: security-reviewer + quality-reviewer + completeness-reviewer + contracts-reviewer
 
 **All reviewers receive:**
 - `Working directory: <projectRoot>`
@@ -276,7 +238,8 @@ Count total tasks across all phases in the plan. Launch reviewers as Task foregr
 **Reviewer mandates:**
 - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
 - **quality-reviewer**: edge cases, error handling, correctness, maintainability
-- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec? Implementation matches `<spec>` contracts — function signatures, error handling, behavioral pre/postconditions, API response shapes. Cross-phase integration — imports resolve across module boundaries, no orphan exports, handoff contracts honored between phases, type consistency across modules
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? Cross-phase integration — imports resolve across module boundaries, no orphan exports, handoff contracts honored between phases, type consistency across modules
+- **contracts-reviewer**: dedicated spec and contract verification. Receives the full plan file (with all `<spec>` sections) plus the list of changed files. For each spec element (`<interface>`, `<error-contract>`, `<behavior>`, `<invariant>`, `<endpoint>`, `<entity>`): read the implementing file(s), verify the implementation satisfies the spec. Report PASS or VIOLATION per spec element with file:line evidence. Also verify: function signatures match `<interface>` specs exactly, error handling matches `<error-contract>` cases, pre/postconditions from `<behavior>` specs are honored, API response shapes match `<endpoint>` specs, entity fields and constraints match `<entity>` specs
 
 All adversarial agents block as foreground Task calls.
 
@@ -317,7 +280,7 @@ bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> [--quick]
 Append `--no-test` only if `noTests` is true (applies to full checks only). Parse the JSON output.
 
 - If all checks pass: proceed to verdict.
-- If any check fails (lint, typecheck, build, test): diagnose which fix-level builder's changes caused the failure. Re-launch that specific builder with error context (1 retry max, `subagent_type="devorch-builder"`). After retry, run `check-project.ts` once more.
+- If any check fails (lint, typecheck, build, test): diagnose which fix-level builder's changes caused the failure. Re-launch that specific builder with error context (1 retry max, `subagent_type="devorch-builder-deep"`). After retry, run `check-project.ts` once more.
   - If retry passes: proceed to verdict.
   - If retry fails or no fix-level builder is responsible: report failures in the verdict as FAIL with specific details.
 
@@ -333,6 +296,7 @@ Append `--no-test` only if `noTests` is true (applies to full checks only). Pars
 Security: <findings ou "✅ clean">
 Quality: <findings ou "✅ clean">
 Completeness: <findings ou "✅ clean">
+Contracts: <PASS/VIOLATION per spec ou "✅ all specs satisfied">
 
 ### Correções de Review
 <N issues corrigidos inline, M via builder agents> (ou "Nenhum")

@@ -52,7 +52,7 @@ After discovery, skip CONVENTIONS.md generation (no code to analyze yet). Contin
 
 **Conventions** (existing projects only): Read `.devorch/CONVENTIONS.md`.
 
-- **If missing** (first-time generation): Run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts <project-root>`. Write the output to `.devorch/CONVENTIONS.md`. Then launch 1 Explore agent (`subagent_type="Explore"`, `model="sonnet"`, thoroughness "quick") to enrich with semantic context the script cannot capture: architectural patterns rationale, active workaround explanations, non-obvious gotchas. Merge the Explore findings into the generated CONVENTIONS.md. Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save initial hashes.
+- **If missing** (first-time generation): Run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts <project-root>`. Write the output to `.devorch/CONVENTIONS.md`. Then launch 1 Explore agent (`subagent_type="Explore"`, thoroughness "quick") to enrich with semantic context the script cannot capture: architectural patterns rationale, active workaround explanations, non-obvious gotchas. Merge the Explore findings into the generated CONVENTIONS.md. Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save initial hashes.
 
 - **If exists**: Run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts`. Parse the JSON output. If `stale` is `false` → skip regeneration, use the existing CONVENTIONS.md as-is. If `stale` is `true` → regenerate: run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts <project-root>`, overwrite `.devorch/CONVENTIONS.md` with the output (no Explore agents for staleness regeneration), then run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update` to save the new hashes.
 
@@ -72,7 +72,7 @@ Store this as `<name>` for all subsequent steps.
 
 **Standard exploration**: Analyze $ARGUMENTS and determine 2-3 distinct exploration focuses relevant to the task. Consider: architecture/integration, risks/edge cases, existing patterns/conventions.
 
-Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`, `model="sonnet"`) in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.
+Launch 2-3 Explore agents (Agent tool with `subagent_type="Explore"`) in parallel in a single message. Each agent receives: a specific focus area (distinct from other agents), $ARGUMENTS, CONVENTIONS.md content (if it exists). Use thoroughness "very thorough" for the primary exploration.
 
 **Effort guidance**: Focus on information gathering. Be concise in summaries — report findings, not reasoning process. Prioritize breadth over depth.
 
@@ -129,7 +129,7 @@ If this reflection surfaces new questions or suggestions, present them in a fina
 
 If user answers revealed new areas to explore, launch additional Explore agents targeted by the user's choices. Append findings to `.devorch/explore-cache-<name>.md`.
 
-Use the Agent tool with `subagent_type="Explore"`, `model="sonnet"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
+Use the Agent tool with `subagent_type="Explore"` for all codebase exploration. **Do NOT read source files directly** — use Explore agent summaries as your evidence base. Use Grep directly only for quantification (counting imports, usage patterns).
 
 **Evidence-based planning**: every task must reference real files discovered by Explore agents, not assumptions. Quantify: "Update 14 files that import from X", not "Update files".
 
@@ -341,10 +341,7 @@ Parse JSON output. If `contentFile` field is present, read that file for full ph
 
 **Cache coverage check**: If the init-phase JSON output contains `cacheCoversPhase: true` → skip explore agents for this phase, log "Cache covers phase N — skipping explore". If `cacheCoversPhase` is `false` → check the `uncoveredFiles` array from init-phase output. If the phase has `<explore-queries>`, the orchestrator evaluates whether `uncoveredFiles` overlap with the queries' targets and decides whether explore is needed. If no explore-queries exist and cache does not cover the phase, let builders use Explore agents as needed.
 
-For each wave, launch builders as foreground parallel Agent calls. Use per-task model and effort from the `tasks` map:
-
-- **`subagent_type`**: If `task.effort == "high"`, use `"devorch-builder-deep"`. Otherwise use `"devorch-builder"`.
-- **`model` override**: If `task.model` is set, pass it as the `model` parameter in the Agent call. Otherwise omit (defaults to `opus`).
+For each wave, launch builders as foreground parallel Agent calls. All tasks use `subagent_type="devorch-builder-deep"` (opus/high effort). No per-task model or effort overrides.
 
 Each builder receives:
 - `Working directory: <projectRoot>`
@@ -372,7 +369,7 @@ After all builders in a wave return, verify via `TaskList` that every task is ma
 1. For each completed task in the wave, check if the task body (from `tasks[taskId]` in init-phase output) contains an explicit `**Spec refs**:` field with a non-empty value. If absent or empty, log "No explicit spec refs for `<taskId>` — skipping contract verification" and skip to the next task.
 2. Find the builder's commit hash: run `git -C <projectRoot> log --oneline --format="%H %s" -20` and search for a commit message containing the task ID. Extract the hash. If no match found, log "No commit found for task `<taskId>` — skipping contract verification" and skip.
 3. Extract the diff: `git -C <projectRoot> show <commit-hash>` (full diff including stat).
-4. Launch a verification agent (`subagent_type="Explore"`, `model="sonnet"`) with a prompt that includes the exact verifier template below, followed by the git diff and spec contracts text from `specsByTask[taskId]`:
+4. Launch a verification agent (`subagent_type="Explore"`) with a prompt that includes the exact verifier template below, followed by the git diff and spec contracts text from `specsByTask[taskId]`:
 
 ```
 You are a contract verifier. Given a git diff and spec contracts, check whether the implementation satisfies each spec element.
@@ -460,14 +457,15 @@ Use the Grep tool to search for `TODO|FIXME|HACK|XXX` across the changed files (
 
 Count total tasks across all phases. Launch reviewers as foreground parallel Agent calls (`subagent_type="Explore"`), all in a single message:
 
-- **1-2 tasks** → **1 combined reviewer** (security + quality + completeness + cross-phase integration in one prompt)
-- **3-5 tasks** → **2 reviewers**: security-reviewer + quality-completeness-reviewer (quality, completeness, and cross-phase integration combined)
-- **6+ tasks** → **3 reviewers**: security-reviewer + quality-reviewer + completeness-reviewer
+- **1-2 tasks** → **2 reviewers**: combined-reviewer (security + quality + completeness) + contracts-reviewer
+- **3-5 tasks** → **3 reviewers**: security-reviewer + quality-completeness-reviewer + contracts-reviewer
+- **6+ tasks** → **4 reviewers**: security-reviewer + quality-reviewer + completeness-reviewer + contracts-reviewer
 
 Each reviewer receives: `Working directory: <projectRoot>`, plan objective, CONVENTIONS.md content, list of changed files. Reviewer mandates:
 - **security-reviewer**: vulnerabilities, injection risks, auth issues, data exposure, secrets
 - **quality-reviewer**: edge cases, error handling, correctness, maintainability
-- **completeness-reviewer**: everything from the plan was implemented? anything missing? behavior matches spec? Cross-phase integration — imports resolve, no orphan exports, handoff contracts honored, type consistency across modules
+- **completeness-reviewer**: everything from the plan was implemented? anything missing? Cross-phase integration — imports resolve, no orphan exports, handoff contracts honored, type consistency across modules
+- **contracts-reviewer**: dedicated spec and contract verification. Receives the full plan file (with all `<spec>` sections) plus the list of changed files. For each spec element (`<interface>`, `<error-contract>`, `<behavior>`, `<invariant>`, `<endpoint>`, `<entity>`): read the implementing file(s), verify the implementation satisfies the spec. Report PASS or VIOLATION per spec element with file:line evidence. Also verify: function signatures match `<interface>` specs exactly, error handling matches `<error-contract>` cases, pre/postconditions from `<behavior>` specs are honored, API response shapes match `<endpoint>` specs
 
 **Fix findings**:
 - **Trivial** (1-2 files, fix is self-evident): fix directly with Edit tool.
@@ -509,6 +507,7 @@ All merge operations in this step run from `<mainRoot>` (the main repo), not `<p
    Security: <findings ou "✅ clean">
    Quality: <findings ou "✅ clean">
    Completeness: <findings ou "✅ clean">
+   Contracts: <PASS/VIOLATION per spec ou "✅ all specs satisfied">
 
    ### Correções de Review
    <N issues corrigidos inline, M via builder agents> (ou "Nenhum")
@@ -557,38 +556,18 @@ Quality guardrails:
 - Max **5 tasks** per phase. Tasks can span multiple related files when the changes are cohesive. Each completable by one builder.
 - **1 task = 1 responsibility** — a task should address one cohesive concern. "Cohesive" means single responsibility: one logical change, one module boundary, one spec contract family. When in doubt, split.
   - Recommend splitting when a task's **Spec refs** point to specs operating on clearly different components or modules (semantic judgment by the planner, not a computable rule).
-  - When a task is classified `opus`/`high` and the complexity comes from volume rather than reasoning depth, consider splitting into 2 tasks at `sonnet`/`medium` IF the resulting tasks are parallelizable (no producer/consumer dependency).
+  - When a task is large from volume rather than reasoning depth, consider splitting into 2 focused tasks IF they are parallelizable (no producer/consumer dependency).
   - Prefer wider waves with focused tasks over narrower waves with complex tasks — 4 focused tasks in 1 parallel wave beats 2 complex tasks in 1 wave.
 - Each phase MUST fit in 1 phase execution without context compaction.
 - Prefer fewer phases with well-scoped tasks. Each builder now has ample context (1M tokens) — use it by including more relevant explore-cache and conventions per task.
 - Include ALL relevant explore-cache sections for each task, not just the minimum. Builders benefit from broader context when it's fresh and focused.
 - **Minimize phase count**: With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate adjacent phases when safe (see Phase consolidation guidance in Step 6). A 2-phase plan that takes 10 min is better than a 4-phase plan that takes 18 min for the same work.
 
-## Per-Task Model & Effort Classification
+## Per-Task Model & Effort
 
-Each task can optionally specify `**Model**` and `**Effort**` to optimize cost and speed without losing quality. **Both fields are optional** — when omitted, defaults are `opus` / `medium`.
+All tasks run at **opus / high** — no per-task model or effort overrides. The `**Model**` and `**Effort**` fields in task definitions are ignored; every builder is dispatched as `devorch-builder-deep` with opus at high effort.
 
-### Classification rules
-
-Classify each task based on its complexity, risk, and type:
-
-| Task characteristics | Model | Effort | Examples |
-|---|---|---|---|
-| Simple edits: docs, config, renaming, copy changes | sonnet | low | Update README, change env var names, adjust config values |
-| Straightforward implementation with clear spec, 1-3 files | sonnet | medium | Add a new route handler following existing pattern, create a simple component |
-| Implementation with clear spec, moderate complexity, following existing patterns | sonnet | medium | Implement a service with 2-3 methods following existing pattern, wire up a new module, CRUD endpoints |
-| Implementation with moderate complexity, cross-module or no clear precedent | opus | medium | Implement a service integrating multiple modules, new API patterns |
-| Multi-file changes with cross-module interactions | opus | high | Refactor shared utilities, implement middleware affecting multiple routes |
-| Complex algorithms, state management, security-sensitive code | opus | high | Auth logic, payment processing, data migration, concurrency handling |
-| New architecture patterns, system design decisions | opus | high | First implementation of a new pattern the codebase will follow |
-
-### Guidelines
-
-- **Default to sonnet/medium** for tasks with clear spec and existing patterns in the codebase. Escalate to `opus` when cross-module reasoning, novel patterns, or security-sensitive logic is involved.
-- **Sonnet is the workhorse**: most implementation tasks with a clear spec and codebase precedent run well on sonnet. Reserve opus for tasks where the model needs to reason across module boundaries or make architectural decisions.
-- **Effort matters more than model** for quality: `opus` at `medium` handles most implementation work well. Reserve `high` for tasks where reasoning depth directly impacts correctness.
-- **Never use `low` effort** for tasks that involve logic, only for pure text/config changes.
-- **Fix-loop tasks** (from review findings) always run at `high` effort regardless of plan classification — the build orchestrator overrides this.
+This maximizes reasoning depth across all tasks. Task splitting for parallelism remains the primary optimization lever — split by scope, not by model tier.
 
 ## Plan Format
 
@@ -684,8 +663,8 @@ Validated structurally but not yet delivered per-task to builders.
 #### 1. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
-- **Model**: <sonnet|opus> <!-- optional, default: opus. Use sonnet for simple/pattern-following tasks -->
-- **Effort**: <low|medium|high> <!-- optional, default: medium. See Per-Task Model & Effort Classification -->
+- **Model**: opus <!-- always opus -->
+- **Effort**: high <!-- always high -->
 - **Repo**: <name> <!-- optional, default: primary. Use secondary repo name when task targets a satellite repo -->
 - **Spec refs**: <comma-separated spec names from phase <spec> section> <!-- optional -->
 - <specific action>
@@ -694,8 +673,8 @@ Validated structurally but not yet delivered per-task to builders.
 #### 2. <Task Name>
 - **ID**: <kebab-case>
 - **Assigned To**: <builder-name>
-- **Model**: <sonnet|opus> <!-- optional -->
-- **Effort**: <low|medium|high> <!-- optional -->
+- **Model**: opus <!-- always opus -->
+- **Effort**: high <!-- always high -->
 - **Spec refs**: <comma-separated spec names> <!-- optional -->
 - <specific action>
 
@@ -728,7 +707,7 @@ Validated structurally but not yet delivered per-task to builders.
 - Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`, `<entity name>`. All names must be unique within a phase.
 - Entity element: `<entity name="...">` requires `name` attribute and at least one child element (`<field>`, `<relationship>`, or `<constraint>`). `<field>` requires `name` attribute. `<relationship>` requires `target` attribute. `<constraint>` requires non-empty body text.
-- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (optional — `sonnet` or `opus`, default: `opus`), `**Effort**` (optional — `low`, `medium`, or `high`, default: `medium`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
+- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (always `opus`), `**Effort**` (always `high`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
 - Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high.
 - Endpoint spec refs use the auto-generated `METHOD-/path` format (e.g., `GET-/api/health`) matching the `<endpoint path method>` tag attributes.
 
