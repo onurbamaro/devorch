@@ -496,12 +496,12 @@ if (phases.length === 0) {
       // Recognized optional fields: Exemplars, Non-goals.
       // Both accept any non-empty value; absence is also valid. No error either way.
       // Explicit recognition here documents them as supported task-level fields.
-      const exemplarsMatch = section.match(/\*\*Exemplars\*\*:\s*(.+)/i);
+      const exemplarsMatch = section.match(/^\s*\*\*Exemplars\*\*:\s*(.+)$/im);
       if (exemplarsMatch && !exemplarsMatch[1].trim()) {
         warnings.push(`Phase ${phase.num}: task "${tid}" has empty Exemplars field — omit the line or provide paths`);
       }
 
-      const nonGoalsMatch = section.match(/\*\*Non-goals\*\*:\s*(.+)/i);
+      const nonGoalsMatch = section.match(/^\s*\*\*Non-goals\*\*:\s*(.+)$/im);
       if (nonGoalsMatch && !nonGoalsMatch[1].trim()) {
         warnings.push(`Phase ${phase.num}: task "${tid}" has empty Non-goals field — omit the line or provide a description`);
       }
