@@ -158,8 +158,9 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 
 | Command | What it does | Uses agents |
 |---------|-------------|-------------|
-| `/devorch` | Unified entry. Triages to quick/scoped/full, applies guardian pass, executes at scope-appropriate ceremony. | Explore, Builder |
-| `/devorch:worktrees` | List, merge, or delete devorch worktrees. | -- |
+| `/devorch` | Unified entry. Triages to quick/scoped/full, applies guardian pass, executes at scope-appropriate ceremony, handles merge (including coordinated multi-repo). | Explore, Builder |
+
+Worktree listing or deletion outside the `/devorch` flow is left to plain git (`git worktree list`, `git worktree remove <path>`, `git branch -D <branch>`). A dedicated `/devorch:worktrees` command was removed in favor of asking Claude Code directly when needed.
 
 ---
 
@@ -214,11 +215,7 @@ capabilities:
 commands:
   - name: devorch
     signature: /devorch [--quick|--full|--resume|--worktree] "<description>"
-    purpose: Unified entry — triage (quick/scoped/full), guardian pass, execute at scope-appropriate ceremony
-    status: active
-  - name: worktrees
-    signature: /devorch:worktrees
-    purpose: List, merge, or delete devorch worktrees
+    purpose: Unified entry — triage (quick/scoped/full), guardian pass, execute at scope-appropriate ceremony, coordinated multi-repo merge
     status: active
 
 architecture:
