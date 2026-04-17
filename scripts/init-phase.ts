@@ -632,6 +632,55 @@ for (const [taskId, task] of Object.entries(tasks)) {
   }
 }
 
+// --- Per-task slice size gates (Principle 2: fresh context with filter gates) ---
+/**
+ * Approximate the token footprint of each task's injected slice and emit warnings
+ * when it falls outside the healthy band. Rationale: Principle 2 of the v3 redesign
+ * states subagents get curated, isolated context — if the filter yields too little
+ * (<3K tokens) the task is likely under-contextualized and the builder will flail;
+ * if it yields too much (>30K tokens) curation failed and we are back to bulk
+ * context. Thresholds 3K/30K match the plan's explicit gate. Token approximation
+ * uses `Math.ceil(charCount / 4)` — good enough to triage; exact counts are not
+ * worth a tiktoken dependency here.
+ */
+const TOKEN_GATE_UNDER = 3000;
+const TOKEN_GATE_OVER = 30000;
+
+// Resolve convention header list → full section content for accurate size measurement.
+const conventionSectionByHeader = new Map<string, string>();
+for (const section of parseConventionSections(conventions)) {
+  if (section.header) {
+    conventionSectionByHeader.set(`## ${section.header}`, section.content);
+  }
+}
+
+const sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }> = [];
+
+for (const taskId of Object.keys(tasks)) {
+  const sectionHeaders = conventionSectionsByTask[taskId] ?? [];
+  const conventionsSlice = sectionHeaders
+    .map((h) => conventionSectionByHeader.get(h) ?? "")
+    .join("\n");
+  const cacheSlice = cacheByTask[taskId] ?? "";
+  const specSlice = specsByTask[taskId] ?? "";
+  const codeStructureSlice = codeStructureByTask[taskId] ?? "";
+
+  const combined = conventionsSlice + cacheSlice + specSlice + codeStructureSlice;
+  const charCount = combined.length;
+
+  if (charCount === 0) {
+    sliceWarnings.push({ taskId, tokens: 0, direction: "under" });
+    continue;
+  }
+
+  const tokens = Math.ceil(charCount / 4);
+  if (tokens < TOKEN_GATE_UNDER) {
+    sliceWarnings.push({ taskId, tokens, direction: "under" });
+  } else if (tokens > TOKEN_GATE_OVER) {
+    sliceWarnings.push({ taskId, tokens, direction: "over" });
+  }
+}
+
 // --- Build output content ---
 const parts: string[] = [];
 
@@ -755,6 +804,8 @@ const result: {
   cacheCoversPhase: boolean;
   /** File paths from phase relevant-files that are not covered by any cache section. */
   uncoveredFiles: string[];
+  /** Per-task slice-size gate warnings. `under` = <3K tokens (likely under-contextualized); `over` = >30K tokens (curation failed). Empty array when all tasks are within bounds. See Principle 2. */
+  sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }>;
   content?: string;
   contentFile?: string;
 } = {
@@ -773,6 +824,7 @@ const result: {
   exploreQueries,
   cacheCoversPhase,
   uncoveredFiles,
+  sliceWarnings,
 };
 
 if (conventions) {
