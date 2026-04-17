@@ -12,7 +12,6 @@ import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 import {
-  FAST_PATH_WHITELIST,
   extractFileRefs,
   extractExtensions,
   filterCacheByRefs,
@@ -309,8 +308,11 @@ const codeStructureByTask: Record<string, string> = {};
 const exemplarsByTask: Record<string, string[]> = {};
 const nonGoalsByTask: Record<string, string> = {};
 
+// Parse conventions once per phase — reused by the per-task filter, the
+// contextual Testing gate, and the slice-size computation below.
+const parsedConventionSections = parseConventionSections(conventions);
 const conventionSectionHeaders = new Set(
-  parseConventionSections(conventions)
+  parsedConventionSections
     .map((s) => s.header)
     .filter(Boolean)
     .map((h) => `## ${h}`),
@@ -318,7 +320,7 @@ const conventionSectionHeaders = new Set(
 
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskExts = extractExtensions(task.content);
-  let taskSections = filterConventionsForTask(conventions, taskExts);
+  const taskSections = filterConventionsForTask(parsedConventionSections, taskExts, planFastPath);
 
   const taskRefs = extractFileRefs(task.content);
   cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
@@ -333,13 +335,6 @@ for (const [taskId, task] of Object.entries(tasks)) {
     shouldIncludeTesting(task.content, taskRefs)
   ) {
     taskSections.push("## Testing");
-  }
-
-  // Fast-path whitelist: intersection with filtered set AND sections present in conventionsText
-  if (planFastPath) {
-    taskSections = FAST_PATH_WHITELIST.filter(
-      (h) => taskSections.includes(h) && conventionSectionHeaders.has(h),
-    );
   }
 
   conventionSectionsByTask[taskId] = taskSections;
@@ -382,7 +377,7 @@ for (const [taskId, task] of Object.entries(tasks)) {
 
 // Resolve convention header list → full section content for accurate size measurement.
 const conventionSectionByHeader = new Map<string, string>();
-for (const section of parseConventionSections(conventions)) {
+for (const section of parsedConventionSections) {
   if (section.header) {
     conventionSectionByHeader.set(`## ${section.header}`, section.content);
   }

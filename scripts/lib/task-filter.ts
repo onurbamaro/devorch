@@ -150,17 +150,19 @@ export function parseFastPath(planContent: string): boolean {
  * Return the list of convention section headers (each prefixed with `## `)
  * matching the task's referenced file extensions. When `planFastPath` is true,
  * the result is intersected with {@link FAST_PATH_WHITELIST} and restricted to
- * headers actually present in `conventionsText`, matching the behavior of the
- * inline fast-path gate that lived in init-phase.ts.
+ * headers actually present in `sections`, matching the behavior of the inline
+ * fast-path gate that lived in init-phase.ts.
+ *
+ * Callers pass pre-parsed sections so conventions are parsed once per phase,
+ * not once per task.
  */
 export function filterConventionsForTask(
-  conventionsText: string,
+  sections: ConventionSection[],
   taskExts: Set<string>,
   planFastPath?: boolean,
 ): string[] {
-  if (!conventionsText || taskExts.size === 0) return [];
+  if (sections.length === 0 || taskExts.size === 0) return [];
 
-  const sections = parseConventionSections(conventionsText);
   let matched: string[] = [];
 
   for (const section of sections) {
