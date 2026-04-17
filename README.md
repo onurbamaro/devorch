@@ -22,6 +22,35 @@ Stop feeding Claude Code one prompt at a time. devorch breaks your work into pha
 
 ---
 
+## v3 (recommended): one command, right-sized ceremony
+
+Starting in v3, the primary entry point is a single command: **`/d`**. It classifies the request (quick / scoped / full), applies an inline senior-guardian pass against industry standards, and executes at the ceremony level the scope actually deserves. Trivial edits skip planning entirely; multi-module features still get full phased execution with waves.
+
+```
+/d "fix the login redirect bug"              # triaged to quick — direct edit
+/d "add POST /orders/bulk endpoint"           # triaged to scoped — single gate, targeted explore
+/d "add real-time order dashboard"            # triaged to full — worktree, phases, waves
+/d --full "<...>"                             # override classification
+/d --resume                                   # resume an active worktree
+```
+
+The guardian is active in every mode. Security (OWASP), performance, architecture, and operations patterns are checked inline — heads-up redirects surface when there's a known-right answer, bifurcations only surface when the trade-off is legitimate. Personal priorities live in `.devorch/profile.yml`.
+
+**What's new in v3:**
+- One command replaces talk + build + fix conceptually (v2 commands still work — see below)
+- Triage is LLM-inline, not a script — intent classification is judgment
+- Ceremony is proportional to scope — `quick` skips planning, `full` is unchanged
+- Guardian posture is default-on, silent when code is correct
+- Edge cases are enumerated up front; questions fire only on real bifurcations
+- Single gate UX: `[Nenhum / Todos / Números]` instead of question chains
+- Profile-driven priorities (performance, security, cost, dx) weight bifurcations
+
+**v2 commands remain functional** for resuming in-flight plans — `/devorch:talk`, `/devorch:build`, `/devorch:fix`, `/devorch:worktrees` all continue to work unchanged. New work should prefer `/d`.
+
+Philosophy, profile format, and flag handling are documented in `docs/PHILOSOPHY.md`, `docs/PROFILE.md`, and `docs/FLAGS.md`.
+
+---
+
 ## Quick Start
 
 ### Install
@@ -132,9 +161,10 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 
 | Command | What it does | Uses agents |
 |---------|-------------|-------------|
-| `/devorch:talk` | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore |
-| `/devorch:fix` | Targeted fix with investigation. Classifies, investigates, implements, validates. | Explore |
-| `/devorch:build` | Executes all remaining phases + adversarial final verification. Supports `--no-tests` to skip test suite. | Explore, Builder |
+| `/d` (v3, recommended) | Unified entry. Triages to quick/scoped/full, applies guardian pass, executes at scope-appropriate ceremony. | Explore, Builder |
+| `/devorch:talk` (v2) | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore |
+| `/devorch:fix` (v2) | Targeted fix with investigation. Classifies, investigates, implements, validates. | Explore |
+| `/devorch:build` (v2) | Executes all remaining phases + adversarial final verification. Supports `--no-tests` to skip test suite. | Explore, Builder |
 | `/devorch:worktrees` | List, merge, or delete devorch worktrees. | -- |
 
 ---
@@ -170,8 +200,8 @@ Installed to `~/.claude/` (commands, agents, scripts, hooks). Per-project state 
 ```yaml
 project:
   name: devorch
-  version: 2.0.0
-  description: Multi-agent orchestration framework for Claude Code
+  version: 3.0.0
+  description: Multi-agent orchestration framework for Claude Code (v3: unified /d command, scope-proportional ceremony, guardian-by-default)
   license: MIT
   runtime: Bun
   language: TypeScript
@@ -188,18 +218,26 @@ capabilities:
   - Multi-repo orchestration with satellite worktrees
 
 commands:
+  - name: d
+    signature: /d [--quick|--full|--resume|--worktree] "<description>"
+    purpose: v3 unified entry — triage (quick/scoped/full), guardian pass, execute at scope-appropriate ceremony
+    status: recommended
   - name: talk
     signature: /devorch:talk "<description>"
-    purpose: Conversation, exploration, and planning with Explore agents
+    purpose: v2 — conversation, exploration, and planning with Explore agents
+    status: legacy (v2 plans still supported)
   - name: fix
     signature: /devorch:fix "<description>"
-    purpose: Targeted fix with investigation, direct execution, and verification
+    purpose: v2 — targeted fix with investigation, direct execution, and verification
+    status: legacy
   - name: build
     signature: /devorch:build [--plan <name>] [--no-tests]
-    purpose: Execute all remaining phases then verify with adversarial review
+    purpose: v2 — execute all remaining phases then verify with adversarial review
+    status: legacy
   - name: worktrees
     signature: /devorch:worktrees
-    purpose: List, merge, or delete devorch worktrees
+    purpose: List, merge, or delete devorch worktrees (v2 + v3)
+    status: active
 
 architecture:
   agents:
