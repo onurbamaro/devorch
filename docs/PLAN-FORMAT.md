@@ -108,8 +108,8 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 
 #### 2. <Task Name>
 - **ID**: <kebab-case>
-- **Assigned To**: devorch-builder-spec       <!-- spec-driven variant when interface+behavior+invariants fully closed -->
-- **Model**: opus
+- **Assigned To**: devorch-builder-mech       <!-- mechanical variant when no decisions remain and edits are literal -->
+- **Model**: sonnet
 - **Effort**: high
 - **Spec refs**: <names>
 - <specific action>
@@ -154,23 +154,19 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 
 ## Model/Effort policy
 
-Three builder variants map to three task profiles. The F3c dispatcher routes on `Model`+`Effort`:
+Two builder variants map to two task profiles. The F3c dispatcher routes on `Model`+`Effort`:
 
 - **devorch-builder-mech** — `Model: sonnet`, `Effort: high`. Strictly mechanical work: renames,
   config tweaks, typos, literal scaffold against a completed interface. Zero design judgment.
   Use **only** when the task has no decisions left to make and touches 1–2 files.
-- **devorch-builder-spec** — `Model: opus`, `Effort: high`. Spec-driven work where
-  `<interface>`/`<behavior>`/`<invariant>` are fully closed. Builder enforces CONTRACT MAP
-  rigorously; the spec carries the inference so reasoning budget can be lower.
 - **devorch-builder-deep** — `Model: opus`, `Effort: xhigh`. **Default.** Anything complex,
-  fix-loop, debugging, refactors, or tasks without a fully-closed spec.
+  fix-loop, debugging, refactors, spec-driven work, or tasks without a fully-closed spec.
 
 `Effort: max` is not used — Max-plan subscribers (20x) prefer xhigh + retry-safety over max.
 
-When the guardian drafts the plan (F2.4), it classifies each task through three gates in order:
+When the guardian drafts the plan (F2.4), it classifies each task through two gates in order:
 1. Is it strictly mechanical (no decisions, 1–2 files, literal edits)? → `mech`
-2. Does the spec fully close interface + behavior + invariants? → `spec`
-3. Else → `deep` (default)
+2. Else → `deep` (default)
 
 If in doubt, pick `deep` — the cost of an upgraded builder is trivial compared to a retry.
 

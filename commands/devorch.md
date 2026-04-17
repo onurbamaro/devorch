@@ -212,12 +212,11 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 3. Emit the same transparency block (Step S3) and a single `AskUserQuestion` gate with `Nenhum / Todos / Números`. Resolve bifurcations in follow-up rounds if needed. **Skip-when-silent**: se `K + J == 0`, pule o bloco e o gate por completo e prossiga direto para o Step 4. Princípio 5.
 4. Draft the plan following the canonical format in `docs/PLAN-FORMAT.md`: `<description>`, `<objective>`, `<classification>`, `<decisions>`, optional `<problem-statement>` + `<solution-approach>` (medium/complex), `<relevant-files>` with optional `<secondary-repos>` for multi-repo, and numbered `<phaseN>` blocks containing `<goal>`, `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>`. Write it to `<projectRoot>/.devorch/plans/<name>.md`.
 
-   **Per-task model/effort classification** (mandatory when drafting `<tasks>`): for each task, pick one of three builder variants through these gates in order (see `docs/PLAN-FORMAT.md` § Model/Effort policy for full rationale):
+   **Per-task model/effort classification** (mandatory when drafting `<tasks>`): for each task, pick one of two builder variants through these gates in order (see `docs/PLAN-FORMAT.md` § Model/Effort policy for full rationale):
    - Gate 1 — **strictly mechanical?** No decisions, 1–2 files, literal edits (rename, config tweak, typo fix, 1:1 boilerplate mirrored from an exemplar). → `Assigned To: devorch-builder-mech` · `Model: sonnet` · `Effort: high`
-   - Gate 2 — **spec fully closed?** `<interface>` + `<behavior>` + `<invariant>` specify the task with zero design room. → `Assigned To: devorch-builder-spec` · `Model: opus` · `Effort: high`
-   - Gate 3 — **default** (complex, fix/debug, partial spec, cross-cutting, or any doubt). → `Assigned To: devorch-builder-deep` · `Model: opus` · `Effort: xhigh`
+   - Gate 2 — **default** (complex, fix/debug, partial spec, cross-cutting, or any doubt). → `Assigned To: devorch-builder-deep` · `Model: opus` · `Effort: xhigh`
 
-   Never emit `Effort: max`. When in doubt between two gates, pick the deeper one — cost of a retry outweighs the reasoning-token delta.
+   Never emit `Effort: max`. When in doubt between the two gates, pick the deeper one — cost of a retry outweighs the reasoning-token delta.
 
    **Multi-repo detection**: If the Step 1 `map-project.ts` output contained a `## Sibling Repos` section, OR `$ARGUMENTS` explicitly mentions more than one repo, OR the guardian pass flagged multi-repo intent, include `<secondary-repos>` in the plan with the chosen sibling paths. The user should have confirmed sibling selection in the gate (Step 5). Siblings are typically at `../<name>/` relative to `<mainRoot>` or absolute paths under `~/dev/`.
 
@@ -241,8 +240,7 @@ Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: 
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool. **Pick the builder variant per task** from its `model`+`effort` fields (already parsed and emitted by `init-phase.ts`):
 
 - `model: sonnet` (any effort) → `subagent_type="devorch-builder-mech"` — strictly mechanical tasks.
-- `model: opus` + `effort: high` → `subagent_type="devorch-builder-spec"` — spec-driven tasks with `<interface>`/`<behavior>`/`<invariant>` fully closed.
-- Else (including `model: opus` + `effort: xhigh`, missing fields, or anything ambiguous) → `subagent_type="devorch-builder-deep"` (default).
+- Else (including `model: opus` at any effort, missing fields, or anything ambiguous) → `subagent_type="devorch-builder-deep"` (default).
 
 `effort: max` is not used — never dispatch with max.
 
@@ -254,7 +252,7 @@ After each wave returns: verify task completion via `TaskList`, extract `## Buil
 
 **On builder failure** (no matching commit or reported failure): retry per task (max 3 attempts). Each retry appends a `## Previous Failure Context` section to the builder prompt containing: retry count, last 50 lines of prior output, git diff from the failed attempt (or "no commits"), and an instruction to diagnose the root cause rather than repeat the approach. On retry exhaustion (3/3): stop the phase, emit a structured failure report with the error timeline and suggest `/devorch --full` re-planning.
 
-**On builder escalation** (build report contains `Model fit: wrong agent — needs builder-spec` or `builder-deep`, and no commit was made): do not count as a failure. Re-dispatch the same task to the escalated variant immediately (no `## Previous Failure Context` — the task was not attempted). If the escalated builder also escalates, treat as a failure and follow the 3-attempt retry rule on `devorch-builder-deep`.
+**On builder escalation** (build report contains `Model fit: wrong agent — needs builder-deep`, and no commit was made): do not count as a failure. Re-dispatch the same task to `devorch-builder-deep` immediately (no `## Previous Failure Context` — the task was not attempted). If `devorch-builder-deep` also escalates, treat as a failure and follow the 3-attempt retry rule on `devorch-builder-deep`.
 
 #### F3d. Per-phase check
 If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
