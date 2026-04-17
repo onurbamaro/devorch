@@ -1,191 +1,348 @@
 # devorch Philosophy
 
-> This document captures the core principles behind devorch.
+> This document captures the core principles behind devorch v3.
 > Use it as a litmus test when evaluating new Claude Code features:
 > if a native feature honors these principles, adopt it.
 > If it violates them, keep the devorch approach.
 
----
-
-## Principle 1: The Orchestrator Must Stay Light
-
-The orchestrator's context window is sacred. It should never grow proportionally
-to the size of the work being done. A 2-hour build across 15 tasks should leave
-the orchestrator at roughly the same context size as a 10-minute build with 2 tasks.
-
-**Why this matters:** LLM quality degrades with context size -- not because the
-model runs out of space, but because attention becomes diluted. At 300K tokens,
-the model is statistically less likely to recall a decision made at token 10K.
-The 1M context window enables the orchestrator to coordinate more efficiently --
-holding phase logic, script outputs, and builder dispatch inline -- but it does
-not change the fundamental principle: focused context beats diluted context.
-Coordination overhead can safely live in the orchestrator's window; implementation
-details must stay in isolated builder contexts.
-
-**How devorch enforces this:**
-- Builder agents run in isolated contexts that are destroyed after each task
-- Only structured summaries (state.md, handoffs) flow back to the orchestrator
-- Exploration happens in separate Explore agents -- findings are cached, not inlined
-- Scripts compute results outside the LLM and return only JSON output
-- Per-task filtering ensures builders receive only conventions and cache relevant to their task
-
-**Validation question:** _"Does this change cause the orchestrator's context to
-grow with the number of tasks?"_ If yes, it violates Principle 1.
+devorch v3 operates on nine principles. The framing reflects a year of
+running earlier iterations against real work and learning where the
+original framing created friction that wasn't earning quality. The
+"Changes from v2" section near the end preserves the historical delta
+from the seven-principle v2 set for reference.
 
 ---
 
-## Principle 2: Fresh Context Beats Accumulated Context
+## Principle 1: Orchestrator stays focused, not small
 
-A builder working on task #15 should have the same quality of context as the
-builder working on task #1. This is impossible when all work happens in a single
-conversation -- by task #15, the context contains 14 tasks worth of code diffs,
-lint outputs, error messages, and fix attempts that are irrelevant noise.
+The orchestrator's context window is not sacred because it is small --
+it is sacred because it is the dispatch surface. With a 1M token window,
+coordination logic, script outputs, classification, and validation can
+live inline. What must not live there is implementation detail: source
+files being edited, debug traces, builder retries, raw exploration dumps.
 
-**Why this matters:** Context compaction (automatic summarization of old messages)
-is lossy by definition. Critical architectural decisions, naming conventions, and
-edge cases discussed early in a session can be lost or distorted when compacted.
-Each compaction is an irreversible information loss event.
+**Why this matters:** LLM attention is not uniform across long contexts.
+The "lost in the middle" effect is well documented -- models recall
+recent and opening tokens far better than material buried in the middle
+third. A focused orchestrator with 40K of coordination state outperforms
+a diluted orchestrator with 400K of mixed coordination and implementation
+noise. The 1M window removes the excuse for ceremonial delegation, not
+the cost of contextual dilution.
 
 **How devorch enforces this:**
-- Each builder receives a curated, minimal context: plan excerpt + conventions +
-  relevant explore-cache + phase handoff (~6-10K tokens total)
+- Triage classification happens inline in the orchestrator (Opus, short thinking)
+- Scripts return structured JSON; raw file content does not enter the orchestrator
+- Builder agents run in isolated contexts destroyed after each task
+- Explorations return cached summaries, not inlined source
+- Per-task filtering keeps the orchestrator out of per-file detail
+
+**Validation question:** _"Is this content helping the orchestrator decide
+and dispatch, or is it implementation detail that belongs in a builder?"_
+If the latter, it does not belong in the orchestrator.
+
+---
+
+## Principle 2: Fresh context per subagent, with filter gates
+
+A builder working on task #15 should have the same quality of context as
+the builder working on task #1. Every subagent -- builder, explorer,
+reviewer -- starts from a curated, isolated slice. But curation is not
+blind: if the filter returns unusually little or unusually much, devorch
+pauses and surfaces the slice to the human before spending tokens on it.
+
+**Why this matters:** Context compaction is lossy by definition, and
+accumulated context is the primary vector for quality decay across long
+sessions. Critical conventions discussed at token 5K are statistically
+less reliable at token 300K. A fresh slice avoids the decay entirely.
+But the slice can also fail in the other direction: a filter that
+returns 500 tokens is under-informed, one that returns 80K has already
+lost focus. Gates on slice size catch both failure modes before execution.
+
+**How devorch enforces this:**
+- Each builder receives plan excerpt + conventions slice + cache slice + handoff
+- Typical builder context: 6-10K tokens
+- `init-phase.ts` filters conventions and cache per task
+- Size gate: if any task returns under 3K or over 30K tokens, pause and surface
 - Builders never see other builders' work, errors, or intermediate states
-- Phase handoffs are explicit and structured -- not compressed conversation history
-- The explore-cache is filtered per-task to include only relevant discoveries
 
-**Validation question:** _"Does task N have worse context quality than task 1?"_
-If yes, it violates Principle 2.
+**Validation question:** _"Does every subagent start from a slice I would
+be willing to paste into a fresh conversation?"_ If not, the filter is wrong.
 
 ---
 
-## Principle 3: Compute Outside the LLM When Possible
+## Principle 3: Mechanical outside the LLM, judgment inside
 
-Every token the LLM spends on mechanical computation (parsing files, running
-regex, counting dependencies, detecting conventions) is a token not spent on
-reasoning. Scripts are deterministic, fast, and free in terms of context cost.
+Scripts beat LLMs at filesystem walks, git operations, parsing, hashing,
+and deterministic execution. LLMs beat scripts at intent classification,
+edge case enumeration, semantic detection, and architectural judgment.
+The line is not "less LLM is better" -- it is "put each job where it
+wins." Triage classification is judgment; it belongs in Opus inline.
+Directory traversal is mechanical; it belongs in a script.
 
-**Why this matters:** When the LLM runs `Glob` + `Read` + `Grep` to understand
-a project's structure, it spends 15-20K tokens on tool calls and reasoning about
-results. A script like `map-project.ts` does the same work in 200ms and returns
-a 2K token structured result. The LLM gets better input at 10x less context cost.
+**Why this matters:** Every token spent on mechanical work is a token
+not spent on reasoning, and mechanical work executed by an LLM is
+slower, more expensive, and less reliable than the same work as a
+script. The inverse is also true: forcing judgment into a regex or a
+rule engine produces brittle systems that fail on the first novel case.
+Misplacing work in either direction costs quality.
 
 **How devorch enforces this:**
-- `map-project.ts` -- discovers tech stack, folder structure, dependencies
-- `map-conventions.ts` -- analyzes code patterns, generates CONVENTIONS.md
-- `init-phase.ts` -- loads and filters all phase context in one call
-- `check-project.ts` -- runs lint/typecheck/build/test in parallel
-- `validate-plan.ts` -- validates plan structure deterministically
-- `phase-summary.ts` -- generates commit messages + state updates
-- `manage-cache.ts` -- trims explore-cache without LLM involvement
+- `map-project.ts`, `map-conventions.ts`, `init-phase.ts`, `check-project.ts`,
+  `validate-plan.ts`, `phase-summary.ts`, `manage-cache.ts` -- mechanical
+- Triage (quick/scoped/full classification) -- judgment, inline Opus
+- Guardian review (industry standards vs code reality) -- judgment, inline
+- Edge case enumeration and bucketing -- judgment, inline
+- Post-edit lint hook -- mechanical
 
-**Validation question:** _"Is the LLM doing work that a script could do
-deterministically and faster?"_ If yes, write a script.
+**Validation question:** _"Is an LLM doing mechanical work, or a script
+pretending to exercise judgment?"_ Either misplacement is a defect.
 
 ---
 
-## Principle 4: Structure Enables Parallelism
+## Principle 4: Parallelism is earned by scope
 
-Unstructured work is inherently sequential. Structured plans with explicit
-phases, waves, and task boundaries enable safe parallel execution. The upfront
-cost of creating a good plan pays for itself many times over in execution speed.
+Parallel waves, parallel explorations, and parallel satellite agents are
+powerful and expensive. They pay off when scope is broad enough that
+serial execution would waste real time. They do not pay off on a typo
+fix or a three-file scoped edit, where the setup cost dwarfs the saving.
+`quick` runs linear. `scoped` runs mostly linear with a single explore.
+`full` earns parallelism across waves, explorations, and satellites.
 
-**Why this matters:** A 5-task wave running in parallel finishes in the time of
-the slowest task, not the sum of all five. But parallelism is only safe when
-tasks have explicit boundaries -- which files they touch, what they depend on,
-and what they produce.
+**Why this matters:** Parallelism has a tax -- coordination overhead,
+more context slices to curate, more checkpoints to reconcile. On large
+work with clean task boundaries, the tax is trivially worth paying. On
+small work, the tax dominates the benefit and adds noise. Applying
+parallelism uniformly is ceremony, not rigor.
 
 **How devorch enforces this:**
-- Plans define phases with explicit goals and success criteria
-- Waves group tasks that can safely run in parallel (no shared file modifications)
-- Task IDs enable dependency tracking and progress monitoring
-- Validation runs after each phase catch integration issues before they propagate
-- The plan format is validated by `validate-plan.ts` before execution begins
+- `quick` mode: single edit, no waves, no parallel explore
+- `scoped` mode: one explore agent (medium thoroughness), linear execution
+- `full` mode: 2-3 parallel explorers with distinct foci, parallel waves, parallel satellites
+- Waves are defined by explicit file-boundary non-overlap in the plan
+- `validate-plan.ts` rejects waves that share write targets
 
-**Validation question:** _"Can this work be safely parallelized with explicit
-boundaries?"_ If yes, structure it into waves.
+**Validation question:** _"Does the scope of this work justify the
+coordination cost of parallel execution?"_ If not, run linear.
 
 ---
 
-## Principle 5: Clarify Before You Build
+## Principle 5: Enumerate before; ask only real bifurcations
 
-Ambiguity in requirements propagates exponentially through implementation.
-A misunderstood requirement in phase 1 can invalidate all subsequent phases.
-Forced clarification rounds before planning eliminate the most expensive kind
-of rework: building the wrong thing.
+Edge cases are always enumerated before execution and always surfaced
+transparently. But enumeration is not the same as interrogation.
+Cases resolved by code convention or explicit in the request are
+recorded and skipped. Only real bifurcations -- decisions with
+legitimate trade-offs the user must own -- become questions. The gate
+is single-shot, offering "None", "All", or specific numbers. Zero
+questions is a valid outcome.
 
-**Why this matters:** The cost of asking 3 clarifying questions is ~2 minutes.
-The cost of rebuilding 3 phases because a requirement was misunderstood is hours.
-LLMs are naturally eager to start working -- devorch's mandatory clarification
-rounds counteract this bias.
+**Why this matters:** Clarification is how devorch avoids the
+exponential cost of building the wrong thing. But over-clarification
+trains the user to ignore the gate. A prompt that asks six questions
+when three were obvious from the code is noise; the fourth time it
+happens, the user clicks "all defaults" without reading. Transparency
+plus selective asking preserves signal.
 
 **How devorch enforces this:**
-- `/devorch:talk` requires at least one `AskUserQuestion` round before planning
-- Exploration happens before clarification, so questions are informed by code reality
-- Decisions are recorded in the plan's `<decisions>` section and persist through execution
-- Builders receive these decisions as context, ensuring alignment through all phases
+- Edge cases bucketed into: resolved-by-code, resolved-by-request, real-bifurcation
+- Bucket counts surfaced in a transparency block before any question
+- Single `AskUserQuestion` gate with None/All/Numbers selector
+- Recommendations are provided inline with each bifurcation, with one-line rationale
+- Zero-bifurcation paths proceed without interrupting the user
 
-**Validation question:** _"Am I confident enough in the requirements to commit
-to a multi-phase plan?"_ If not, ask more questions.
+**Validation question:** _"Is each question a trade-off the user must
+own, or something the code or the request already answers?"_ If the
+latter, resolve it silently and log it in the transparency block.
 
 ---
 
-## Principle 6: Code Is the Source of Truth
+## Principle 6: Code is contextual truth; industry is normative
 
-The codebase is always more authoritative than cached summaries, previous
-conversation context, or the LLM's training data. Every exploration should
-read actual code. Every convention should be derived from actual patterns.
+The codebase tells you what the project is. Industry standards tell you
+what the project should be. Both matter, but they are not equivalent.
+Conventions extracted from the repo enter as context, not as law --
+they describe local reality and remain substitutable. Industry patterns
+(OWASP, N+1, pagination, idempotency) enter as norms the guardian
+checks against. When the two diverge, the guardian surfaces the gap
+rather than silently enforcing either.
+
+**Why this matters:** Pretending the code is always right means
+propagating existing bugs and anti-patterns. Pretending industry
+standards are always right means fighting legitimate local constraints
+(legacy boundaries, migration half-states, deliberate trade-offs). The
+honest posture is: describe what is, name what should be, let the user
+decide when they diverge.
 
 **How devorch enforces this:**
-- `map-conventions.ts` analyzes real code to generate CONVENTIONS.md
-- Explore agents read actual files, not cached descriptions
-- The explore-cache has TTL-like behavior (invalidated when relevant files change)
-- Builders are instructed to verify assumptions against actual code before modifying
+- `map-conventions.ts` extracts CONVENTIONS.md from actual code patterns
+- Conventions are passed as context, not as rules, in builder slices
+- Guardian evaluates code against industry standards (OWASP, performance, architecture)
+- Divergences become heads-up items or bifurcations, not silent rewrites
+- `.devorch/standards-silenced.md` lets the project record accepted divergences
+
+**Validation question:** _"Am I treating code as prescriptive, or as the
+current state against which a norm is being checked?"_ Conventions
+describe; norms prescribe; the user decides when they meet.
 
 ---
 
-## Principle 7: Fail Fast, Fix With Context
+## Principle 7: Fail fast, fix with context
 
-Errors are cheapest to fix when the agent that caused them still has full context.
-Deferring validation to the end means the fixing agent must rebuild context from
-scratch -- or worse, guess at intent.
+Errors are cheapest to fix when the agent that caused them still has
+full context. Deferring validation to the end of a multi-phase build
+means the fixing agent must reconstruct intent from commit messages and
+diffs -- or worse, guess. Fast failure keeps the error surface small
+and the fix surface informed.
+
+**Why this matters:** A type error in phase 1 becomes a runtime crash
+in phase 3 that looks like a logic bug, consuming hours of context
+reconstruction. Catching it before phase 2 starts costs minutes. The
+asymmetry is not marginal; it compounds with every phase that sits on
+top of undetected breakage.
 
 **How devorch enforces this:**
-- Post-edit lint hook catches syntax/style errors on every Write/Edit
-- `check-project.ts` runs after each phase while builders still have context
-- Builders get one retry loop to fix their own errors before escalating
-- Final adversarial review catches cross-phase issues with specialized reviewers
+- Post-edit lint hook catches syntax and style on every Write/Edit
+- `check-project.ts --quick` runs between phases
+- Builders get one local retry loop before escalating
+- Final adversarial review splits into security, performance, completeness, flags
+- Each reviewer is scoped so findings come with context, not with ambiguity
 
-**Validation question:** _"Will the agent fixing this error still have the
-context of why the code was written this way?"_ If not, validate earlier.
+**Validation question:** _"If this error surfaces three phases from now,
+will the agent fixing it still have the context of why the code was
+written this way?"_ If not, validate earlier.
+
+---
+
+## Principle 8: Guardian is default posture
+
+In every mode, the orchestrator operates as a senior engineer pair
+reviewing the work of a well-intentioned, performance-first, self-taught
+developer. The guardian is silent when the code is correct, loud when
+it detects a critical heads-up. It does not teach. It redirects.
+
+**Why this matters:** The most expensive failures are not bugs the user
+knows about -- those get fixed. The expensive ones are anti-patterns
+the user does not know to look for: SQL concatenation, N+1 on a hot
+path, missing idempotency on a retry boundary, a worker proxying a
+30MB upload. A silent assistant that just does what is asked amplifies
+these. A guardian posture catches them before they become production
+incidents without turning every session into a lecture.
+
+**How devorch enforces this:**
+- Guardian instruction block runs in all modes, not only in `full`
+- Domain checklist: auth, rate-limiting, input validation, error boundaries,
+  caching, indexing, N+1, pagination, realtime, upload path, async/queue,
+  observability, idempotency, secrets, cross-tenant isolation
+- Findings bucketed: heads-up critical (known right answer) vs real bifurcation
+- Tone is "by this path, not that one" -- not tutorial prose
+- `.devorch/profile.yml` tunes weighting (priorities, biases) without silencing
+
+**Validation question:** _"If the user ships this as-is, will the
+guardian have flagged the issues that would matter in production?"_
+Silence is correct only when the code already meets the bar.
+
+---
+
+## Principle 9: Ceremony proportional to scope
+
+A typo fix does not need a plan, a worktree, and a phase boundary.
+A three-module refactor does. Devorch offers three modes with
+proportional cost: `quick` skips plan, clarify, and worktree; `scoped`
+skips the formal plan but keeps enumeration and the guardian; `full`
+runs the full pipeline with worktree, phases, waves, and adversarial
+review. The mode is chosen by triage, not by ritual.
+
+**Why this matters:** Ceremony for small tasks is not rigor -- it is
+theater that trains the user to route around the tool. If `/devorch`
+takes ten minutes to rename a variable, the user will rename the
+variable by hand and the guardian never sees the session. The tool
+that survives is the one whose cost is shaped to the task.
+
+**How devorch enforces this:**
+- Triage classifies every invocation into quick/scoped/full with a one-line justification
+- `--quick` and `--full` flags override the classifier when the user disagrees
+- `quick` mode: classify, guardian sweep, edit, lint hook, commit
+- `scoped` mode: classify, one explore, enumerate, gate, execute, check, commit
+- `full` mode: worktree, plan, phases, waves, parallel explore, adversarial review, merge flow
+- Worktree is obligatory only for `full`; opt-in for `scoped`; skipped for `quick`
+
+**Validation question:** _"Does the ceremony cost match the task size,
+or am I paying full-mode overhead for a quick-mode task?"_ When in
+doubt, classify smaller; the user can always escalate with `--full`.
 
 ---
 
 ## Anti-Principles: What devorch Deliberately Avoids
 
 ### "Just use a bigger context window"
-More context is not better context. A 50K token focused context will outperform
-a 500K token diluted context on implementation quality. However, larger context
-windows do enable reduced orchestration overhead -- the orchestrator can hold
-coordination logic inline rather than delegating to intermediate agents. The key
-distinction: orchestration context (script outputs, task dispatch, validation
-results) benefits from centralization; implementation context (source code,
-debugging, writing new code) must stay focused and isolated in builders.
+
+Larger context is a dispatch enabler, not a quality substitute. A 1M
+window lets the orchestrator hold coordination inline -- scripts,
+triage, validation. It does not let the orchestrator hold source code,
+debug traces, and builder retries without paying the lost-in-the-middle
+tax. The distinction: coordination context benefits from centralization;
+implementation context must stay focused and isolated in builders.
 
 ### "Let the LLM figure it out"
-LLMs are excellent reasoners but inefficient computers. Asking an LLM to parse
-a package.json, count files in a directory, or detect indentation patterns is
-like asking a novelist to do arithmetic. Scripts handle mechanical work; the
-LLM handles judgment and creativity.
+
+LLMs are excellent reasoners but inefficient computers, and they are
+excellent classifiers but brittle parsers. Asking an LLM to walk a
+directory tree or count dependencies wastes tokens that should go to
+judgment. Asking a regex to classify user intent produces a system
+that shatters on the first novel phrasing. The rule is not "less LLM";
+it is mechanical outside, judgment inside. Misplacing work in either
+direction is a defect.
 
 ### "One agent can do everything"
-A single long-running agent accumulates context debt with every action. Multiple
-short-lived agents with focused contexts produce consistently higher quality
-output. The coordination overhead of multi-agent orchestration is worth paying.
+
+A single long-running agent accumulates context debt with every
+action. By hour two, it is reasoning against a mixture of its own
+edits, its own errors, its own retries, and the original request --
+none of them cleanly separable. Multiple short-lived agents with
+curated slices produce consistently higher quality. The coordination
+overhead is real and worth paying.
 
 ### "Ship fast, validate later"
-Deferred validation creates compound errors. A type error in phase 1 becomes
-a runtime crash in phase 3 that looks like a logic bug. Per-phase validation
-keeps the error surface small and localized.
+
+Deferred validation creates compound errors. A type error in phase 1
+becomes a runtime crash in phase 3 that looks like a logic bug. The
+fix then requires reconstructing context the original builder already
+had and discarded. Per-phase validation keeps the error surface small
+and the fix surface informed.
+
+### "Ceremony signals seriousness"
+
+A plan, a worktree, a review cycle, and a phase boundary are not
+inherently rigorous -- they are inherently expensive. Applying them
+to a three-line typo fix is theater, not diligence. It trains the
+user to bypass the tool, which means the guardian never runs, which
+means the anti-patterns the tool was built to catch never get caught.
+Rigor is ceremony shaped to the task. Uniform ceremony is cosplay.
+
+---
+
+## Changes from v2
+
+The delta from the seven v2 principles to the nine v3 principles:
+
+- **P1**: "Orchestrator Must Stay Light" -> "Orchestrator stays focused, not small."
+  Reframed around 1M context: the problem was never token count, it was dilution.
+- **P2**: "Fresh Context Beats Accumulated Context" -> "Fresh context per subagent, with filter gates."
+  Adds the size gate (under 3K or over 30K pauses for human review).
+- **P3**: "Compute Outside the LLM When Possible" -> "Mechanical outside the LLM, judgment inside."
+  Sharpened: the line is about fit, not about minimizing LLM use; triage is explicitly judgment.
+- **P4**: "Structure Enables Parallelism" -> "Parallelism is earned by scope."
+  Inverted emphasis: parallelism has a tax, and small work does not justify paying it.
+- **P5**: "Clarify Before You Build" -> "Enumerate before; ask only real bifurcations."
+  Major shift: enumeration is always done, asking is selective. Zero questions is valid.
+- **P6**: "Code Is the Source of Truth" -> "Code is contextual truth; industry is normative."
+  Significantly reframed: code is descriptive, industry is prescriptive, divergence is explicit.
+- **P7**: "Fail Fast, Fix With Context" -> "Fail fast, fix with context."
+  Intact. Renamed to match v3 casing.
+- **P8** (new): "Guardian is default posture."
+  New principle. Codifies the senior-engineer posture as always-on, not opt-in.
+- **P9** (new): "Ceremony proportional to scope."
+  New principle. Codifies the quick/scoped/full mode split as a first-class commitment.
 
 ---
 
@@ -193,9 +350,11 @@ keeps the error surface small and localized.
 
 Review these principles when:
 - Claude Code ships a major new feature (new agent system, context changes, etc.)
-- A devorch build produces lower quality than expected (which principle was violated?)
+- A devorch build produces lower quality than expected -- name the violated principle
 - Considering whether to replace a devorch component with a native alternative
-- The context window changes significantly (2M+, infinite context, etc.)
+- The context window changes significantly (2M, 10M, effectively unbounded)
+- A mode's ceremony cost drifts out of proportion with its target scope
 
-The principles themselves may evolve, but changes should be deliberate and
-justified -- not reactive to feature announcements.
+The principles themselves may evolve, but changes should be deliberate
+and justified -- not reactive to feature announcements or one-off
+session frustrations.

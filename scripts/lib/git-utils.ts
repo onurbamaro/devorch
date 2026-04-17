@@ -3,14 +3,16 @@
  */
 
 /**
- * Detects the main branch name (main or master).
+ * Detects the main branch name (main or master) for the given repo.
  * Checks: symbolic ref of origin/HEAD → existence of refs/heads/main → fallback to master.
+ * If repoPath is omitted, operates in the current working directory (backwards compatible).
  */
-export function getMainBranch(): string {
+export function getMainBranch(repoPath?: string): string {
+  const gitPrefix = repoPath ? ["-C", repoPath] : [];
   // Try origin/HEAD first (most reliable when remote is configured)
   try {
     const proc = Bun.spawnSync(
-      ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+      ["git", ...gitPrefix, "symbolic-ref", "refs/remotes/origin/HEAD"],
       { stdout: "pipe", stderr: "pipe" }
     );
     if (proc.exitCode === 0) {
@@ -25,7 +27,7 @@ export function getMainBranch(): string {
   // Fallback: check if local "main" branch exists
   try {
     const proc = Bun.spawnSync(
-      ["git", "rev-parse", "--verify", "refs/heads/main"],
+      ["git", ...gitPrefix, "rev-parse", "--verify", "refs/heads/main"],
       { stdout: "pipe", stderr: "pipe" }
     );
     if (proc.exitCode === 0) return "main";

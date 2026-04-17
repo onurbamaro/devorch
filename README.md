@@ -18,7 +18,33 @@ Stop feeding Claude Code one prompt at a time. devorch breaks your work into pha
 
 **Automatic validation** -- Every phase runs a quick build + typecheck check (10s). The final build step runs the complete suite (lint, typecheck, build, tests) plus adversarial review with specialized agents (security, quality, completeness). Bugs surface immediately.
 
-**State-aware resumption** -- Interrupted? Run `/devorch:build` again and pick up exactly where you left off. Phase handoffs carry just enough context for continuity without bloating the window.
+**State-aware resumption** -- Interrupted? Run `/devorch --resume` and pick up exactly where you left off. Phase handoffs carry just enough context for continuity without bloating the window.
+
+---
+
+## One command, right-sized ceremony
+
+The primary entry point is a single command: **`/devorch`**. It classifies the request (quick / scoped / full), applies an inline senior-guardian pass against industry standards, and executes at the ceremony level the scope actually deserves. Trivial edits skip planning entirely; multi-module features still get full phased execution with waves.
+
+```
+/devorch "fix the login redirect bug"              # triaged to quick — direct edit
+/devorch "add POST /orders/bulk endpoint"           # triaged to scoped — single gate, targeted explore
+/devorch "add real-time order dashboard"            # triaged to full — worktree, phases, waves
+/devorch --full "<...>"                             # override classification
+/devorch --resume                                   # resume an active worktree
+```
+
+The guardian is active in every mode. Security (OWASP), performance, architecture, and operations patterns are checked inline — heads-up redirects surface when there's a known-right answer, bifurcations only surface when the trade-off is legitimate. Personal priorities live in `.devorch/profile.yml`.
+
+**Key properties:**
+- Triage is LLM-inline, not a script — intent classification is judgment
+- Ceremony is proportional to scope — `quick` skips planning, `full` runs the full pipeline
+- Guardian posture is default-on, silent when code is correct
+- Edge cases are enumerated up front; questions fire only on real bifurcations
+- Single gate UX: `[Nenhum / Todos / Números]` instead of question chains
+- Profile-driven priorities (performance, security, cost, dx) weight bifurcations
+
+Philosophy, profile format, and flag handling are documented in `docs/PHILOSOPHY.md`, `docs/PROFILE.md`, and `docs/FLAGS.md`.
 
 ---
 
@@ -34,10 +60,10 @@ bun run install.ts
 
 ```bash
 # Explore, plan, and build a feature
-/devorch:talk "add user authentication with JWT"
+/devorch "add user authentication with JWT"
 ```
 
-That's it. devorch explores your codebase with parallel Explore agents, clarifies ambiguities with you, creates a phased plan with parallel waves, sets up a git worktree, and hands off to `/devorch:build`. Coding conventions are detected automatically on first run.
+That's it. devorch triages the request, explores your codebase with parallel Explore agents, clarifies ambiguities with you, creates a phased plan with parallel waves, sets up a git worktree, and executes phases through builder agents. Coding conventions are detected automatically on first run.
 
 ---
 
@@ -46,19 +72,19 @@ That's it. devorch explores your codebase with parallel Explore agents, clarifie
 ### Start a new project from scratch
 
 ```
-/devorch:talk "..."   # detects empty project, runs discovery Q&A, plans first milestone
+/devorch "..."   # detects empty project, runs discovery Q&A, plans first milestone
 ```
 
 ### Add features to an existing project
 
 ```
-/devorch:talk "..."   # auto-generates CONVENTIONS.md on first run, plans and builds
+/devorch "..."   # auto-generates CONVENTIONS.md on first run, plans and builds
 ```
 
 ### Work across multiple repos
 
 ```
-/devorch:talk "add real-time sync between salsago-core and salsago-web"
+/devorch "add real-time sync between salsago-core and salsago-web"
 ```
 
 devorch detects sibling repositories automatically. During planning, it asks which repos to include as satellites. Each repo gets its own worktree with the same branch name. Validation runs per-repo, and merge is coordinated across all of them.
@@ -66,30 +92,30 @@ devorch detects sibling repositories automatically. During planning, it asks whi
 ### Ship a quick fix
 
 ```
-/devorch:fix "fix the login redirect bug"
+/devorch "fix the login redirect bug"
 ```
 
-devorch classifies the task intelligently -- if it needs design decisions or has structural impact, it redirects to `/devorch:talk`. Otherwise it investigates with parallel agents, implements the fix directly, validates, and commits.
+Triage classifies the task intelligently — small, localized fixes run in `quick` mode (direct edit, guardian sweep, commit). Anything with design impact escalates to `scoped` or `full` automatically.
 
 ### Explore an idea
 
 ```
-/devorch:talk "how does the auth module work? is it safe to refactor?"
+/devorch "how does the auth module work? is it safe to refactor?"
 ```
 
-Conversation mode: devorch explores the codebase with Explore agents and presents findings. If you decide to act, it generates a plan.
+Exploration requests stay conversational: devorch runs Explore agents and presents findings without building anything. If you decide to act on the findings, re-invoke with an action request.
 
 ---
 
 ## How It Works
 
-devorch has three commands, each focused on a specific workflow:
+`/devorch` is a single unified entry with three internal modes, selected automatically by triage (or forced via `--quick` / `--full`):
 
-1. **`/devorch:talk`** -- Conversation, exploration, and planning. Launches parallel Explore agents to investigate the codebase, clarifies ambiguities with you, then produces a structured plan in a git worktree.
+1. **`quick`** -- Direct edit. No plan, no worktree. The orchestrator classifies, runs a guardian sweep, edits, lets the post-edit lint hook fire, and commits. For typos, renames, and isolated small fixes.
 
-2. **`/devorch:fix`** -- Targeted fixes. Classifies the task (fix vs needs planning), investigates with parallel agents testing distinct hypotheses, implements directly, validates in parallel, and auto-fixes trivial issues.
+2. **`scoped`** -- Targeted change with a single explore pass. One Explore agent investigates, edge cases are enumerated, a single gate surfaces any real bifurcations, then the orchestrator executes directly and validates. For 1–3 file changes with a clear shape.
 
-3. **`/devorch:build`** -- Phased execution. Deploys builder agents in parallel waves per phase, runs automated checks after each phase, then performs a final adversarial review with security, quality, and completeness reviewers. Auto-fixes trivial findings; generates `/devorch:fix` prompts for complex ones.
+3. **`full`** -- Phased execution. Creates a worktree, runs parallel Explore agents with distinct foci, produces a phased plan with parallel waves, deploys builder agents per wave, validates after each phase (quick check: build + typecheck), and performs a final adversarial review with security, quality, and completeness reviewers. Auto-fixes trivial findings; surfaces complex ones as flags.
 
 ### Agents
 
@@ -132,10 +158,9 @@ Scripts import shared utilities from `scripts/lib/` (plan-parser, args, fs-utils
 
 | Command | What it does | Uses agents |
 |---------|-------------|-------------|
-| `/devorch:talk` | Conversation, exploration, and planning. Creates phased plans in worktrees. | Explore |
-| `/devorch:fix` | Targeted fix with investigation. Classifies, investigates, implements, validates. | Explore |
-| `/devorch:build` | Executes all remaining phases + adversarial final verification. Supports `--no-tests` to skip test suite. | Explore, Builder |
-| `/devorch:worktrees` | List, merge, or delete devorch worktrees. | -- |
+| `/devorch` | Unified entry. Triages to quick/scoped/full, applies guardian pass, executes at scope-appropriate ceremony, handles merge (including coordinated multi-repo). | Explore, Builder |
+
+Worktree listing or deletion outside the `/devorch` flow is left to plain git (`git worktree list`, `git worktree remove <path>`, `git branch -D <branch>`). A dedicated `/devorch:worktrees` command was removed in favor of asking Claude Code directly when needed.
 
 ---
 
@@ -170,8 +195,8 @@ Installed to `~/.claude/` (commands, agents, scripts, hooks). Per-project state 
 ```yaml
 project:
   name: devorch
-  version: 2.0.0
-  description: Multi-agent orchestration framework for Claude Code
+  version: 3.0.0
+  description: Multi-agent orchestration framework for Claude Code (v3: unified /devorch command, scope-proportional ceremony, guardian-by-default)
   license: MIT
   runtime: Bun
   language: TypeScript
@@ -188,18 +213,10 @@ capabilities:
   - Multi-repo orchestration with satellite worktrees
 
 commands:
-  - name: talk
-    signature: /devorch:talk "<description>"
-    purpose: Conversation, exploration, and planning with Explore agents
-  - name: fix
-    signature: /devorch:fix "<description>"
-    purpose: Targeted fix with investigation, direct execution, and verification
-  - name: build
-    signature: /devorch:build [--plan <name>] [--no-tests]
-    purpose: Execute all remaining phases then verify with adversarial review
-  - name: worktrees
-    signature: /devorch:worktrees
-    purpose: List, merge, or delete devorch worktrees
+  - name: devorch
+    signature: /devorch [--quick|--full|--resume|--worktree] "<description>"
+    purpose: Unified entry — triage (quick/scoped/full), guardian pass, execute at scope-appropriate ceremony, coordinated multi-repo merge
+    status: active
 
 architecture:
   agents:
@@ -235,7 +252,7 @@ key_concepts:
 
 state_files:
   - path: .devorch/ARCHITECTURE.md
-    purpose: Architecture design (generated by /devorch:talk for new projects)
+    purpose: Architecture design (generated by /devorch for new projects)
   - path: .devorch/CONVENTIONS.md
     purpose: Coding conventions, auto-generated on first run
   - path: .devorch/explore-cache-<name>.md
@@ -249,7 +266,7 @@ state_files:
 
 file_structure:
   source:
-    - commands/ (4 .md slash command definitions)
+    - commands/ (2 .md slash command definitions)
     - agents/ (1 .md agent type definition)
     - scripts/ (10 .ts utility scripts + lib/)
     - docs/ (philosophy, archived references)
