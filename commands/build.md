@@ -1,8 +1,10 @@
 ---
-description: Executes all remaining phases of the current devorch plan
+description: "[LEGACY v2] Executes all remaining phases of the current devorch plan — prefer /d --full"
 argument-hint: [--plan <name>] [--no-tests]
 model: opus
 ---
+
+**LEGACY (v2).** This command is preserved for resuming in-flight v2 plans. For new work, use `/d` — classification + guardian + execution are unified. `/d --full` covers the same phased-build territory with the v3 gate, filter warnings, and categorized review.
 
 Execute all remaining phases of the plan automatically, then verify the full implementation.
 
