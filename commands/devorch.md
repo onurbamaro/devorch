@@ -136,6 +136,8 @@ Based on `$ARGUMENTS`, explore findings, CONVENTIONS.md, and the guardian pass, 
 
 ### S3. Transparency block + unified gate
 
+**Skip-when-silent**: if `K + J == 0` (nenhuma bifurcação real e nenhum heads-up crítico após S2), pule este passo por completo — nem bloco de transparência nem `AskUserQuestion`. Siga direto para S4. Princípio 5: zero questions is a valid outcome.
+
 Emit this block to the user (plain markdown — no box-drawing):
 
 ```
@@ -207,7 +209,7 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 
 1. Launch 2–3 Explore agents (`subagent_type="Explore"`, thoroughness **very thorough**) in parallel with distinct focuses (architecture, risks/edges, existing patterns). Write combined findings to `<mainRoot>/.devorch/explore-cache-<name>.md`.
 2. Re-run the guardian pass with full exploration context. Enumerate edge cases into the same 3 buckets as scoped mode.
-3. Emit the same transparency block (Step S3) and a single `AskUserQuestion` gate with `Nenhum / Todos / Números`. Resolve bifurcations in follow-up rounds if needed.
+3. Emit the same transparency block (Step S3) and a single `AskUserQuestion` gate with `Nenhum / Todos / Números`. Resolve bifurcations in follow-up rounds if needed. **Skip-when-silent**: se `K + J == 0`, pule o bloco e o gate por completo e prossiga direto para o Step 4. Princípio 5.
 4. Draft the plan following the canonical format in `docs/PLAN-FORMAT.md`: `<description>`, `<objective>`, `<classification>`, `<decisions>`, optional `<problem-statement>` + `<solution-approach>` (medium/complex), `<relevant-files>` with optional `<secondary-repos>` for multi-repo, and numbered `<phaseN>` blocks containing `<goal>`, `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>`. Write it to `<projectRoot>/.devorch/plans/<name>.md`.
 
    **Per-task model/effort classification** (mandatory when drafting `<tasks>`): for each task, pick one of three builder variants through these gates in order (see `docs/PLAN-FORMAT.md` § Model/Effort policy for full rationale):
@@ -341,67 +343,23 @@ N dificuldades registradas. Para evoluir:
 /devorch --full Evoluir o devorch baseado em .devorch/feedback.md
 ```
 
-### F9. Flow friction capture (all modes — not just full)
+### F9. Flow friction capture (todos os modos)
 
-This step runs in **every mode** (quick / scoped / full) right before the final report. It captures frictions in the devorch flow itself — not in user code. Examples of what counts:
+Roda antes do report final. Captura atritos no próprio fluxo do devorch — não em código do usuário. Conta: script errou ou retornou JSON malformado, retry loop precisou >1 tentativa, gate precisou ser reinvocado, hook não disparou quando devia, você improvisou porque a instrução estava ambígua, bifurcação sem precedente nem resposta da indústria.
 
-- Script errored, returned malformed JSON, or was missing a field d.md expected
-- A retry loop needed more than 1 attempt to recover
-- `AskUserQuestion` had to be re-invoked because the first gate didn't cover a case
-- A hook didn't fire when d.md said it should
-- You (the orchestrator) had to improvise a step because d.md was ambiguous
-- A bifurcation had no precedent and no industry answer — clear gap
+**Inbox path** (primeiro que casar): `$DEVORCH_REPO/.devorch/flow-issues-inbox/` → `../devorch/.devorch/flow-issues-inbox/` → `<mainRoot>/.devorch/flow-issues-inbox/`.
 
-For each friction observed this session, write one file to the inbox directory:
+**Um arquivo por atrito**, nomeado `<YYYY-MM-DD>-<slug>.md`, contendo: título, timestamp, `Mode`, `Severity` (blocker/gap/nit), prompt pronto (`/devorch ... "<fix>"`), contexto mínimo (onde/o que aconteceu/esperado/workaround).
 
-**Inbox path resolution**:
-1. If env `DEVORCH_REPO` is set and `<DEVORCH_REPO>/.devorch/flow-issues-inbox/` exists → use it.
-2. Else if a sibling devorch repo exists at `../devorch/.devorch/flow-issues-inbox/` → use it.
-3. Else → `<mainRoot>/.devorch/flow-issues-inbox/` (project-local, user will copy later).
-
-**File naming**: `<YYYY-MM-DD>-<slug>.md` (slug is 3-5 words from the friction title).
-
-**File format**:
-```markdown
-# Flow issue: <title>
-
-**Captured**: <ISO timestamp>
-**Origin session**: /devorch <original $ARGUMENTS>
-**Mode**: quick | scoped | full
-**Severity**: blocker | gap | nit
-
-## Ready-to-paste prompt
-
-/devorch <--quick|--full|nothing> "<concrete fix description>"
-
-## Context
-
-- Where: <file>:<section> (e.g. commands/devorch.md § F3b)
-- What happened: <1-2 lines>
-- Expected: <1 line>
-- Workaround used: <if any>
-
-## Related
-
-- <link to docs/V3-TEST-PLAN.md issue if applicable, or "new">
-```
-
-**If zero frictions were observed**, write nothing and output one line: "Flow friction capture: nenhum item registrado." Do not create empty files.
-
-**If one or more frictions were captured**, output a summary at the end of the report:
-```
-### Flow friction capture
-N item(s) registrado(s) em <inbox-path>/.
-Copie os prompts para /devorch quando for evoluir o devorch.
-```
-
-Keep entries surgical — one friction per file, each readable standalone. The inbox accumulates over time; periodic sweep from the devorch repo clears backlog.
+**Zero atritos**: não escreva nada e omita qualquer menção no report. **≥1 atrito**: adicione ao report `### Flow friction capture: N item(s) em <inbox-path>/`.
 
 ---
 
 ## Step 5 — Unified gate UX (used by scoped and full)
 
-The transparency block above is always followed by a single `AskUserQuestion` call with these options:
+**Precondition**: este gate só roda quando há pelo menos uma bifurcação real ou um heads-up crítico (`K + J > 0`). Se ambos forem zero, S3/F2 já terão pulado este passo silenciosamente — não invoque `AskUserQuestion` apenas para confirmar defaults.
+
+Quando executado, o transparency block é seguido por uma única chamada `AskUserQuestion` com estas opções:
 
 - **"Nenhum"** — seguir com defaults e recomendações
 - **"Todos"** — abrir pergunta para cada bifurcação em rounds subsequentes
