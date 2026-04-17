@@ -171,6 +171,8 @@ Think through: core problem, approach, alternatives considered, risks and mitiga
 
 **Spec drafting**: Design `<spec>` contracts as part of the solution. Each phase should have specs that define the contracts builders must implement. Prefer fewer, more precise specs over many vague ones. Ground specs in what the exploration found — reference real files, patterns, or constraints discovered. Don't spec what the codebase or conventions already define. Don't spec pure implementation details the builder is better equipped to decide. Include concrete examples derived from the exploration (real function names, real error cases discovered). These specs will be displayed within the plan proposal (Step 5) for unified approval.
 
+**Spec density rule**: Each task with substantive implementation logic MUST have ≥1 `<interface>` OR `<behavior>` OR `<error-contract>` spec referenced via its **Spec refs** field. Tasks with zero specs are flagged as under-specified during planning and must be either split (so each resulting sub-task gains its own specs) or merged into a neighboring task (when the scope is too small to warrant specs on its own). Pure configuration, documentation, or trivial one-file chores may be exempt — use judgment, but the default posture is: no specs → reconsider the task.
+
 When the design identifies areas that will need deeper exploration during build (complex modules the builder hasn't seen, third-party API patterns), add `<explore-queries>` to the relevant phase with directed queries targeting specific knowledge artifacts.
 
 ### 6b. Devil's Advocate (automatic)
@@ -230,24 +232,21 @@ Then use `AskUserQuestion` with options:
 
 #### Phase consolidation guidance
 
-Prefer **fewer, denser phases** over many thin ones. With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate when safe.
+Prefer **fewer, denser phases** over many thin ones. With 1M context, the orchestrator handles phases inline — each additional phase adds ~2-3 min overhead (init + check + summary). Consolidate aggressively when safe.
 
-**When to merge adjacent phases** (both conditions must hold):
-- Both phases have ≤3 tasks each
-- No cross-phase file conflicts (no file modified in both phases)
-- No mandatory handoff context needed (phase B doesn't depend on phase A's runtime output)
+**MUST-merge rule**: Phases that have NO handoff dependency AND NO shared-file conflict **MUST be merged** into a single phase. Splitting into multiple phases is only justified when the planner can cite an explicit reason: a handoff dependency (phase B consumes phase A's committed output), a shared-file conflict (same file modified in both phases), or a mandatory phase checkpoint (e.g., migrations must succeed before seeding). If no such reason exists, a multi-phase split is an error — collapse into one phase with multiple waves.
 
-**When NOT to merge**:
-- Tasks in phase B depend on phase A's committed outputs (e.g., generated files, schema changes)
-- Shared file modifications across phases — two builders in the same wave cannot edit the same file
-- Phase A's checks must pass before phase B's work begins (e.g., migrations must succeed before seeding)
+**When NOT to merge** (valid justifications — planner must cite at least one):
+- **Handoff dependency**: tasks in phase B depend on phase A's committed outputs (e.g., generated files, schema changes, new public exports)
+- **Shared-file conflict**: the same file is modified in both phases, so combining would force two wave members onto the same file
+- **Phase checkpoint**: phase A's checks must pass before phase B's work begins (e.g., migrations must succeed before seeding, build must pass before downstream tasks consume new artifacts)
 
-When splitting a task creates additional tasks that fit in the same wave without file conflicts, consolidation into the same phase adds zero overhead — only phase boundaries (not wave boundaries) incur pipeline overhead.
+When splitting a task creates additional tasks that fit in the same wave without file conflicts, consolidation into the same phase adds zero overhead — only phase boundaries (not wave boundaries) incur pipeline overhead (~2-3 min each).
 
 **Examples**:
-- Two phases of 2 tasks each, no shared files → merge into one phase of 4 tasks in 2 waves
-- Phase 1 creates a new module, Phase 2 imports it → keep separate (producer/consumer dependency)
-- Phase 1 has 5 tasks, Phase 2 has 1 task → keep separate (Phase 1 already at max)
+- Two phases of 2 tasks each, no shared files → **MUST merge** into one phase of 4 tasks in 2 waves
+- Phase 1 creates a new module, Phase 2 imports it → keep separate (producer/consumer handoff dependency)
+- Phase 1 has 5 tasks, Phase 2 has 1 task, no handoff → keep separate only if phase 1 already at max 5 and a shared-file conflict prevents absorbing the sixth task; otherwise merge
 
 ---
 
@@ -353,15 +352,19 @@ Each builder receives:
 - Plan **Objective**, **Solution Approach** (if present), **Decisions** (if present) — from init output
 - Full task details from the `tasks` map
 - Convention sections: read `conventions` (full string) from init-phase JSON root and `conventionSectionsByTask[taskId]` (array of section header names). If the array is empty or missing for the task, inject the full `conventions` text. Otherwise, split `conventions` by `## ` headers, match section names from the array, extract matching sections with their content, join them, and inject the result.
-- Spec contracts from `specsByTask[taskId]`
-- Code structure from `codeStructureByTask[taskId]` (if non-empty)
+- Code structure from `codeStructureByTask[taskId]` — labeled as "## Code Structure" in the builder prompt. Only include if non-empty.
+- Exemplars from `exemplarsByTask[taskId]` — labeled as "## Exemplars" in the builder prompt. Inject `## Exemplars` from `exemplarsByTask[taskId]` when non-empty. Format as a bulleted list, one file path per line: `- path/to/file.ext`. Omit the section entirely when the array is empty or missing.
+- Spec contracts from `specsByTask[taskId]` — labeled as "## Spec Contracts" in the builder prompt. Only include if non-empty.
+- Non-goals from `nonGoalsByTask[taskId]` — labeled as "## Non-goals" in the builder prompt. Inject `## Non-goals` from `nonGoalsByTask[taskId]` when non-empty. Format as a single bullet or short paragraph. Omit the section entirely when the string is empty or missing.
 - Cache sections from `cacheByTask[taskId]`
+- **Section order** (must match `commands/build.md` § 2c exactly — no divergence between build.md and talk.md): `## Conventions` → `## Code Structure` (if non-empty) → `## Exemplars` (only if `exemplarsByTask[taskId]` non-empty) → `## Spec Contracts` (if non-empty) → `## Non-goals` (only if `nonGoalsByTask[taskId]` non-empty) → cache sections. Empty optional sections are omitted entirely.
 - **Effort guidance**: "Execute focused implementation. You have a clear spec — prioritize writing correct code over extensive exploration. If you encounter unexpected complexity, use Explore agents rather than reasoning through unknowns."
 - **Spec verification instruction**: "Verify your implementation satisfies all spec contracts before committing. Check: function signatures match `<interface>` specs, error handling matches `<error-contract>` cases, pre/postconditions from `<behavior>` specs are honored."
 - `commit with type(scope): description`
-- `CRITICAL: call TaskUpdate with status "completed" as your very last action`
 
 After all builders in a wave return, verify via `TaskList` that every task is marked completed.
+
+**Orchestrator-side TaskUpdate**: For each task in the wave whose Agent call returned with a matching commit in `git log` (success), the orchestrator calls `TaskUpdate` with `status: "completed"` on that task's id. Builders no longer self-mark completion. On builder failure (no matching commit or reported failure), do NOT call `TaskUpdate` to `"completed"` — follow the existing retry flow below instead.
 
 **Build Report extraction** — After verifying task completion for a wave, extract the `## Build Report` block from each completed builder's text output (the text returned by the Task/Agent call):
 - Use regex: from `## Build Report` to the next `##` header or end of text.
@@ -544,13 +547,13 @@ Suggest: `/devorch:fix` to address remaining issues, or `/devorch:build --plan <
 
 Maximize parallel execution without losing quality:
 
-- **Break work into independent units.** If a large task can be split into two tasks that touch different files, split it.
+- **Default wave target: 4-5 tasks in parallel.** This is the planner's default posture. Narrower waves (1-3 tasks) require a documented constraint: shared files between tasks, a producer-consumer dependency, or a phase that has fewer than 4 total tasks. If no such constraint applies, merge tasks into a wider wave.
+- **Break work into independent units.** If a large task can be split into two tasks that touch different files, split it — wider waves are preferred over sequential execution.
 - **Group independent tasks into the same wave.** All tasks in a wave run as parallel agents.
 - **Only create sequential waves when truly necessary**: task B reads output of task A, or both modify the same file.
-- **Aim for wide waves**: 3 parallel tasks in 1 wave is better than 3 sequential waves of 1 task.
 - **Wider waves in fewer phases > narrow waves across many phases**: A single phase with a 4-task wave completes faster than two phases with 2-task waves each, due to per-phase overhead (init, check, summary). Consolidate when tasks are independent.
 
-Quality guardrails:
+Quality guardrails (unchanged):
 - Two tasks in the same wave must NOT modify the same file.
 - Two tasks in the same wave must NOT have a producer/consumer relationship.
 - Each task must be self-contained — a builder should complete it without needing another builder's uncommitted work.
@@ -672,6 +675,8 @@ Validated structurally but not yet delivered per-task to builders.
 - **Effort**: high <!-- always high -->
 - **Repo**: <name> <!-- optional, default: primary. Use secondary repo name when task targets a satellite repo -->
 - **Spec refs**: <comma-separated spec names from phase <spec> section> <!-- optional -->
+- **Exemplars**: src/a.ts, src/b.ts <!-- optional — comma-separated file paths a builder should mirror -->
+- **Non-goals**: do not alter the public API of module X <!-- optional — one-line description of explicit exclusions -->
 - <specific action>
 - <specific action>
 
@@ -681,6 +686,8 @@ Validated structurally but not yet delivered per-task to builders.
 - **Model**: opus <!-- always opus -->
 - **Effort**: high <!-- always high -->
 - **Spec refs**: <comma-separated spec names> <!-- optional -->
+- **Exemplars**: path/to/exemplar.ts <!-- optional -->
+- **Non-goals**: one-line description <!-- optional -->
 - <specific action>
 
 </tasks>
@@ -712,7 +719,7 @@ Validated structurally but not yet delivered per-task to builders.
 - Inside phase: `<goal>`, `<spec>`, `<explore-queries>` (optional), `<tasks>`, `<execution>`, `<criteria>`, `<handoff>` (except last phase). Each query line: `- "directive text" — for task task-id`. Task-ids must exist in the phase. Optional section.
 - Inside spec: `<interface name>`, `<error-contract name>`, `<behavior name>`, `<invariant>`, `<endpoint path method>`, `<entity name>`. All names must be unique within a phase.
 - Entity element: `<entity name="...">` requires `name` attribute and at least one child element (`<field>`, `<relationship>`, or `<constraint>`). `<field>` requires `name` attribute. `<relationship>` requires `target` attribute. `<constraint>` requires non-empty body text.
-- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (always `opus`), `**Effort**` (always `high`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section)
+- Task fields: `**ID**` (required), `**Assigned To**` (required), `**Model**` (always `opus`), `**Effort**` (always `high`), `**Repo**` (optional — default: primary; set to secondary repo name when task targets a satellite repo), `**Spec refs**` (optional — comma-separated spec names from the phase `<spec>` section), `**Exemplars**` (optional — comma-separated file paths a builder should mirror as style/pattern references), `**Non-goals**` (optional — one-line description of explicit exclusions the builder must not touch)
 - Classification values — Type: feature | fix | refactor | migration | chore | enhancement | infrastructure. Complexity: simple | medium | complex. Risk: low | medium | high. Fast-path: optional | true | false | when omitted, treated as false.
 - Endpoint spec refs use the auto-generated `METHOD-/path` format (e.g., `GET-/api/health`) matching the `<endpoint path method>` tag attributes.
 
