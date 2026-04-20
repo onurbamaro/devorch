@@ -26,16 +26,14 @@ If `--resume` is present:
    - `mainRoot = <cwd>` (the main repo root where `.worktrees/` lives)
    - `projectRoot = .worktrees/<name>`
    - `<name> = basename(projectRoot)`
-   - `cacheName = <name>`
    - `planPath` = the first `.md` under `<projectRoot>/.devorch/plans/` (excluding `archive/`)
    - `originalBranch` = run `git -C <mainRoot> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo main` and strip `origin/` prefix; fall back to `main` or `master` as available.
-5. Jump to full-mode Step F3 (phase loop) with these bindings.
+5. Jump to full-mode Step F3 (phase loop) with these bindings. Note: on resume, the in-memory explore findings from the original F2 are gone — builders will still receive gotchas + specs + code structure, and you may launch a fresh Explore agent from F3 if a task needs broader context.
 
 ## Step 1 — Load minimal context
 
 Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
 
-Also clean up stale cache: `find .devorch -maxdepth 1 -name 'explore-cache-*.md' -mtime +7 -delete 2>/dev/null || true`.
 
 ## Step 2 — Triage (Opus inline, short thinking)
 
@@ -197,7 +195,7 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 
 ### F2. Deep explore + guardian + gate
 
-1. Launch 2–3 Explore agents (`subagent_type="Explore"`, thoroughness **very thorough**) in parallel with distinct focuses (architecture, risks/edges, existing patterns). Write combined findings to `<mainRoot>/.devorch/explore-cache-<name>.md`.
+1. Launch 2–3 Explore agents (`subagent_type="Explore"`, thoroughness **very thorough**) in parallel with distinct focuses (architecture, risks/edges, existing patterns). Consolidate findings in your own context — do not persist to disk. In F3c you will curate per-task subsets into each builder prompt.
 2. Re-run the guardian pass with full exploration context. Enumerate edge cases into the same 3 buckets as scoped mode.
 3. Emit the transparency block (see Step S3) and apply the unified gate (§ Step 5). Skip-when-silent applies here too.
 4. Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `<projectRoot>/.devorch/plans/<name>.md`. Every task uses `Assigned To: devorch-builder`.
@@ -205,7 +203,7 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
    **Multi-repo detection**: If Step 1 `map-project.ts` included `## Sibling Repos`, `$ARGUMENTS` names multiple repos, or the guardian flagged multi-repo intent, include `<secondary-repos>` in the plan. Siblings are typically at `../<name>/` relative to `<mainRoot>`.
 
 5. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked.
-6. Commit the plan in the worktree: stage `.devorch/plans/<name>.md` plus `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) if either was copied in F1.4, then `git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`. Also commit explore-cache changes in `<mainRoot>` with `chore(devorch): add worktree for <name>`.
+6. Commit the plan in the worktree: stage `.devorch/plans/<name>.md` plus `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) if either was copied in F1.4, then `git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`.
 7. Set `planPath = <projectRoot>/.devorch/plans/<name>.md`.
 
 8. **Satellite worktree setup** (only when plan includes `<secondary-repos>`): parse the list of sibling repos from the plan. Build a JSON array `[{name, path}, ...]` with resolved absolute paths. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --add-secondary '<json>'`. Parse the returned `satellites` array and store it as `<satellites>` for F3e and F7. If any satellite fails to create (missing repo, uncommitted changes, branch collision), stop and surface the error — do not proceed to F3.
@@ -215,15 +213,15 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 For each phase N sequentially:
 
 #### F3a. Init phase
-Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --cache-root <mainRoot> --cache-name <name>`. Parse JSON. If `contentFile` is present, read it for full context.
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N`. Parse JSON. If `contentFile` is present, read it for full context.
 
 #### F3b. Filter size gate
-Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). If the array is non-empty, pause and show the user: task id, direction, approximate token count. Offer: continue / split the task / re-curate the slice (manually edit cache or conventions scope). Do not dispatch builders until the array is empty or the user explicitly accepts the warnings.
+Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). If the array is non-empty, pause and show the user: task id, direction, approximate token count. Offer: continue / split the task / re-curate the slice (narrow gotchas, tighten specs, or add the explore findings you're going to inject in the builder prompt). Do not dispatch builders until the array is empty or the user explicitly accepts the warnings.
 
 #### F3c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool, each with `subagent_type="devorch-builder"`. Issue one Task tool call per task inside the same assistant message so they run in parallel.
 
-Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
+Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), and `## Explore Findings` — the subset of F2 explore results you judge relevant to this specific task (files mentioned, patterns touched). Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → Explore Findings.
 
 After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
 
@@ -236,10 +234,9 @@ After each wave returns: verify task completion via `TaskList`, extract `## Buil
 #### F3d. Per-phase check
 If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
 
-#### F3e. Phase summary + commit + cache trim
+#### F3e. Phase summary + commit
 - `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>" [--satellites '<json>']` — include `--satellites` only when `<satellites>` is non-empty (build JSON as `[{name, path}, ...]` from the F2.8 output).
 - Commit with the returned message if there are changes in the primary worktree. For each satellite, also commit phase progress if it has changes: `git -C <satellite.worktreePath> add -A && git -C <satellite.worktreePath> commit -m "<phase-summary-message>"`.
-- `bun $CLAUDE_HOME/devorch-scripts/manage-cache.ts --action invalidate,trim --max-lines 3000 --root <mainRoot> --cache-name <name>`
 
 ### F4. Categorized adversarial review
 

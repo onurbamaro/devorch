@@ -1,9 +1,7 @@
 /**
- * slice-builder.ts — Phase-level cache filtering, wave/task parsing, and slice-size
- * gate constants for init-phase.
+ * slice-builder.ts — Wave/task parsing and slice-size gate constants for init-phase.
  */
 import { extractTagContent } from "./plan-parser";
-import { extractFileRefs, filterCacheByRefs } from "./task-filter";
 
 export interface ParsedWave {
   wave: number;
@@ -28,18 +26,6 @@ export interface ParsedTask {
  *  `> TOKEN_GATE_OVER`  → curation failed; builder is back on bulk context. */
 export const TOKEN_GATE_UNDER = 3000;
 export const TOKEN_GATE_OVER = 30000;
-
-/**
- * Filter the phase-level explore-cache to sections referencing any file path
- * mentioned in the phase's `<tasks>` block. Delegates to filterCacheByRefs
- * after extracting refs from the tasks content.
- */
-export function filterCache(cache: string, phaseText: string): string {
-  if (!cache) return "";
-  const tasksContent = extractTagContent(phaseText, "tasks") || "";
-  const fileRefs = extractFileRefs(tasksContent);
-  return filterCacheByRefs(cache, fileRefs);
-}
 
 /**
  * Parse the phase's `<execution>` block into wave descriptors. Recognizes lines

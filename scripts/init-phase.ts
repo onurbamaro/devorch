@@ -1,23 +1,23 @@
 /**
- * init-phase.ts — Compound phase init: plan context + gotchas + state + filtered explore-cache + waves/tasks.
- * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>] [--cache-name <name>]
+ * init-phase.ts — Compound phase init: plan context + gotchas + state + waves/tasks.
+ * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N>
  * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >50000 chars).
- * Compound init: returns phase context, gotchas, state, filtered explore-cache, and structured waves/tasks as JSON.
- * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/ instead of from the plan's directory.
- * --cache-name: when provided, reads explore-cache-<name>.md instead of explore-cache.md. Enables per-plan cache isolation.
+ *
+ * Explore findings are held by the orchestrator in-context and curated into
+ * per-task builder prompts directly — no persistence, no script-mediated
+ * filtering.
  */
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
-import { extractFileRefs, filterCacheByRefs } from "./lib/task-filter";
+import { extractFileRefs } from "./lib/task-filter";
 import {
   type ParsedWave,
   type ParsedTask,
   TOKEN_GATE_UNDER,
   TOKEN_GATE_OVER,
-  filterCache,
   parseWaves,
   parseTasks,
 } from "./lib/slice-builder";
@@ -31,17 +31,13 @@ interface SatelliteInfo {
   worktreePath: string;
 }
 
-const args = parseArgs<{ plan: string; phase: number; "cache-root": string; "cache-name": string }>([
+const args = parseArgs<{ plan: string; phase: number }>([
   { name: "plan", type: "string", required: true },
   { name: "phase", type: "number", required: true },
-  { name: "cache-root", type: "string" },
-  { name: "cache-name", type: "string" },
 ]);
 
 const planPath = args.plan;
 const phaseNum = args.phase;
-const cacheRoot = args["cache-root"];
-const cacheName = args["cache-name"];
 
 const content = readPlan(planPath);
 const phases = parsePhaseBounds(content);
@@ -107,12 +103,6 @@ const gotchasPath = resolve(projectRoot, ".devorch/GOTCHAS.md");
 const legacyConventionsPath = resolve(projectRoot, ".devorch/CONVENTIONS.md");
 const gotchas = safeReadFile(existsSync(gotchasPath) ? gotchasPath : legacyConventionsPath);
 const state = safeReadFile(resolve(projectRoot, ".devorch/state.md"));
-const cacheRootDir = cacheRoot || projectRoot;
-const cacheFileName = cacheName ? `explore-cache-${cacheName}.md` : "explore-cache.md";
-const cacheSource = resolve(cacheRootDir, ".devorch", cacheFileName);
-const cacheRaw = safeReadFile(cacheSource);
-
-const filteredCache = filterCache(cacheRaw, phaseContent);
 
 const waves: ParsedWave[] = parseWaves(phaseContent);
 const tasks: Record<string, ParsedTask> = parseTasks(phaseContent);
@@ -292,7 +282,6 @@ const exploreQueries = extractExploreQueries(phaseContent);
 const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
 
 // --- Build per-task filtered context ---
-const cacheByTask: Record<string, string> = {};
 const specsByTask: Record<string, string> = {};
 const codeStructureByTask: Record<string, string> = {};
 const exemplarsByTask: Record<string, string[]> = {};
@@ -300,7 +289,6 @@ const nonGoalsByTask: Record<string, string> = {};
 
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskRefs = extractFileRefs(task.content);
-  cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
 
   exemplarsByTask[taskId] = task.exemplars;
   nonGoalsByTask[taskId] = task.nonGoals;
@@ -347,11 +335,10 @@ for (const [taskId, task] of Object.entries(tasks)) {
 const sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }> = [];
 
 for (const taskId of Object.keys(tasks)) {
-  const cacheSlice = cacheByTask[taskId] ?? "";
   const specSlice = specsByTask[taskId] ?? "";
   const codeStructureSlice = codeStructureByTask[taskId] ?? "";
 
-  const combined = gotchas + cacheSlice + specSlice + codeStructureSlice;
+  const combined = gotchas + specSlice + codeStructureSlice;
   const charCount = combined.length;
 
   if (charCount === 0) {
@@ -428,41 +415,7 @@ if (projectMap) {
   parts.push("");
 }
 
-if (filteredCache) {
-  parts.push("## Explore Cache (filtered)");
-  parts.push("");
-  parts.push(filteredCache);
-  parts.push("");
-}
-
 const fullContent = parts.join("\n");
-
-// --- Compute cache coverage for phase ---
-const phaseFileRefs = extractFileRefs(phaseContent);
-let cacheCoversPhase = false;
-let uncoveredFiles: string[] = [];
-
-if (phaseFileRefs.size === 0 || !filteredCache) {
-  cacheCoversPhase = false;
-  uncoveredFiles = [];
-} else {
-  const cacheSections = filteredCache.split(/(?=^## )/m);
-  const missing: string[] = [];
-  for (const ref of phaseFileRefs) {
-    let found = false;
-    for (const section of cacheSections) {
-      if (section.includes(ref)) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      missing.push(ref);
-    }
-  }
-  cacheCoversPhase = missing.length === 0;
-  uncoveredFiles = missing;
-}
 
 // --- Output ---
 const result: {
@@ -474,7 +427,6 @@ const result: {
   waves: ParsedWave[];
   tasks: Record<string, ParsedTask>;
   gotchas?: string;
-  cacheByTask: Record<string, string>;
   /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
   specsByTask: Record<string, string>;
   /** Per-task TLDR code structure analysis. Markdown-formatted summaries of exports, imports, functions, types. */
@@ -485,10 +437,6 @@ const result: {
   nonGoalsByTask: Record<string, string>;
   /** Directed explore queries extracted from phase content. Each has a query text and associated taskId. */
   exploreQueries: Array<{ query: string; taskId: string }>;
-  /** Whether all phase relevant-files appear in at least one filtered cache section. */
-  cacheCoversPhase: boolean;
-  /** File paths from phase relevant-files that are not covered by any cache section. */
-  uncoveredFiles: string[];
   /** Per-task slice-size gate warnings. `under` = <3K tokens (likely under-contextualized); `over` = >30K tokens (curation failed). Empty array when all tasks are within bounds. See Principle 2. */
   sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }>;
   content?: string;
@@ -501,14 +449,11 @@ const result: {
   satellites,
   waves,
   tasks,
-  cacheByTask,
   specsByTask,
   codeStructureByTask,
   exemplarsByTask,
   nonGoalsByTask,
   exploreQueries,
-  cacheCoversPhase,
-  uncoveredFiles,
   sliceWarnings,
 };
 
