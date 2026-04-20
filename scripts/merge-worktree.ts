@@ -633,6 +633,7 @@ async function main(): Promise<void> {
 
   // --- Archive primary plan BEFORE removing primary worktree ---
   let planArchivedTo: string | null = null;
+  let planActiveCleaned: string | null = null;
   if (planFile && existsSync(planFile)) {
     const archiveScript = join(import.meta.dirname, "archive-plan.ts");
     const archiveProc = Bun.spawnSync(
@@ -644,12 +645,47 @@ async function main(): Promise<void> {
       try {
         const parsed = JSON.parse(archiveText);
         planArchivedTo = parsed.to || null;
+        planActiveCleaned = parsed.activeCleaned || null;
         log(`Plan archived to ${planArchivedTo}`);
+        if (planActiveCleaned) {
+          log(`Removed stale active plan ${planActiveCleaned}`);
+        }
       } catch {
         log(`archive-plan returned non-JSON: ${archiveText}`);
       }
     } else {
       log(`archive-plan failed: ${archiveProc.stderr.toString("utf-8").trim()}`);
+    }
+  }
+
+  // --- Commit archival in mainRoot so the active→archive transition is tracked ---
+  // Without this, the archive file stays untracked and the active copy (inherited
+  // from the merge commit) remains in .devorch/plans/, leaking into future worktrees.
+  let archivalCommit: string | null = null;
+  if (planArchivedTo) {
+    const stagePaths: string[] = [".devorch/plans/archive", ".devorch/plans"];
+    const stage = git(mainRoot, ["add", "--", ...stagePaths]);
+    if (stage.exitCode !== 0) {
+      log(`Archival stage failed: ${stage.stderr}`);
+    } else {
+      const diff = git(mainRoot, ["diff", "--cached", "--name-only"]);
+      if (diff.stdout.trim()) {
+        const planTitleForCommit = planTitle || basename(planArchivedTo, ".md");
+        const commit = git(mainRoot, [
+          "commit",
+          "-m",
+          `chore(devorch): archive plan — ${planTitleForCommit}`,
+        ]);
+        if (commit.exitCode === 0) {
+          const sha = git(mainRoot, ["rev-parse", "HEAD"]).stdout.trim();
+          archivalCommit = sha || null;
+          log(`Archival commit: ${archivalCommit}`);
+        } else {
+          log(`Archival commit failed: ${commit.stderr}`);
+        }
+      } else {
+        log(`No archival delta to commit (already tracked).`);
+      }
     }
   }
 
@@ -716,6 +752,8 @@ async function main(): Promise<void> {
     planTitle,
     repos: reposReport,
     planArchivedTo,
+    planActiveCleaned,
+    archivalCommit,
     selfBuildInstalled,
   });
 }

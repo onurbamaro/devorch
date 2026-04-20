@@ -297,7 +297,7 @@ Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON sh
 Optional flags: `--squash`, `--keep-branch`, `--no-rebase`, `--dry-run`.
 
 Parse JSON output and route by `ok`:
-- `ok: true` → iterate `repos[]`: for each entry report `role` (primary / satellite), `name`, `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`. Also surface `planArchivedTo` and, when the merged repo was devorch itself, `selfBuildInstalled` (the script auto-re-runs `install.ts` after a devorch self-merge). Done.
+- `ok: true` → iterate `repos[]`: for each entry report `role` (primary / satellite), `name`, `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`. Also surface `planArchivedTo`, `planActiveCleaned` (stale active copy removed from `mainRoot`), `archivalCommit` (the commit sha recording the active→archive transition), and, when the merged repo was devorch itself, `selfBuildInstalled` (the script auto-re-runs `install.ts` after a devorch self-merge). Done.
 - `ok: false` → route by `phase`:
   - `"rebase"` → rebase conflict in a specific repo; surface `failedRepos[].conflictFiles` and instruct manual resolution.
   - `"dry-run"` → one or more repos' merge dry-run failed; list them with conflict files. No repo was merged (atomicity guard). Preserve all worktrees.

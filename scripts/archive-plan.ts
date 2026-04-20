@@ -49,13 +49,29 @@ const archivePath = resolve(archiveDir, archiveFilename);
 // Create archive directory
 mkdirSync(archiveDir, { recursive: true });
 
-// Copy then delete
+// Copy source to archive and delete source
 copyFileSync(resolved, archivePath);
 unlinkSync(resolved);
+
+// When --target-root is provided, the source is typically a worktree's plan.
+// The merge already landed an identical copy at <target-root>/.devorch/plans/<basename>.
+// Remove that one too — otherwise it leaks into future worktrees as a stale plan.
+// Only remove if it has the same basename as our source (fresh merge) — skip if different
+// or absent (user running archive-plan standalone).
+let activeCleaned: string | null = null;
+if (targetRoot) {
+  const sourceBasename = resolved.split("/").pop() || "";
+  const activeInMain = resolve(targetRoot, ".devorch/plans", sourceBasename);
+  if (existsSync(activeInMain)) {
+    unlinkSync(activeInMain);
+    activeCleaned = activeInMain.replaceAll("\\", "/");
+  }
+}
 
 console.log(JSON.stringify({
   archived: true,
   from: planPath,
   to: archivePath.replaceAll("\\", "/"),
+  activeCleaned,
   planName,
 }));
