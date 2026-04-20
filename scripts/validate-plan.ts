@@ -24,151 +24,6 @@ try {
 const errors: string[] = [];
 const warnings: string[] = [];
 
-// --- Spec concreteness detection ---
-const VAGUE_PATTERNS = [
-  /\bobject\b/i,
-  /\bdata\b/i,
-  /\bany\b/i,
-  /\bappropriate\b/i,
-  /\bcorrect(ly)?\b/i,
-  /\bproper(ly)?\b/i,
-  /\bas needed\b/i,
-  /\brelevant\b/i,
-  /\bhandle correctly\b/i,
-  /\bshould process\b/i,
-  /\bshould manage\b/i,
-  /\bshould handle\b/i,
-];
-
-const OBSERVABLE_PATTERNS = [
-  /\bstring\b/i,
-  /\bnumber\b/i,
-  /\bboolean\b/i,
-  /\bnull\b/i,
-  /\bundefined\b/i,
-  /[{}\[\]]/,
-  /\breturns?\b/i,
-  /\bcontains?\b/i,
-  /\bequals?\b/i,
-  /\bexists?\b/i,
-  /\bthrows?\b/i,
-  /\bstatus\b/i,
-  /\b\d{3}\b/,
-];
-
-function checkSpecConcreteness(specContent: string): string[] {
-  const found: string[] = [];
-
-  interface SpecElement {
-    label: string;
-    text: string;
-  }
-
-  const elements: SpecElement[] = [];
-
-  // interface input/output
-  const interfaceRegex = /<interface\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/interface>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = interfaceRegex.exec(specContent)) !== null) {
-    const iName = m[1];
-    const body = m[2];
-    const inputM = body.match(/<input[^>]*>([\s\S]*?)<\/input>/i);
-    if (inputM) elements.push({ label: `interface '${iName}' <input>`, text: inputM[1] });
-    const outputM = body.match(/<output[^>]*>([\s\S]*?)<\/output>/i);
-    if (outputM) elements.push({ label: `interface '${iName}' <output>`, text: outputM[1] });
-  }
-
-  // behavior precondition/postcondition
-  const behaviorRegex = /<behavior\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/behavior>/gi;
-  while ((m = behaviorRegex.exec(specContent)) !== null) {
-    const bName = m[1];
-    const body = m[2];
-    const preM = body.match(/<precondition[^>]*>([\s\S]*?)<\/precondition>/i);
-    if (preM) elements.push({ label: `behavior '${bName}' <precondition>`, text: preM[1] });
-    const postM = body.match(/<postcondition[^>]*>([\s\S]*?)<\/postcondition>/i);
-    if (postM) elements.push({ label: `behavior '${bName}' <postcondition>`, text: postM[1] });
-  }
-
-  // error-contract case trigger/handling
-  const ecRegex = /<error-contract\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/error-contract>/gi;
-  while ((m = ecRegex.exec(specContent)) !== null) {
-    const eName = m[1];
-    const body = m[2];
-    const caseRegex = /<case\s+[^>]*>([\s\S]*?)<\/case>/gi;
-    let cm: RegExpExecArray | null;
-    while ((cm = caseRegex.exec(body)) !== null) {
-      elements.push({ label: `error-contract '${eName}' <case>`, text: cm[1] });
-    }
-    // Also check case attributes (trigger text)
-    const caseTriggerRegex = /<case\s+([^>]*)>/gi;
-    let ct: RegExpExecArray | null;
-    while ((ct = caseTriggerRegex.exec(body)) !== null) {
-      elements.push({ label: `error-contract '${eName}' case trigger`, text: ct[1] });
-    }
-  }
-
-  // entity field descriptions and constraint text
-  const entityRegex2 = /<entity\s+[^>]*name="([^"]*)"[^>]*>([\s\S]*?)<\/entity>/gi;
-  while ((m = entityRegex2.exec(specContent)) !== null) {
-    const eName = m[1];
-    const body = m[2];
-    // Field descriptions (text after attributes in self-closing tags, or type attribute value)
-    const fieldDescRegex = /<field\s+([^>]*)\/?>/gi;
-    let fm: RegExpExecArray | null;
-    while ((fm = fieldDescRegex.exec(body)) !== null) {
-      const fieldAttrs = fm[1];
-      const fieldName = fieldAttrs.match(/name="([^"]+)"/)?.[1] || "unknown";
-      const typeVal = fieldAttrs.match(/type="([^"]+)"/)?.[1] || "";
-      if (typeVal) {
-        elements.push({ label: `entity '${eName}' field '${fieldName}' type`, text: typeVal });
-      }
-    }
-    // Constraint text
-    const conRegex = /<constraint(?:\s[^>]*)?>([^<]*)<\/constraint>/gi;
-    let cm2: RegExpExecArray | null;
-    while ((cm2 = conRegex.exec(body)) !== null) {
-      elements.push({ label: `entity '${eName}' <constraint>`, text: cm2[1] });
-    }
-  }
-
-  // endpoint request/response
-  const endpointRegex = /<endpoint\s+([^>]*)>([\s\S]*?)<\/endpoint>/gi;
-  while ((m = endpointRegex.exec(specContent)) !== null) {
-    const attrs = m[1];
-    const body = m[2];
-    const pathM = attrs.match(/path="([^"]*)"/);
-    const epName = pathM ? pathM[1] : "unknown-endpoint";
-    const reqM = body.match(/<request[^>]*>([\s\S]*?)<\/request>/i);
-    if (reqM) elements.push({ label: `endpoint '${epName}' <request>`, text: reqM[1] });
-    const respRegex = /<response[^>]*>([\s\S]*?)<\/response>/gi;
-    let rm: RegExpExecArray | null;
-    while ((rm = respRegex.exec(body)) !== null) {
-      elements.push({ label: `endpoint '${epName}' <response>`, text: rm[1] });
-    }
-  }
-
-  for (const el of elements) {
-    const vagueCount = VAGUE_PATTERNS.filter((p) => p.test(el.text)).length;
-    const observableCount = OBSERVABLE_PATTERNS.filter((p) => p.test(el.text)).length;
-
-    if (vagueCount >= 2 && observableCount === 0) {
-      const vagueMatches = VAGUE_PATTERNS
-        .filter((p) => p.test(el.text))
-        .map((p) => {
-          const match = el.text.match(p);
-          return match ? match[0] : "";
-        })
-        .join(", ");
-      const specNameFromLabel = el.label.match(/'([^']+)'/)?.[1] ?? "unknown";
-      found.push(
-        `Spec '${specNameFromLabel}' has vague ${el.label}: '${vagueMatches}' — consider specifying concrete types/behaviors`
-      );
-    }
-  }
-
-  return found;
-}
-
 // --- Required top-level tags ---
 const requiredTags = [
   { pattern: /<description>[\s\S]*?<\/description>/i, name: "description" },
@@ -197,15 +52,6 @@ if (classBlock) {
   }
   if (!/Risk:\s*(low|medium|high)/i.test(classBlock)) {
     errors.push("Classification: missing or invalid Risk. Must be one of: low, medium, high");
-  }
-
-  // Optional Fast-path field: true | false | absent (treated as false)
-  const fastPathMatch = classBlock.match(/^\s*Fast-path:\s*(\S+)\s*$/im);
-  if (fastPathMatch) {
-    const value = fastPathMatch[1];
-    if (value !== "true" && value !== "false") {
-      errors.push(`Invalid Fast-path value in classification: expected 'true' or 'false', got '${value}'`);
-    }
   }
 }
 
@@ -470,41 +316,19 @@ if (phases.length === 0) {
         }
       }
 
-      // --- Spec concreteness warnings ---
-      warnings.push(...checkSpecConcreteness(specContent));
     }
 
-    // --- Assigned To, Model, and Effort validation ---
-    // Allowlist mirrors the two builder variants documented in docs/PLAN-FORMAT.md § Model/Effort policy.
-    // Kept as a warning (not error) so plans can experiment with custom builder agents — runtime dispatch
-    // in /devorch F3c falls back to devorch-builder-deep when an agent fails to resolve.
-    const validAgents = new Set(["devorch-builder-deep", "devorch-builder-mech"]);
-    const validModels = new Set(["sonnet", "opus", "haiku"]);
-    const validEfforts = new Set(["low", "medium", "high", "xhigh"]);
-
+    // --- Assigned To validation (single builder: devorch-builder) ---
     const taskSectionsForME = tasksContent.split(/####\s+\d+\.\s+/);
     for (const section of taskSectionsForME.slice(1)) {
       const taskIdMatchME = section.match(/\*\*ID\*\*:\s*(\S+)/i);
       const tid = taskIdMatchME ? taskIdMatchME[1] : "unknown";
 
       const assignedMatch = section.match(/\*\*Assigned To\*\*:\s*(\S+)/i);
-      if (assignedMatch && !validAgents.has(assignedMatch[1])) {
-        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Assigned To "${assignedMatch[1]}" (expected: ${[...validAgents].join(", ")})`);
+      if (assignedMatch && assignedMatch[1] !== "devorch-builder") {
+        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Assigned To "${assignedMatch[1]}" (expected: devorch-builder)`);
       }
 
-      const modelMatch = section.match(/\*\*Model\*\*:\s*(\S+)/i);
-      if (modelMatch && !validModels.has(modelMatch[1].toLowerCase())) {
-        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Model "${modelMatch[1]}" (expected: sonnet, opus, haiku)`);
-      }
-
-      const effortMatch = section.match(/\*\*Effort\*\*:\s*(\S+)/i);
-      if (effortMatch && !validEfforts.has(effortMatch[1].toLowerCase())) {
-        warnings.push(`Phase ${phase.num}: task "${tid}" has unrecognized Effort "${effortMatch[1]}" (expected: low, medium, high, xhigh)`);
-      }
-
-      // Recognized optional fields: Exemplars, Non-goals.
-      // Both accept any non-empty value; absence is also valid. No error either way.
-      // Explicit recognition here documents them as supported task-level fields.
       const exemplarsMatch = section.match(/^\s*\*\*Exemplars\*\*:\s*(.+)$/im);
       if (exemplarsMatch && !exemplarsMatch[1].trim()) {
         warnings.push(`Phase ${phase.num}: task "${tid}" has empty Exemplars field — omit the line or provide paths`);

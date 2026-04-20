@@ -107,11 +107,7 @@ The post-edit lint hook fires automatically via `PostToolUse`. If it surfaces er
 
 ### Q4. Commit
 
-Conventional commit, stage only touched files:
-```
-git add <files>
-git commit -m "type(scope): description"
-```
+Conventional commit, stage only touched files.
 
 ### Q5. Report + gotcha capture
 
@@ -159,12 +155,7 @@ Bifurcações:
 Quais itens clarificar? [Nenhum / Todos / Números (ex: 1,3)]
 ```
 
-Then call `AskUserQuestion` once consolidating the gate. Options:
-- **Nenhum** — seguir com defaults e recomendações
-- **Todos** — abrir pergunta por cada bifurcação
-- **Números** — usuário digita `1,3` para clarificar apenas esses
-
-If the user chose **Números** or **Todos**, follow up with targeted `AskUserQuestion` rounds (max 4 questions per call) until all selected bifurcations are resolved. Zero questions is valid.
+Then apply the unified gate (§ Step 5 below).
 
 ### S4. Worktree (opt-in)
 
@@ -208,16 +199,10 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 
 1. Launch 2–3 Explore agents (`subagent_type="Explore"`, thoroughness **very thorough**) in parallel with distinct focuses (architecture, risks/edges, existing patterns). Write combined findings to `<mainRoot>/.devorch/explore-cache-<name>.md`.
 2. Re-run the guardian pass with full exploration context. Enumerate edge cases into the same 3 buckets as scoped mode.
-3. Emit the same transparency block (Step S3) and a single `AskUserQuestion` gate with `Nenhum / Todos / Números`. Resolve bifurcations in follow-up rounds if needed. **Skip-when-silent**: se `K + J == 0`, pule o bloco e o gate por completo e prossiga direto para o Step 4. Princípio 5.
-4. Draft the plan following the canonical format in `docs/PLAN-FORMAT.md`: `<description>`, `<objective>`, `<classification>`, `<decisions>`, optional `<problem-statement>` + `<solution-approach>` (medium/complex), `<relevant-files>` with optional `<secondary-repos>` for multi-repo, and numbered `<phaseN>` blocks containing `<goal>`, `<spec>`, `<tasks>`, `<execution>`, `<criteria>`, `<handoff>`. Write it to `<projectRoot>/.devorch/plans/<name>.md`.
+3. Emit the transparency block (see Step S3) and apply the unified gate (§ Step 5). Skip-when-silent applies here too.
+4. Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `<projectRoot>/.devorch/plans/<name>.md`. Every task uses `Assigned To: devorch-builder`.
 
-   **Per-task model/effort classification** (mandatory when drafting `<tasks>`): for each task, pick one of two builder variants through these gates in order (see `docs/PLAN-FORMAT.md` § Model/Effort policy for full rationale):
-   - Gate 1 — **strictly mechanical?** No decisions, 1–2 files, literal edits (rename, config tweak, typo fix, 1:1 boilerplate mirrored from an exemplar). → `Assigned To: devorch-builder-mech` · `Model: sonnet` · `Effort: high`
-   - Gate 2 — **default** (complex, fix/debug, partial spec, cross-cutting, or any doubt). → `Assigned To: devorch-builder-deep` · `Model: opus` · `Effort: xhigh`
-
-   Never emit `Effort: max`. When in doubt between the two gates, pick the deeper one — cost of a retry outweighs the reasoning-token delta.
-
-   **Multi-repo detection**: If the Step 1 `map-project.ts` output contained a `## Sibling Repos` section, OR `$ARGUMENTS` explicitly mentions more than one repo, OR the guardian pass flagged multi-repo intent, include `<secondary-repos>` in the plan with the chosen sibling paths. The user should have confirmed sibling selection in the gate (Step 5). Siblings are typically at `../<name>/` relative to `<mainRoot>` or absolute paths under `~/dev/`.
+   **Multi-repo detection**: If Step 1 `map-project.ts` included `## Sibling Repos`, `$ARGUMENTS` names multiple repos, or the guardian flagged multi-repo intent, include `<secondary-repos>` in the plan. Siblings are typically at `../<name>/` relative to `<mainRoot>`.
 
 5. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked.
 6. Commit the plan in the worktree: stage `.devorch/plans/<name>.md` plus `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) if either was copied in F1.4, then `git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`. Also commit explore-cache changes in `<mainRoot>` with `chore(devorch): add worktree for <name>`.
@@ -236,24 +221,17 @@ Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N 
 Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). If the array is non-empty, pause and show the user: task id, direction, approximate token count. Offer: continue / split the task / re-curate the slice (manually edit cache or conventions scope). Do not dispatch builders until the array is empty or the user explicitly accepts the warnings.
 
 #### F3c. Dispatch builders (parallel waves)
-For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool. **Pick the builder variant per task** from its `model`+`effort` fields (already parsed and emitted by `init-phase.ts`):
+For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool, each with `subagent_type="devorch-builder"`. Issue one Task tool call per task inside the same assistant message so they run in parallel.
 
-- `model: sonnet` (any effort) → `subagent_type="devorch-builder-mech"` — strictly mechanical tasks.
-- Else (including `model: opus` at any effort, missing fields, or anything ambiguous) → `subagent_type="devorch-builder-deep"` (default).
+Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
 
-`effort: max` is not used — never dispatch with max.
-
-A single wave may mix variants; issue one Task tool call per task inside the same assistant message so they run in parallel. Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
-
-After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id for aggregation. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
+After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
 
 **Multi-repo tasks**: when `<satellites>` is non-empty and a task has `Repo: <name>` matching a satellite, prepend to the builder prompt: `Working directory: <satellite.worktreePath>` and `Use git -C <satellite.worktreePath> for all git commands`. Tasks without `Repo:` (or with `Repo: primary`) use `<projectRoot>` as their working directory.
 
-**On builder failure** (no matching commit or reported failure): retry per task (max 3 attempts). Each retry appends a `## Previous Failure Context` section to the builder prompt containing: retry count, last 50 lines of prior output, git diff from the failed attempt (or "no commits"), and an instruction to diagnose the root cause rather than repeat the approach. On retry exhaustion (3/3): stop the phase, emit a structured failure report with the error timeline and suggest `/devorch --full` re-planning.
+**On builder failure** (no matching commit or reported failure): retry per task (max 3 attempts). Each retry appends a `## Previous Failure Context` section to the builder prompt: retry count, last 50 lines of prior output, git diff from the failed attempt (or "no commits"), and an instruction to diagnose the root cause. On retry exhaustion: stop the phase, emit a structured failure report and suggest `/devorch --full` re-planning.
 
-**On builder escalation** (build report contains `Model fit: wrong agent — needs builder-deep`, and no commit was made): do not count as a failure. Re-dispatch the same task to `devorch-builder-deep` immediately (no `## Previous Failure Context` — the task was not attempted). If `devorch-builder-deep` also escalates, treat as a failure and follow the 3-attempt retry rule on `devorch-builder-deep`.
-
-**On agent resolution failure** (Task tool returns `Agent type ... not found` or equivalent for the chosen `subagent_type`, and no commit was made): the agent is not registered in the current Claude Code session — typically because the agent was installed after the session started and agent registration is session-scoped. Do not count as a task failure or consume a retry slot. Log one line (`dispatcher: <agent> unresolvable in session — falling back to devorch-builder-deep`) and immediately re-dispatch the same task to `devorch-builder-deep`. If `devorch-builder-deep` itself fails to resolve, stop the phase and surface the session-registration issue to the user (suggest restarting Claude Code after `bun install.ts`).
+**On agent resolution failure** (Task tool returns `Agent type not found` and no commit was made): the agent is not registered in the current session — typically because it was installed after session start. Do not count as a failure or consume a retry slot. Surface the session-registration issue to the user and suggest restarting Claude Code after `bun install.ts`.
 
 #### F3d. Per-phase check
 If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
@@ -278,7 +256,7 @@ Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single me
 
 Classify each finding:
 - **Trivial** (1–2 files, obvious fix) → apply inline with Edit.
-- **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder-deep` agents in parallel.
+- **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder` agents in parallel.
 - **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested `/devorch --full` prompt.
 
 Skip review execution entirely if all reviewers and residual scan reported zero findings. After fixes, run `check-project.ts <projectRoot>` (full if fix-level launched, `--quick` if trivial only). One retry on failure.
@@ -333,16 +311,7 @@ Plan archival is done inside `merge-worktree.ts`. Self-build install (when editi
 
 On FAIL → do not merge, preserve worktrees, suggest `/devorch --resume` to retry or `/devorch --full "<fix description>"` for a new attempt.
 
-### F8. Feedback (user preferences)
-
-If `<mainRoot>/.devorch/feedback.md` gained entries in this session, append:
-```
-### Feedback devorch
-N dificuldades registradas. Para evoluir:
-/devorch --full Evoluir o devorch baseado em .devorch/feedback.md
-```
-
-### F8.5. Gotcha capture (full mode)
+### F8. Gotcha capture (full mode)
 
 Apply the gotcha-capture rule (§ Gotcha capture below). Full mode has the richest signal — builder retries, reviewer surprises, guardian flags on untyped contracts — so this step is especially valuable here.
 

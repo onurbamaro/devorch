@@ -8,10 +8,7 @@
 Nine principles, each paired with a validation question that tells you
 when you are violating it. The principles are descriptive of what the
 current implementation commits to; if the code drifts from a principle,
-one of the two is wrong and needs explicit reconciliation. The
-"Changes from v2" section near the end preserves the delta from the
-earlier seven-principle set, so the lineage stays legible to anyone
-inheriting this project.
+one of the two is wrong and needs explicit reconciliation.
 
 ---
 
@@ -326,31 +323,6 @@ to a three-line typo fix is theater, not diligence. It trains the
 user to bypass the tool, which means the guardian never runs, which
 means the anti-patterns the tool was built to catch never get caught.
 Rigor is ceremony shaped to the task. Uniform ceremony is cosplay.
-
----
-
-## Changes from v2
-
-The delta from the seven v2 principles to the nine v3 principles:
-
-- **P1**: "Orchestrator Must Stay Light" -> "Orchestrator stays focused, not small."
-  Reframed around 1M context: the problem was never token count, it was dilution.
-- **P2**: "Fresh Context Beats Accumulated Context" -> "Fresh context per subagent, with filter gates."
-  Adds the size gate (under 3K or over 30K pauses for human review).
-- **P3**: "Compute Outside the LLM When Possible" -> "Mechanical outside the LLM, judgment inside."
-  Sharpened: the line is about fit, not about minimizing LLM use; triage is explicitly judgment.
-- **P4**: "Structure Enables Parallelism" -> "Parallelism is earned by scope."
-  Inverted emphasis: parallelism has a tax, and small work does not justify paying it.
-- **P5**: "Clarify Before You Build" -> "Enumerate before; ask only real bifurcations."
-  Major shift: enumeration is always done, asking is selective. Zero questions is valid.
-- **P6**: "Code Is the Source of Truth" -> "Code is contextual truth; industry is normative."
-  Significantly reframed: code is descriptive, industry is prescriptive, divergence is explicit.
-- **P7**: "Fail Fast, Fix With Context" -> "Fail fast, fix with context."
-  Intact. Renamed to match v3 casing.
-- **P8** (new): "Guardian is default posture."
-  New principle. Codifies the senior-engineer posture as always-on, not opt-in.
-- **P9** (new): "Ceremony proportional to scope."
-  New principle. Codifies the quick/scoped/full mode split as a first-class commitment.
 
 ---
 

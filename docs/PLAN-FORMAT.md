@@ -22,7 +22,6 @@ parses the structure below to produce per-task context slices.
 Type: <type>
 Complexity: <complexity>
 Risk: <risk>
-Fast-path: <true|false>  <!-- optional — include only when fast-path condition was triggered -->
 </classification>
 
 <decisions>
@@ -96,22 +95,12 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 <tasks>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
-- **Assigned To**: devorch-builder-deep       <!-- default: deep (opus xhigh). See Model/Effort policy below -->
-- **Model**: opus
-- **Effort**: xhigh
+- **Assigned To**: devorch-builder
 - **Repo**: <name>                       <!-- optional, default: primary. Use secondary repo name when the task targets a satellite -->
 - **Spec refs**: <comma-separated spec names>   <!-- optional — references <spec> children by name -->
 - **Exemplars**: src/a.ts, src/b.ts              <!-- optional — file paths the builder should mirror -->
 - **Non-goals**: one-line description            <!-- optional — explicit exclusions -->
 - <specific action>
-- <specific action>
-
-#### 2. <Task Name>
-- **ID**: <kebab-case>
-- **Assigned To**: devorch-builder-mech       <!-- mechanical variant when no decisions remain and edits are literal -->
-- **Model**: sonnet
-- **Effort**: high
-- **Spec refs**: <names>
 - <specific action>
 
 </tasks>
@@ -152,24 +141,6 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 - `<global-invariants>` applies to every phase but is not delivered per-task to
   builders — surface it via Spec refs where needed.
 
-## Model/Effort policy
-
-Two builder variants map to two task profiles. The F3c dispatcher routes on `Model`+`Effort`:
-
-- **devorch-builder-mech** — `Model: sonnet`, `Effort: high`. Strictly mechanical work: renames,
-  config tweaks, typos, literal scaffold against a completed interface. Zero design judgment.
-  Use **only** when the task has no decisions left to make and touches 1–2 files.
-- **devorch-builder-deep** — `Model: opus`, `Effort: xhigh`. **Default.** Anything complex,
-  fix-loop, debugging, refactors, spec-driven work, or tasks without a fully-closed spec.
-
-`Effort: max` is not used — Max-plan subscribers (20x) prefer xhigh + retry-safety over max.
-
-When the guardian drafts the plan (F2.4), it classifies each task through two gates in order:
-1. Is it strictly mechanical (no decisions, 1–2 files, literal edits)? → `mech`
-2. Else → `deep` (default)
-
-If in doubt, pick `deep` — the cost of an upgraded builder is trivial compared to a retry.
-
 ## Consumer scripts
 
 - `validate-plan.ts` — structural validation, invoked after plan draft.
@@ -183,7 +154,7 @@ If in doubt, pick `deep` — the cost of an upgraded builder is trivial compared
 - [ ] `# Plan: <name>` header present
 - [ ] `<description>`, `<objective>`, `<classification>`, `<decisions>` blocks present
 - [ ] Phases numbered consecutively from 1
-- [ ] Every task has `ID`, `Assigned To`, `Model`, `Effort` (see Model/Effort policy)
+- [ ] Every task has `ID` and `Assigned To: devorch-builder`
 - [ ] Every non-trivial task has at least one Spec ref OR is explicitly exempt
   (pure config/docs/trivial one-file chore)
 - [ ] `<execution>` wave mapping matches declared task IDs

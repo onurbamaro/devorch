@@ -1,14 +1,9 @@
 /**
  * slice-builder.ts — Phase-level cache filtering, wave/task parsing, and slice-size
  * gate constants for init-phase.
- *
- * Pure functions extracted from init-phase.ts so the compound init script can stay
- * focused on CLI glue, subprocess orchestration, and JSON assembly. Every function
- * here is a byte-for-byte preservation of behavior as it ran inline in init-phase.ts;
- * no logic has been tightened, optimized, or reordered. See init-phase.ts for the
- * original definitions.
  */
 import { extractTagContent } from "./plan-parser";
+import { extractFileRefs, filterCacheByRefs } from "./task-filter";
 
 export interface ParsedWave {
   wave: number;
@@ -35,63 +30,15 @@ export const TOKEN_GATE_UNDER = 3000;
 export const TOKEN_GATE_OVER = 30000;
 
 /**
- * Filter the phase-level explore-cache down to sections whose bodies reference
- * any file path mentioned in the phase's `<tasks>` block. Matches the phase-scoped
- * filter that ran inline in init-phase.ts — not the per-task filter
- * (see {@link filterCacheByRefs} in task-filter.ts for that).
- *
- * Algorithm:
- *   1. Collect backtick-quoted file refs from the `<tasks>` content.
- *   2. Split cache on `## ` headers; keep the preamble and every section whose
- *      content includes a ref, or whose content contains the directory prefix
- *      (first path segment) of any ref, case-insensitively.
- *   3. When no refs are found, return the cache unchanged.
+ * Filter the phase-level explore-cache to sections referencing any file path
+ * mentioned in the phase's `<tasks>` block. Delegates to filterCacheByRefs
+ * after extracting refs from the tasks content.
  */
 export function filterCache(cache: string, phaseText: string): string {
   if (!cache) return "";
-
   const tasksContent = extractTagContent(phaseText, "tasks") || "";
-  const fileRefs = new Set<string>();
-  const filePatterns = [...tasksContent.matchAll(/`([^`]*(?:\/[^`]+|\.\w{1,5}))`/g)];
-  for (const match of filePatterns) {
-    const ref = match[1];
-    if (/\.\w{1,5}$/.test(ref) || ref.includes("/")) {
-      fileRefs.add(ref);
-    }
-  }
-
-  if (fileRefs.size === 0) return cache;
-
-  const sections = cache.split(/(?=^## )/m);
-  const matched: string[] = [];
-
-  for (const section of sections) {
-    if (!section.startsWith("## ")) {
-      matched.push(section);
-      continue;
-    }
-    let sectionMatches = false;
-    for (const ref of fileRefs) {
-      if (section.includes(ref)) {
-        sectionMatches = true;
-        break;
-      }
-    }
-    if (!sectionMatches) {
-      for (const ref of fileRefs) {
-        const dir = ref.split("/")[0];
-        if (dir && section.toLowerCase().includes(dir.toLowerCase())) {
-          sectionMatches = true;
-          break;
-        }
-      }
-    }
-    if (sectionMatches) {
-      matched.push(section);
-    }
-  }
-
-  return matched.join("").trim();
+  const fileRefs = extractFileRefs(tasksContent);
+  return filterCacheByRefs(cache, fileRefs);
 }
 
 /**
