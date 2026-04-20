@@ -40,7 +40,7 @@ Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structur
 Use short internal thinking (~500–1000 tokens) to classify `$ARGUMENTS` into exactly one mode:
 
 - **quick** — 1–3 known files, explicit action, no design ambiguity. Signals: typo, rename, localized bugfix, config tweak, edit in a clearly identified file.
-- **scoped** — 1 module, feature/fix with legitimate options, 1 explore suffices. Signals: bug with multiple possible causes, new endpoint in existing module, small feature, refactor in 1 file.
+- **scoped** — 1 module (or a tight set of files within one), feature/fix with legitimate options, narrow exploration suffices (1–3 medium explores, not deep). Signals: bug with multiple possible causes, new endpoint in existing module, small feature, refactor in 1 file.
 - **full** — multi-module, new feature, broad refactor, worktree justifiable. Signals: new abstraction, multi-repo, term without precedent in the repo, cross-cutting change (auth, DB schema, API shape).
 
 Output exactly one line: `Classification: <mode> — <1 line justification>`.
@@ -119,7 +119,7 @@ One-line report: what changed, commit hash. Then apply the gotcha-capture rule (
 
 ### S1. Quick explore
 
-Derive a kebab-case `<name>` from `$ARGUMENTS` (3–5 words). Launch 1 Explore agent (`subagent_type="Explore"`, thoroughness **medium**) in parallel with the rest of this flow. Focus: architecture, relevant files, existing patterns for the request. Wait for return before Step S2.
+Derive a kebab-case `<name>` from `$ARGUMENTS` (3–5 words). Launch **1–3 Explore agents** (`subagent_type="Explore"`, thoroughness **medium**) in parallel — adapt the count and focuses to what the request actually needs: a localized bugfix in a known area may warrant 1 focused explore; a bug with unclear cause across suspect modules, or a small feature touching multiple layers, may warrant 2–3 explores with distinct focuses (e.g. architecture, risks/edges, existing patterns). Err on the side of fewer — scoped mode is meant to be lighter than full (F2 uses 2–3 **very thorough**); if you find yourself wanting more, reconsider whether the request is actually `full`. Wait for all returns before Step S2.
 
 ### S2. Enumerate edge cases (3 buckets)
 
@@ -132,28 +132,16 @@ Based on `$ARGUMENTS`, explore findings, GOTCHAS.md (if present), and the guardi
 
 **Skip-when-silent**: if `K + J == 0` (nenhuma bifurcação real e nenhum heads-up crítico após S2), pule este passo por completo — nem bloco de transparência nem `AskUserQuestion`. Siga direto para S4. Princípio 5: zero questions is a valid outcome.
 
-Emit this block to the user (plain markdown — no box-drawing):
+Emit only the counts block (plain markdown — no box-drawing):
 
 ```
 Edge cases considerados: N
 Resolvidos por convenção/código/pedido: M
 Bifurcações reais: K
 Heads up crítico: J
-
-Heads up:
-- <item> ... [opção A] [opção B] [skip]
-
-Bifurcações:
-1. <título>
-   A) <opção> (recomendada)
-   B) <opção>
-   Recomendação: A — <1 linha de motivo>
-2. ...
-
-Quais itens clarificar? [Nenhum / Todos / Números (ex: 1,3)]
 ```
 
-Then apply the unified gate (§ Step 5 below).
+Não liste bifurcações nem heads-ups como texto aqui — eles são apresentados como `AskUserQuestion` diretas no Step 5. Aplique o unified gate (§ Step 5 abaixo).
 
 ### S4. Worktree (opt-in)
 
@@ -216,7 +204,13 @@ For each phase N sequentially:
 Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N`. Parse JSON. If `contentFile` is present, read it for full context.
 
 #### F3b. Filter size gate
-Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). If the array is non-empty, pause and show the user: task id, direction, approximate token count. Offer: continue / split the task / re-curate the slice (narrow gotchas, tighten specs, or add the explore findings you're going to inject in the builder prompt). Do not dispatch builders until the array is empty or the user explicitly accepts the warnings.
+Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). The init-phase check sizes only what the script can see (gotchas + specs + code structure) — it runs **before** F3c curates and injects F2 Explore Findings into each builder prompt, so `under` warnings are expected whenever you have relevant findings queued for injection.
+
+Handling per direction:
+- **`under`** — for each warning, decide if the Explore Findings you plan to inject for that task in F3c will materially raise the effective slice size. If yes, auto-resolve silently and log a single line: `Slice <task-id> marcado under (<N>K); vou engordar via Explore Findings na F3c.` If no injection is planned for that task (or the planned injection is trivial), pause and offer the user: continue / split the task / re-curate the slice (narrow gotchas, tighten specs) / inject additional findings.
+- **`over`** — always pause. Show task id, approximate token count, and offer: continue / split the task / trim the slice (narrow gotchas, tighten specs, reduce injected findings).
+
+Do not dispatch builders until every remaining warning is either auto-resolved (with the log line) or explicitly accepted by the user.
 
 #### F3c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool, each with `subagent_type="devorch-builder"`. Issue one Task tool call per task inside the same assistant message so they run in parallel.
@@ -324,17 +318,53 @@ Roda antes do report final. Captura atritos no próprio fluxo do devorch — nã
 
 ---
 
-## Step 5 — Unified gate UX (used by scoped and full)
+## Step 5 — Unified gate UX (used by quick, scoped, and full)
 
-**Precondition**: este gate só roda quando há pelo menos uma bifurcação real ou um heads-up crítico (`K + J > 0`). Se ambos forem zero, S3/F2 já terão pulado este passo silenciosamente — não invoque `AskUserQuestion` apenas para confirmar defaults.
+**Precondition**: este gate só roda quando há pelo menos uma bifurcação real ou um heads-up crítico (`K + J > 0`). Se ambos forem zero, Q1/S3/F2 já terão pulado este passo silenciosamente — não invoque `AskUserQuestion` apenas para confirmar defaults. Se só heads-ups existirem (`J > 0`, `K == 0`), rode apenas o heads-up pass; se só bifurcações existirem (`K > 0`, `J == 0`), rode apenas o bifurcations pass.
 
-Quando executado, o transparency block é seguido por uma única chamada `AskUserQuestion` com estas opções:
+### Heads-up pass (quando `J > 0`)
 
-- **"Nenhum"** — seguir com defaults e recomendações
-- **"Todos"** — abrir pergunta para cada bifurcação em rounds subsequentes
-- **"Números: 1,3,..."** — clarificar apenas os itens listados (usuário digita a lista)
+Antes da pergunta, emita a lista dos heads-ups como markdown simples (não inclua na pergunta — mantém a pergunta curta):
 
-If **Números** or **Todos** is selected, loop with `AskUserQuestion` (max 4 per call) until all selected bifurcations are resolved. Zero questions is a valid outcome.
+```
+Heads-ups críticos:
+1. <título curto> — `file:line` (se conhecido) — <motivo/redirect em 1 linha>
+2. ...
+```
+
+Então faça **uma única** `AskUserQuestion` agregando todos os heads-ups:
+
+- `question`: "Quer comentar algo sobre os heads-ups acima, ou sigo com as correções recomendadas?"
+- `header`: "Heads-ups"
+- `multiSelect`: false
+- `options` (2 opções; o botão **Other** — gerado automaticamente pela ferramenta — é o canal para escrever comentário ou override livre):
+  - label `"Seguir recomendações"`, description: "Aplicar todas as correções recomendadas pelos heads-ups acima sem input adicional."
+  - label `"Pular heads-up(s)"`, description: "Preservar o código atual ignorando uma ou mais recomendações. Use 'Other' para indicar quais números pular e por quê."
+
+Se o usuário escolher "Other" e escrever texto livre, trate o conteúdo como override ou comentário — ajuste o plano/execução de acordo antes de prosseguir.
+
+### Bifurcations pass (quando `K > 0`)
+
+Cada bifurcação vira uma pergunta dedicada em `AskUserQuestion` (até 4 perguntas por chamada; se `K > 4`, pagine em rounds sucessivos). Não há etapa intermediária de "quais clarificar" — todas são perguntadas.
+
+Cada pergunta deve seguir estas regras de clareza (o problema atual é que perguntas curtas demais deixam dúvida sobre o que está sendo decidido):
+
+- `question`: 2–4 frases. Comece contextualizando **onde** a decisão incide (arquivo, módulo, feature, endpoint), **o que** está em jogo (qual comportamento/propriedade muda conforme a escolha), e **por que** precisa decidir agora. Termine com a pergunta objetiva. A pergunta deve ser inteligível lida isoladamente — sem depender do transparency block nem de contexto anterior.
+- `header`: 1–2 palavras que nomeiam o eixo da decisão (ex.: "Sessão", "Cache", "Multi-repo", "Paginação").
+- `multiSelect`: false, salvo quando a bifurcação for legitimamente multi-select (ex.: quais satélites incluir).
+- `options`: 2–4 opções A/B/... Cada opção com:
+  - `label` — 1–5 palavras nomeando a abordagem (ex.: "Cookie httpOnly", "JWT em memória"). Marque a recomendada como **primeira opção** com sufixo ` (recomendada)` no label.
+  - `description` — 2–3 frases cobrindo: (1) o que a opção faz concretamente na implementação; (2) o trade-off principal (custo, complexidade, risco, performance); (3) quando ela é preferível. Na opção recomendada, inclua o motivo da recomendação (priorities do profile, convenção do repo, anti-pattern evitado).
+
+Exemplo de pergunta bem formada:
+
+> question: "A nova rota `/api/session` precisa decidir onde o token de sessão vive no cliente. Essa escolha impacta tanto segurança (exposição a XSS) quanto UX em refresh. Qual estratégia de storage usar?"
+> header: "Sessão"
+> options:
+>   - label "Cookie httpOnly (recomendada)", description: "Gravar o token em cookie httpOnly + SameSite=Strict; backend lê via header automático. Evita exposição a XSS ao custo de exigir CSRF token em forms. Preferível por alinhar com a `priority: security` do profile."
+>   - label "localStorage", description: "JS lê/escreve o token em `localStorage`. Implementação mais simples e sobrevive a refresh, mas qualquer XSS rouba a sessão inteira. Escolha só se CSRF for caro e risco XSS for mitigado por outro meio."
+
+Zero questions é resultado válido — se `K == 0` e `J == 0`, Q1/S3/F2 já pularam esta fase inteira.
 
 ## Gotcha capture
 
