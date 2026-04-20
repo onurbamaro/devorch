@@ -29,13 +29,13 @@ If any of these are true, stop before any Edit/Write and emit a `## Build Report
 - You need to decide an approach, an interface, an error shape, or a data flow.
 - The task mentions debugging, investigation, fix-loop, retry context, or "figure out why".
 - A security check is required (auth, ownership, input validation, response sanitization).
-- CONVENTIONS.md is silent on a question that affects the output.
+- GOTCHAS.md (or nearby code) is silent on a question that affects the output.
 
 Escalation is not failure — it is doing your job. Do not push through.
 
 ## Workflow
 
-1. Task details, conventions, and exemplars are in your prompt.
+1. Task details, gotchas (if any), and exemplars are in your prompt.
 2. Read the exemplar(s) if any `Exemplars:` were listed — your output must mirror their shape.
 3. Apply edits literally with Edit/Write. No elaboration. No "while I'm here" fixes. No style
    tweaks outside what the task explicitly asks for.
@@ -46,7 +46,7 @@ Escalation is not failure — it is doing your job. Do not push through.
    `## Build Report` with all fields:
    - **Spec gaps**: usually "none" — if you needed more instruction, you should have escalated.
    - **Model fit**: `sonnet/high was adequate` or `escalated — <reason>`.
-   - **Convention gaps**: "none" or describe.
+   - **Gotcha candidates**: usually "none" for mechanical tasks — describe only if you genuinely hit surprise behavior.
    - **Cache gaps**: "none" or describe.
    - **Flow friction**: "none" or describe.
    - **Warnings**: out-of-scope issues noticed (do not fix).

@@ -1,8 +1,8 @@
 /**
- * init-phase.ts — Compound phase init: plan context + conventions + state + filtered explore-cache + waves/tasks.
+ * init-phase.ts — Compound phase init: plan context + gotchas + state + filtered explore-cache + waves/tasks.
  * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N> [--cache-root <path>] [--cache-name <name>]
  * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >50000 chars).
- * Compound init: returns phase context, conventions, state, filtered explore-cache, and structured waves/tasks as JSON.
+ * Compound init: returns phase context, gotchas, state, filtered explore-cache, and structured waves/tasks as JSON.
  * --cache-root: when provided, reads explore-cache from <cache-root>/.devorch/ instead of from the plan's directory.
  * --cache-name: when provided, reads explore-cache-<name>.md instead of explore-cache.md. Enables per-plan cache isolation.
  */
@@ -11,15 +11,7 @@ import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
-import {
-  extractFileRefs,
-  extractExtensions,
-  filterCacheByRefs,
-  parseConventionSections,
-  shouldIncludeTesting,
-  parseFastPath,
-  filterConventionsForTask,
-} from "./lib/task-filter";
+import { extractFileRefs, filterCacheByRefs } from "./lib/task-filter";
 import {
   type ParsedWave,
   type ParsedTask,
@@ -66,7 +58,6 @@ if (!targetPhase) {
 }
 
 const planTitle = extractPlanTitle(content);
-const planFastPath = parseFastPath(content);
 
 // --- Extract plan-level fields ---
 const objective = extractTagContent(content, "objective") || "";
@@ -111,8 +102,10 @@ const satellites: SatelliteInfo[] = secondaryRepos.map((repo) => {
   return { name: repo.name, path: resolvedPath, worktreePath: wtPath };
 });
 
-// --- Read optional files ---
-const conventions = safeReadFile(resolve(projectRoot, ".devorch/CONVENTIONS.md"));
+// --- Read optional files (prefer GOTCHAS.md; fall back to legacy CONVENTIONS.md) ---
+const gotchasPath = resolve(projectRoot, ".devorch/GOTCHAS.md");
+const legacyConventionsPath = resolve(projectRoot, ".devorch/CONVENTIONS.md");
+const gotchas = safeReadFile(existsSync(gotchasPath) ? gotchasPath : legacyConventionsPath);
 const state = safeReadFile(resolve(projectRoot, ".devorch/state.md"));
 const cacheRootDir = cacheRoot || projectRoot;
 const cacheFileName = cacheName ? `explore-cache-${cacheName}.md` : "explore-cache.md";
@@ -180,10 +173,8 @@ async function runMapProject(): Promise<string> {
   if (isProjectMapFresh()) {
     return safeReadFile(projectMapPath);
   }
-  const mapArgs = ["bun", resolve(scriptDir, "map-project.ts"), projectRoot];
-  if (planFastPath) mapArgs.push("--compact");
   const mapProc = Bun.spawn(
-    mapArgs,
+    ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
     { cwd: projectRoot, stderr: "pipe" }
   );
   const exitCode = await mapProc.exited;
@@ -301,43 +292,18 @@ const exploreQueries = extractExploreQueries(phaseContent);
 const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
 
 // --- Build per-task filtered context ---
-const conventionSectionsByTask: Record<string, string[]> = {};
 const cacheByTask: Record<string, string> = {};
 const specsByTask: Record<string, string> = {};
 const codeStructureByTask: Record<string, string> = {};
 const exemplarsByTask: Record<string, string[]> = {};
 const nonGoalsByTask: Record<string, string> = {};
 
-// Parse conventions once per phase — reused by the per-task filter, the
-// contextual Testing gate, and the slice-size computation below.
-const parsedConventionSections = parseConventionSections(conventions);
-const conventionSectionHeaders = new Set(
-  parsedConventionSections
-    .map((s) => s.header)
-    .filter(Boolean)
-    .map((h) => `## ${h}`),
-);
-
 for (const [taskId, task] of Object.entries(tasks)) {
-  const taskExts = extractExtensions(task.content);
-  const taskSections = filterConventionsForTask(parsedConventionSections, taskExts, planFastPath);
-
   const taskRefs = extractFileRefs(task.content);
   cacheByTask[taskId] = filterCacheByRefs(cacheRaw, taskRefs);
 
   exemplarsByTask[taskId] = task.exemplars;
   nonGoalsByTask[taskId] = task.nonGoals;
-
-  // Contextual Testing re-inclusion (after tightened EXT_KEYWORDS)
-  if (
-    conventionSectionHeaders.has("## Testing") &&
-    !taskSections.includes("## Testing") &&
-    shouldIncludeTesting(task.content, taskRefs)
-  ) {
-    taskSections.push("## Testing");
-  }
-
-  conventionSectionsByTask[taskId] = taskSections;
 
   // Extract **Spec refs** from task content; if present, filter specs; otherwise include full spec section
   const specRefsMatch = task.content.match(/\*\*Spec refs\*\*:\s*(.+)/);
@@ -373,28 +339,19 @@ for (const [taskId, task] of Object.entries(tasks)) {
  * context. Thresholds 3K/30K match the plan's explicit gate. Token approximation
  * uses `Math.ceil(charCount / 4)` — good enough to triage; exact counts are not
  * worth a tiktoken dependency here.
+ *
+ * Gotchas is a whole-file artifact (small by construction) — included in full
+ * in every task's slice size computation rather than sectioned per task.
  */
-
-// Resolve convention header list → full section content for accurate size measurement.
-const conventionSectionByHeader = new Map<string, string>();
-for (const section of parsedConventionSections) {
-  if (section.header) {
-    conventionSectionByHeader.set(`## ${section.header}`, section.content);
-  }
-}
 
 const sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }> = [];
 
 for (const taskId of Object.keys(tasks)) {
-  const sectionHeaders = conventionSectionsByTask[taskId] ?? [];
-  const conventionsSlice = sectionHeaders
-    .map((h) => conventionSectionByHeader.get(h) ?? "")
-    .join("\n");
   const cacheSlice = cacheByTask[taskId] ?? "";
   const specSlice = specsByTask[taskId] ?? "";
   const codeStructureSlice = codeStructureByTask[taskId] ?? "";
 
-  const combined = conventionsSlice + cacheSlice + specSlice + codeStructureSlice;
+  const combined = gotchas + cacheSlice + specSlice + codeStructureSlice;
   const charCount = combined.length;
 
   if (charCount === 0) {
@@ -516,8 +473,7 @@ const result: {
   satellites: SatelliteInfo[];
   waves: ParsedWave[];
   tasks: Record<string, ParsedTask>;
-  conventions?: string;
-  conventionSectionsByTask?: Record<string, string[]>;
+  gotchas?: string;
   cacheByTask: Record<string, string>;
   /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
   specsByTask: Record<string, string>;
@@ -556,9 +512,8 @@ const result: {
   sliceWarnings,
 };
 
-if (conventions) {
-  result.conventions = conventions;
-  result.conventionSectionsByTask = conventionSectionsByTask;
+if (gotchas) {
+  result.gotchas = gotchas;
 }
 
 if (fullContent.length > CONTENT_THRESHOLD) {

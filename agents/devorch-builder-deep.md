@@ -18,7 +18,7 @@ This is the **default builder variant** — runs Opus at `xhigh` effort. Used fo
 
 ## Workflow
 
-1. Your task details, project conventions, and relevant codebase context are provided in your prompt — do NOT call TaskGet or read CONVENTIONS.md separately.
+1. Your task details, project gotchas (if any), and relevant codebase context are provided in your prompt — do NOT call TaskGet or read GOTCHAS.md separately.
 2. If your task touches multiple files or modules and you need to understand code not covered in the provided context, use the Agent tool with `subagent_type="Explore"` to gather what you need before writing code. Launch multiple Explore agents in parallel when exploring independent areas.
 3. **CONTRACT MAP** — If your task includes a `## Spec Contracts` section, produce a CONTRACT MAP as a checklist before writing any code. For each named spec, list the spec name, target file(s) and function(s), and approach. Format:
    ```
@@ -31,7 +31,7 @@ This is the **default builder variant** — runs Opus at `xhigh` effort. Used fo
 5. **Implementation focus**: write code efficiently against the stubs and spec. Check the Spec Contracts section for error handling rules, behavioral pre/postconditions, and invariants. Save deep reasoning for debugging and error fixing.
 6. Implement the task:
    - Write clean, focused code
-   - Follow project conventions strictly
+   - Infer style from nearby code; apply gotchas from the `## Gotchas` section of your prompt when they intersect the touched area
    - Make minimal changes — only what the task requires
 7. **SELF-VERIFY** — If you produced a CONTRACT MAP in step 3, verify each spec with file:line evidence. Use this exact format:
    ```
@@ -50,7 +50,7 @@ This is the **default builder variant** — runs Opus at `xhigh` effort. Used fo
 9. **Final output**: Your last text message must be a concise summary (max 3 lines): commit hash, files changed, and any warnings. After the summary, append a `## Build Report` section with ALL of the following fields (always present — use "none" or "adequate" when nothing to report):
    - **Spec gaps**: was the spec insufficient? Missing edge cases or unclear requirements?
    - **Model fit**: was the assigned model/effort adequate? (e.g., "opus/high was adequate" or "task was over-specced, could have been simpler")
-   - **Convention gaps**: patterns encountered not covered by CONVENTIONS.md?
+   - **Gotcha candidates**: non-obvious behaviors you discovered while working — where the type/test/linter did not describe reality, or you had to read non-adjacent files to understand something. For each: `file:line — one-line why it surprises`. List only if you genuinely hit surprise, not as a reflex.
    - **Cache gaps**: needed to explore something the explore-cache didn't have?
    - **Flow friction**: information missing from the prompt, confusing instructions, things self-discovered that should have been provided?
    - **Warnings**: out-of-scope issues detected but not fixed?

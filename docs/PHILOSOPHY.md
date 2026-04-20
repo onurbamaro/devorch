@@ -89,7 +89,7 @@ rule engine produces brittle systems that fail on the first novel case.
 Misplacing work in either direction costs quality.
 
 **How devorch enforces this:**
-- `map-project.ts`, `map-conventions.ts`, `init-phase.ts`, `check-project.ts`,
+- `map-project.ts`, `init-phase.ts`, `check-project.ts`,
   `validate-plan.ts`, `phase-summary.ts`, `manage-cache.ts` -- mechanical
 - Triage (quick/scoped/full classification) -- judgment, inline Opus
 - Guardian review (industry standards vs code reality) -- judgment, inline
@@ -176,15 +176,21 @@ honest posture is: describe what is, name what should be, let the user
 decide when they diverge.
 
 **How devorch enforces this:**
-- `map-conventions.ts` extracts CONVENTIONS.md from actual code patterns
-- Conventions are passed as context, not as rules, in builder slices
+- Code is read directly by builders — conventions derivable from the code
+  (naming, style, imports) are not re-extracted by a script
+- `.devorch/GOTCHAS.md` captures only what code does **not** self-document:
+  deliberate workarounds, non-obvious invariants, anti-patterns retained by
+  trade-off. Never auto-generated — grows organically as real sessions
+  surface real surprises (see `commands/devorch.md` § Gotcha capture)
+- Gotchas are passed as context, not as rules, in builder slices
 - Guardian evaluates code against industry standards (OWASP, performance, architecture)
 - Divergences become heads-up items or bifurcations, not silent rewrites
 - `.devorch/standards-silenced.md` lets the project record accepted divergences
 
 **Validation question:** _"Am I treating code as prescriptive, or as the
-current state against which a norm is being checked?"_ Conventions
-describe; norms prescribe; the user decides when they meet.
+current state against which a norm is being checked?"_ The code describes;
+GOTCHAS.md warns about what the code does not say; norms prescribe; the
+user decides when they meet.
 
 ---
 

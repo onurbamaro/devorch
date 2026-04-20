@@ -33,7 +33,7 @@ If `--resume` is present:
 
 ## Step 1 — Load minimal context
 
-Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --compact` to collect tech stack and folder structure inline. Read `.devorch/CONVENTIONS.md` if it exists. Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
+Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
 
 Also clean up stale cache: `find .devorch -maxdepth 1 -name 'explore-cache-*.md' -mtime +7 -delete 2>/dev/null || true`.
 
@@ -99,7 +99,7 @@ If the guardian found a critical heads-up, pause and show it using the unified g
 
 ### Q2. Execute edit
 
-Apply the edit directly with Edit/Write tools. Minimal changes. Follow CONVENTIONS.md strictly.
+Apply the edit directly with Edit/Write tools. Minimal changes. Infer style from nearby code; consult GOTCHAS.md only when relevant to the touched area.
 
 ### Q3. Post-edit lint
 
@@ -113,9 +113,9 @@ git add <files>
 git commit -m "type(scope): description"
 ```
 
-### Q5. Report
+### Q5. Report + gotcha capture
 
-One-line report: what changed, commit hash. Run the flow-friction capture (§ F9) — typically nothing to log for a clean quick edit. Stop.
+One-line report: what changed, commit hash. Then apply the gotcha-capture rule (§ Gotcha capture below). Run the flow-friction capture (§ F9) — typically nothing to log for a clean quick edit. Stop.
 
 ---
 
@@ -129,8 +129,8 @@ Derive a kebab-case `<name>` from `$ARGUMENTS` (3–5 words). Launch 1 Explore a
 
 ### S2. Enumerate edge cases (3 buckets)
 
-Based on `$ARGUMENTS`, explore findings, CONVENTIONS.md, and the guardian pass, enumerate edge cases into 3 buckets:
-- **Resolved by convention/code/request** — count only
+Based on `$ARGUMENTS`, explore findings, GOTCHAS.md (if present), and the guardian pass, enumerate edge cases into 3 buckets:
+- **Resolved by code/gotcha/request** — count only
 - **Critical heads-up** (guardian) — show with redirect
 - **Real bifurcation** — show with A/B/... options and a recommendation
 
@@ -170,7 +170,7 @@ If the user chose **Números** or **Todos**, follow up with targeted `AskUserQue
 
 If `--worktree` flag is present:
 1. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>` and parse JSON.
-2. Set `projectRoot = <worktreePath>`. Copy CONVENTIONS.md into it.
+2. Set `projectRoot = <worktreePath>`. If `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) exists in `mainRoot`, copy it to the worktree.
 3. All subsequent edits/commits run with `cwd` = `projectRoot`.
 
 Otherwise `projectRoot = <cwd>`.
@@ -187,9 +187,9 @@ Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. O
 
 Conventional commit in `<projectRoot>`, stage only touched files.
 
-### S8. Report
+### S8. Report + gotcha capture
 
-Concise summary: edge cases count, bifurcations resolved, files changed, check result. Run the flow-friction capture (§ F9). Stop.
+Concise summary: edge cases count, bifurcations resolved, files changed, check result. Apply the gotcha-capture rule (§ Gotcha capture below). Run the flow-friction capture (§ F9). Stop.
 
 ---
 
@@ -201,9 +201,8 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
 
 1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`.
 2. Record `mainRoot = <cwd>` and `originalBranch = git branch --show-current`.
-3. If CONVENTIONS.md missing, run `bun $CLAUDE_HOME/devorch-scripts/map-conventions.ts <mainRoot>` and write `.devorch/CONVENTIONS.md`, then `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts --update`. If present, run `bun $CLAUDE_HOME/devorch-scripts/check-conventions-staleness.ts`; if stale → regenerate via `map-conventions.ts` then `--update`.
-4. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>` and parse JSON. Store `worktreePath`, set `projectRoot = worktreePath`.
-5. Copy CONVENTIONS.md to `<projectRoot>/.devorch/CONVENTIONS.md`.
+3. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>` and parse JSON. Store `worktreePath`, set `projectRoot = worktreePath`.
+4. If `<mainRoot>/.devorch/GOTCHAS.md` exists, copy it to `<projectRoot>/.devorch/GOTCHAS.md`. If it doesn't but `<mainRoot>/.devorch/CONVENTIONS.md` exists (legacy), copy it to `<projectRoot>/.devorch/CONVENTIONS.md` — `init-phase.ts` reads both. GOTCHAS.md is opt-in and grows organically (see § Gotcha capture); never auto-generated.
 
 ### F2. Deep explore + guardian + gate
 
@@ -221,7 +220,7 @@ Multi-module, new feature, or broad refactor. Worktree is mandatory.
    **Multi-repo detection**: If the Step 1 `map-project.ts` output contained a `## Sibling Repos` section, OR `$ARGUMENTS` explicitly mentions more than one repo, OR the guardian pass flagged multi-repo intent, include `<secondary-repos>` in the plan with the chosen sibling paths. The user should have confirmed sibling selection in the gate (Step 5). Siblings are typically at `../<name>/` relative to `<mainRoot>` or absolute paths under `~/dev/`.
 
 5. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked.
-6. Commit the plan in the worktree: `git -C <projectRoot> add .devorch/plans/<name>.md .devorch/CONVENTIONS.md && git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`. Also commit explore-cache changes in `<mainRoot>` with `chore(devorch): add worktree for <name>`.
+6. Commit the plan in the worktree: stage `.devorch/plans/<name>.md` plus `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) if either was copied in F1.4, then `git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`. Also commit explore-cache changes in `<mainRoot>` with `chore(devorch): add worktree for <name>`.
 7. Set `planPath = <projectRoot>/.devorch/plans/<name>.md`.
 
 8. **Satellite worktree setup** (only when plan includes `<secondary-repos>`): parse the list of sibling repos from the plan. Build a JSON array `[{name, path}, ...]` with resolved absolute paths. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --add-secondary '<json>'`. Parse the returned `satellites` array and store it as `<satellites>` for F3e and F7. If any satellite fails to create (missing repo, uncommitted changes, branch collision), stop and surface the error — do not proceed to F3.
@@ -244,7 +243,7 @@ For each wave from the init-phase output, launch all `taskIds` in a single messa
 
 `effort: max` is not used — never dispatch with max.
 
-A single wave may mix variants; issue one Task tool call per task inside the same assistant message so they run in parallel. Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Conventions` (filtered by `conventionSectionsByTask[taskId]`), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Conventions → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
+A single wave may mix variants; issue one Task tool call per task inside the same assistant message so they run in parallel. Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), cache sections. Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → cache.
 
 After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id for aggregation. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
 
@@ -268,7 +267,7 @@ If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <pr
 
 After all phases complete, determine changed files via `git -C <projectRoot> diff --name-only <originalBranch>...HEAD`. Grep for `TODO|FIXME|HACK|XXX` across changed files (residual scan).
 
-Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single message). All receive: `Working directory: <projectRoot>`, plan objective, CONVENTIONS.md, changed-files list.
+Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single message). All receive: `Working directory: <projectRoot>`, plan objective, GOTCHAS.md (or legacy CONVENTIONS.md) if it exists, changed-files list. Each reviewer should also flag non-obvious behaviors discovered in the changed code as gotcha candidates in their report.
 
 - **security** — OWASP Top 10 anti-patterns, injection risks, auth gaps, data exposure, secrets handling
 - **performance** — estimated cost, anti-patterns (N+1, full scans, polling, synchronous workers, server-side buffering), cache opportunities
@@ -343,6 +342,10 @@ N dificuldades registradas. Para evoluir:
 /devorch --full Evoluir o devorch baseado em .devorch/feedback.md
 ```
 
+### F8.5. Gotcha capture (full mode)
+
+Apply the gotcha-capture rule (§ Gotcha capture below). Full mode has the richest signal — builder retries, reviewer surprises, guardian flags on untyped contracts — so this step is especially valuable here.
+
 ### F9. Flow friction capture (todos os modos)
 
 Roda antes do report final. Captura atritos no próprio fluxo do devorch — não em código do usuário. Conta: script errou ou retornou JSON malformado, retry loop precisou >1 tentativa, gate precisou ser reinvocado, hook não disparou quando devia, você improvisou porque a instrução estava ambígua, bifurcação sem precedente nem resposta da indústria.
@@ -366,6 +369,35 @@ Quando executado, o transparency block é seguido por uma única chamada `AskUse
 - **"Números: 1,3,..."** — clarificar apenas os itens listados (usuário digita a lista)
 
 If **Números** or **Todos** is selected, loop with `AskUserQuestion` (max 4 per call) until all selected bifurcations are resolved. Zero questions is a valid outcome.
+
+## Gotcha capture
+
+Gotchas are invariants the code does not self-document — non-obvious behaviors a fresh reader would discover only by hitting a bug. GOTCHAS.md is never auto-generated; it grows organically from real sessions. Each entry earns its place.
+
+**When to offer capture** (accumulate candidates during the run, prompt once at report time):
+
+- **Quick mode**: the edit required reading non-adjacent files to understand a behavior, OR a type/interface did not describe real runtime state.
+- **Scoped mode**: any of the above, OR the guardian flagged an invariant not enforced by types/tests/linter, OR a retry happened because of surprise behavior.
+- **Full mode**: any of the above across builders, OR an F4 reviewer (security / performance / completeness / flags) explicitly marked a finding as "this surprised me" or "non-obvious", OR a builder hit a retry caused by undocumented behavior.
+
+**Candidate quality bar** (each candidate must satisfy all three):
+1. **File:line reference** — where the behavior lives.
+2. **"Why it surprises"** — one sentence a fresh reader needs. If you can't write this sentence, it is not a gotcha.
+3. **Not covered by types, tests, linter, or obvious code reading** — otherwise it's normal code, not a gotcha.
+
+**How to prompt**: zero candidates → silent skip (no mention in report). One or more candidates → single `AskUserQuestion` with options per candidate (Add / Skip) and a free "Add all / Skip all" path. Keep wording concise; show file:line + one-line why per candidate.
+
+**Writing**: append accepted candidates to `<projectRoot>/.devorch/GOTCHAS.md` (create if missing). Use this shape:
+
+```
+# Gotchas
+
+- **<short title>** (`file:line`) — <one-line why it surprises>.
+```
+
+Append-only; never rewrite existing entries. Commit the change with `chore(devorch): gotcha — <short title>` (one commit per session, not per candidate).
+
+**Prune on demand, not automatically**: staleness is not detected by script. If the user runs `/devorch --full "review gotchas"`, treat that as a full-mode request to read each entry against current code and propose removals for ones that no longer apply.
 
 ## Worktree policy
 
