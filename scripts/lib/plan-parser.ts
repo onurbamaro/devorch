@@ -105,12 +105,15 @@ export function parseSpecNames(specContent: string): string[] {
     names.push(m[1]);
   }
 
-  // Invariant tags — implicit naming: invariant-1, invariant-2, ...
-  const invariantRegex = /<invariant(?:\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
+  // Invariant tags — accept both explicit name="..." and implicit ordinal (invariant-N)
+  const invariantRegex = /<invariant(\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
   let invIdx = 0;
-  while (invariantRegex.exec(specContent) !== null) {
+  while ((m = invariantRegex.exec(specContent)) !== null) {
     invIdx++;
     names.push(`invariant-${invIdx}`);
+    const attrs = m[1] || "";
+    const nameMatch = attrs.match(/name="([^"]+)"/);
+    if (nameMatch) names.push(nameMatch[1]);
   }
 
   // Endpoint tags — implicit naming: METHOD-/path
@@ -138,12 +141,14 @@ export function filterSpecsByRefs(specContent: string, refs: string[]): string {
     }
   }
 
-  // Invariant tags with implicit names
-  const invariantRegex = /<invariant(?:\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
+  // Invariant tags — match by explicit name="..." OR implicit ordinal (invariant-N)
+  const invariantRegex = /<invariant(\s[^>]*)?>[\s\S]*?<\/invariant>/gi;
   let invIdx = 0;
   while ((m = invariantRegex.exec(specContent)) !== null) {
     invIdx++;
-    if (refsSet.has(`invariant-${invIdx}`)) {
+    const attrs = m[1] || "";
+    const nameMatch = attrs.match(/name="([^"]+)"/);
+    if (refsSet.has(`invariant-${invIdx}`) || (nameMatch && refsSet.has(nameMatch[1]))) {
       matched.push(m[0]);
     }
   }

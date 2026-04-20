@@ -65,12 +65,33 @@ function fail(error: string, extra: Record<string, unknown> = {}): never {
   process.exit(1);
 }
 
-function findPlanFile(plansDir: string): string | null {
+function findPlanFile(plansDir: string, worktreeName: string): string | null {
   if (!existsSync(plansDir)) return null;
   try {
-    const entries = readdirSync(plansDir);
-    const md = entries.find((f) => f.endsWith(".md") && f !== "archive");
-    return md ? join(plansDir, md) : null;
+    const entries = readdirSync(plansDir).filter(
+      (f) => f.endsWith(".md") && f !== "archive",
+    );
+    if (entries.length === 0) return null;
+    const byName = entries.find((f) => f === `${worktreeName}.md`);
+    if (byName) {
+      if (entries.length > 1) {
+        const stale = entries.filter((f) => f !== byName).join(", ");
+        log(
+          `Warning: multiple non-archived plans in ${plansDir} — using ${byName} (matches worktree), ignoring: ${stale}`,
+        );
+      }
+      return join(plansDir, byName);
+    }
+    if (entries.length === 1) {
+      log(
+        `Warning: plan file ${entries[0]} does not match worktree name "${worktreeName}.md"; using it anyway.`,
+      );
+      return join(plansDir, entries[0]);
+    }
+    log(
+      `Warning: no plan file matches worktree name "${worktreeName}.md" and ${entries.length} candidates exist (${entries.join(", ")}); skipping plan archival.`,
+    );
+    return null;
   } catch {
     return null;
   }
@@ -192,7 +213,36 @@ function rebaseRepo(repo: RepoTarget): { ok: true } | { ok: false; conflictFiles
   if (fetch.exitCode !== 0) {
     log(`[${repo.name}] fetch failed (proceeding with local ref): ${fetch.stderr}`);
   }
-  const rebaseTarget = fetch.exitCode === 0 ? `origin/${repo.mainBranch}` : repo.mainBranch;
+  let rebaseTarget = fetch.exitCode === 0 ? `origin/${repo.mainBranch}` : repo.mainBranch;
+
+  // Detect local-ahead-of-origin: if origin/<main> exists but has nothing the
+  // local <main> does not already contain, rebasing onto origin would re-introduce
+  // files that were intentionally deleted locally (common in local-only repos).
+  if (fetch.exitCode === 0) {
+    const originAhead = git(repo.worktreePath, [
+      "rev-list",
+      "--count",
+      `${repo.mainBranch}..origin/${repo.mainBranch}`,
+    ]);
+    const localAhead = git(repo.worktreePath, [
+      "rev-list",
+      "--count",
+      `origin/${repo.mainBranch}..${repo.mainBranch}`,
+    ]);
+    if (originAhead.exitCode === 0 && localAhead.exitCode === 0) {
+      const originAheadCount = parseInt(originAhead.stdout, 10) || 0;
+      const localAheadCount = parseInt(localAhead.stdout, 10) || 0;
+      if (originAheadCount === 0 && localAheadCount > 0) {
+        log(
+          `[${repo.name}] Local ${repo.mainBranch} is ${localAheadCount} commit(s) ahead of origin/${repo.mainBranch} with nothing new upstream; rebasing onto local ${repo.mainBranch} to avoid conflicts with reverted/removed files.`,
+        );
+        rebaseTarget = repo.mainBranch;
+      }
+    } else {
+      log(`[${repo.name}] origin/${repo.mainBranch} not reachable for ahead/behind comparison; falling back to ${rebaseTarget}.`);
+    }
+  }
+
   log(`[${repo.name}] Rebasing onto ${rebaseTarget}...`);
   const rebase = git(repo.worktreePath, ["rebase", rebaseTarget]);
   if (rebase.exitCode !== 0) {
@@ -442,7 +492,7 @@ async function main(): Promise<void> {
 
   // --- Plan file (primary only) ---
   const plansDir = join(primary.worktreePath, ".devorch/plans");
-  const planFile = findPlanFile(plansDir);
+  const planFile = findPlanFile(plansDir, name);
   let planTitle = basename(name);
   if (planFile) {
     const planContent = safeReadFile(planFile);
@@ -609,6 +659,39 @@ async function main(): Promise<void> {
     cleanupByRepo.set(repo.name, cleanupRepo(repo, args["keep-branch"]));
   }
 
+  // --- Self-build install: if mainRoot is devorch itself, re-run install.ts so
+  // ~/.claude/{agents,commands,devorch-scripts,hooks} reflect the merged state.
+  // Detected by package.json name === "devorch" AND presence of install.ts at root.
+  let selfBuildInstalled = false;
+  const installScript = join(mainRoot, "install.ts");
+  const pkgPath = join(mainRoot, "package.json");
+  if (existsSync(installScript) && existsSync(pkgPath)) {
+    const pkgContent = safeReadFile(pkgPath);
+    let isDevorchRepo = false;
+    if (pkgContent) {
+      try {
+        const pkg = JSON.parse(pkgContent);
+        isDevorchRepo = pkg?.name === "devorch";
+      } catch {
+        /* ignore malformed package.json */
+      }
+    }
+    if (isDevorchRepo) {
+      log(`[self-build] Detected devorch self-merge; running install.ts from ${mainRoot}...`);
+      const installProc = Bun.spawnSync(["bun", installScript], {
+        cwd: mainRoot,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      if (installProc.exitCode === 0) {
+        selfBuildInstalled = true;
+        log(`[self-build] install.ts completed successfully.`);
+      } else {
+        log(`[self-build] install.ts failed (exit ${installProc.exitCode}): ${installProc.stderr.toString("utf-8").trim()}`);
+      }
+    }
+  }
+
   // --- Final JSON ---
   const reposReport = mergeResults.map(({ repo, outcome }) => {
     const s = statsByRepo.get(repo.name)!;
@@ -633,6 +716,7 @@ async function main(): Promise<void> {
     planTitle,
     repos: reposReport,
     planArchivedTo,
+    selfBuildInstalled,
   });
 }
 

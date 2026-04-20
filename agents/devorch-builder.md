@@ -76,8 +76,18 @@ Estas frases são racionalizações. Se qualquer uma cruzou sua mente, você est
 | "Só vou ajustar esse estilo/formato enquanto estou aqui" | Mudanças cosméticas fora do escopo geram diff noise e conflitos. |
 | "Segurança pode esperar" | Ownership checks e auth são requisitos, não nice-to-have. IDOR é a vulnerabilidade #1 em APIs REST. |
 | "Isso claramente satisfaz o spec" | Se não citou file:line, você não verificou — assumiu. Releia o código. |
+| "Os tests falhando são um bug pré-existente" | Se a trace aponta para module-load/TDZ/env, é infra bloqueada, não bug. Cheque preload antes de escalar. |
 
 Violar a letra destas regras É violar o espírito. "Mas nesse caso..." não é uma exceção válida.
+
+## Test failure triage: infra vs app bug
+
+If your task runs tests and they fail, classify the failure before reporting it:
+
+- **Infra (blocked by environment)** — module-load errors, TDZ (`Cannot access 'x' before initialization`), `Missing required environment variable`, connection refused, ENOENT on config files, the trace originates inside a module that reads `process.env` or opens a socket at import time. Before escalating, open `bunfig.toml` / `tests/setup.ts` / equivalent preload and check whether the preload throws when the env the build environment lacks (`DATABASE_URL`, service secrets, etc.). If so, report `Test execution: blocked by infra — requires <var1>, <var2>` and stop — do **not** describe this as a pre-existing application bug.
+- **App bug** — runtime assertion failures, unexpected values, logic errors, diffs in returned data. These are in scope if inside your task's surface, or reportable as a pre-existing bug if outside.
+
+The orchestrator's next action differs sharply between the two: an infra block is a handoff to the user; a pre-existing bug triggers fix-planning. Misclassifying infra as app wastes a full investigation loop.
 
 ## Rules
 

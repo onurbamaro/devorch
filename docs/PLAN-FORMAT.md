@@ -74,7 +74,7 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
   <precondition>what must be true before</precondition>
   <postcondition>what must be true after</postcondition>
 </behavior>
-<invariant>condition that must always hold</invariant>
+<invariant name="optional-name">condition that must always hold</invariant>
 <endpoint path="/path" method="METHOD">
   <request>schema or description</request>
   <response status="NNN">schema or description</response>
@@ -134,6 +134,8 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
   not enforce this by itself — waves are trusted from the plan author.
 - `<spec>` children are **named** (`name="..."`) and referenced by **Spec refs**
   in tasks. A task with no spec reference receives the full phase spec block.
+  `<invariant>` accepts either an explicit `name="..."` or the implicit ordinal
+  (`invariant-1`, `invariant-2`, ...); both forms resolve to the same element.
 - Task **Repo** is optional; omit it for primary-repo tasks. Required when the
   task targets a satellite (must match a name from `<secondary-repos>`).
 - `<secondary-repos>` is the single source of truth for satellites. If present,

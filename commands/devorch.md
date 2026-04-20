@@ -297,14 +297,14 @@ Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON sh
 Optional flags: `--squash`, `--keep-branch`, `--no-rebase`, `--dry-run`.
 
 Parse JSON output and route by `ok`:
-- `ok: true` → iterate `repos[]`: for each entry report `role` (primary / satellite), `name`, `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`. Also surface `planArchivedTo`. Done.
+- `ok: true` → iterate `repos[]`: for each entry report `role` (primary / satellite), `name`, `merged` (merge commit sha), `commitsIntegrated`, `filesChanged`. Also surface `planArchivedTo` and, when the merged repo was devorch itself, `selfBuildInstalled` (the script auto-re-runs `install.ts` after a devorch self-merge). Done.
 - `ok: false` → route by `phase`:
   - `"rebase"` → rebase conflict in a specific repo; surface `failedRepos[].conflictFiles` and instruct manual resolution.
   - `"dry-run"` → one or more repos' merge dry-run failed; list them with conflict files. No repo was merged (atomicity guard). Preserve all worktrees.
   - `"merge"` → a merge failed after dry-run passed (rare: concurrent writes to main); surface `okRepos[]` (already merged) and `failedRepos[]` (pending). Prompt user to resolve.
   - `"cleanup"` → merge succeeded but worktree/branch removal failed; surface for manual cleanup.
 
-Plan archival is done inside `merge-worktree.ts`. Self-build install (when editing devorch itself) is also handled inside the script. Nothing extra to run.
+Plan archival is done inside `merge-worktree.ts`. Self-build install (when the merged repo's `package.json` has `"name": "devorch"`) is also handled inside the script — it re-runs `install.ts` from `mainRoot` so `~/.claude/{agents,commands,devorch-scripts,hooks}` reflect the merged state. Nothing extra to run.
 
 On FAIL → do not merge, preserve worktrees, suggest `/devorch --resume` to retry or `/devorch --full "<fix description>"` for a new attempt.
 
