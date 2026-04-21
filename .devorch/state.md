@@ -1,7 +1,7 @@
 # devorch State
-- Plan: Consolidate builders and split init-phase
+- Plan: fix-flow-friction-backlog
 - Last completed phase: 1
-- Status: ready for review
+- Status: ready for phase 2
 
 ## Phase 1 Summary
-Consolidated builders (eliminated spec variant) and split init-phase.ts into task-filter.ts + slice-builder.ts libs. CLI contract verified.
+commands/devorch.md: F5 file-overlap guard, Q2/S5 pre-edit WIP check, F3e/F7 explicit repoPath. 3 inbox entries removed.
