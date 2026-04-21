@@ -10,14 +10,15 @@
 import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync } from "fs";
 import { join, resolve } from "path";
 import { parseArgs } from "./lib/args";
-import { isGitRepo, checkBranchExists, getUncommittedFiles } from "./lib/git-utils";
+import { isGitRepo, checkBranchExists, getUncommittedFiles, getUntrackedFiles } from "./lib/git-utils";
 
-const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string; "sparse-paths": string }>([
+const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string; "sparse-paths": string; "no-env": boolean }>([
   { name: "name", type: "string", required: true },
   { name: "secondary", type: "string", required: false },
   { name: "recreate", type: "boolean", required: false },
   { name: "add-secondary", type: "string", required: false },
   { name: "sparse-paths", type: "string", required: false },
+  { name: "no-env", type: "boolean", required: false },
 ]);
 
 // Mutual exclusion: --secondary and --add-secondary
@@ -27,7 +28,27 @@ if (args.secondary && args["add-secondary"]) {
 }
 
 const name = args.name;
-const cwd = process.cwd();
+
+/**
+ * Resolves the real mainRoot when invoked from inside an existing worktree.
+ * Walks up process.cwd(), finds the LAST `.worktrees` path segment, and returns
+ * the path up to (but not including) that segment. Returns process.cwd() unchanged
+ * when no `.worktrees` segment is present.
+ */
+function resolveMainRoot(): string {
+  const initial = process.cwd();
+  const segments = initial.split("/");
+  let lastIdx = -1;
+  for (let i = 0; i < segments.length; i++) {
+    if (segments[i] === ".worktrees") lastIdx = i;
+  }
+  if (lastIdx === -1) return initial;
+  const resolved = segments.slice(0, lastIdx).join("/") || "/";
+  console.error(`Detected cwd inside .worktrees/; resolved mainRoot = ${resolved}`);
+  return resolved;
+}
+
+const cwd = resolveMainRoot();
 const worktreesDir = join(cwd, ".worktrees");
 const worktreePath = join(worktreesDir, name);
 const branch = `devorch/${name}`;
@@ -224,6 +245,23 @@ async function createSatellites(jsonStr: string, recreate: boolean): Promise<Sat
     }
   }
 
+  // Guard: abort atomically if any satellite has untracked files.
+  // Runs BEFORE any worktree mutation so no satellite is created when one is dirty.
+  for (const repo of secondaryRepos) {
+    const repoPath = resolve(cwd, repo.path);
+    const untracked = getUntrackedFiles(repoPath, [".worktrees/", "node_modules/", "dist/"]);
+    if (untracked.length > 0) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: "satellite-untracked",
+        satellite: repo.name,
+        repoPath,
+        untrackedFiles: untracked,
+      }));
+      process.exit(1);
+    }
+  }
+
   const results = await Promise.all(secondaryRepos.map(async (repo) => {
     const repoPath = resolve(cwd, repo.path);
     const satWorktreePath = join(repoPath, ".worktrees", name);
@@ -289,6 +327,15 @@ const { warnings: primaryWarnings } = createSingleWorktree({
   recreate: args.recreate,
 });
 
+// Auto-copy .env to worktree (default ON; --no-env to opt out).
+let envCopied = false;
+const envSrc = join(cwd, ".env");
+const envDst = join(worktreePath, ".env");
+if (!args["no-env"] && existsSync(envSrc) && !existsSync(envDst)) {
+  cpSync(envSrc, envDst, { preserveTimestamps: true });
+  envCopied = true;
+}
+
 // Copy uncommitted .devorch/ files to worktree
 const devorchSrc = join(cwd, ".devorch");
 const devorchDst = join(worktreePath, ".devorch");
@@ -337,6 +384,7 @@ const output: Record<string, unknown> = {
   worktreePath: `.worktrees/${name}`,
   branch,
   devorch: devorchCopied,
+  envCopied,
 };
 
 if (primaryWarnings.length > 0) {
