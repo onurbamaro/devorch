@@ -50,6 +50,10 @@ Risk: <risk>
 <secondary-repos>
 - `<name>` — /absolute/or/relative/path/to/repo
 </secondary-repos>
+<!-- When present, the orchestrator passes `[{name, path, status?}]` to
+     phase-summary.ts and merge-worktree.ts, where `path` is the satellite's
+     repoPath (the repo root). merge-worktree.ts resolves `.worktrees/<name>`
+     internally; phase-summary.ts reads only name + status. -->
 </relevant-files>
 
 <!-- optional — cross-cutting invariants: -->

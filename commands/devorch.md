@@ -247,9 +247,11 @@ After all phases complete, determine changed files via `git -C <projectRoot> dif
 
 Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single message). All receive: `Working directory: <projectRoot>`, plan objective, GOTCHAS.md (or legacy CONVENTIONS.md) if it exists, changed-files list. Each reviewer should also flag non-obvious behaviors discovered in the changed code as gotcha candidates in their report.
 
+**Anti-staleness directive (included in every reviewer prompt)**: read file contents at current HEAD of the worktree, not the base branch. Cite `file:line` from the current state. Before reporting a contract as unsatisfied, grep for the expected new symbol or phrase (e.g. the behavior name, the added function, the new flag) in the actual file. A reviewer reporting "not implemented" without such a grep check is treated as stale and re-run.
+
 - **security** — OWASP Top 10 anti-patterns, injection risks, auth gaps, data exposure, secrets handling
 - **performance** — estimated cost, anti-patterns (N+1, full scans, polling, synchronous workers, server-side buffering), cache opportunities
-- **completeness** — spec vs delivery: every `<spec>` element satisfied? cross-phase integration intact? handoffs honored?
+- **completeness** — spec vs delivery: every `<spec>` element satisfied? cross-phase integration intact? handoffs honored? Required method: for each `<behavior>`/`<invariant>` in the plan, grep the changed files for its identifying symbol (function name, flag name, new phrase) AND verify with a direct Read on the relevant line range. Do not infer from absence at a master-era line number.
 - **flags** — adjacent items out of scope. For each flag: type (security | performance | architecture | ops), severity, detection (file:line), suggested fix, one-line alternative. Write all flags to `<mainRoot>/.devorch/flags-<name>.md` using the FLAGS.md format.
 
 ### F5. Apply review fixes
