@@ -1,7 +1,7 @@
 # devorch State
 - Plan: fix-flow-friction-backlog
-- Last completed phase: 1
-- Status: ready for phase 2
+- Last completed phase: 2
+- Status: ready for phase 3
 
-## Phase 1 Summary
-commands/devorch.md: F5 file-overlap guard, Q2/S5 pre-edit WIP check, F3e/F7 explicit repoPath. 3 inbox entries removed.
+## Phase 2 Summary
+setup-worktree.ts: .env auto-copy (--no-env opt-out), cwd walk-up from inside .worktrees/, satellite untracked-files abort guard. getUntrackedFiles helper added. 3 inbox entries removed.
