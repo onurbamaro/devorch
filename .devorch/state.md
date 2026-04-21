@@ -1,7 +1,7 @@
 # devorch State
 - Plan: fix-flow-friction-backlog
-- Last completed phase: 3
-- Status: ready for phase 4
+- Last completed phase: 4
+- Status: all phases complete, ready for review
 
-## Phase 3 Summary
-merge-worktree.ts: identical-untracked auto-remove, detached-HEAD fallback via worktree list --porcelain (primary only), zero-commit-ahead skip (dry-run + merge) with cleanup. JSON gains skipped flag. 3 inbox entries removed.
+## Phase 4 Summary
+list-worktrees.ts: prefer self-named plan (<name>.md); stderr warning on fallback. Last inbox entry removed.
