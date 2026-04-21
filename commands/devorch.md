@@ -97,6 +97,10 @@ If the guardian found a critical heads-up, pause and show it using the unified g
 
 ### Q2. Execute edit
 
+#### Q2a. Pre-edit WIP check
+
+Antes do primeiro Edit/Write em cada arquivo tracked, rode `git -C <projectRoot> status --porcelain <file>`. Se o status começar com `M`, `A`, `MM`, `AM` ou `UU` (mudanças tracked não commitadas de uma sessão anterior), pause e faça `AskUserQuestion` com 3 opções: (a) bundle — incluir a WIP no commit desta sessão; (b) stash — `git stash -u <file>` e reaplicar depois do commit; (c) split — commitar a WIP sozinha primeiro e depois prosseguir. Arquivos apenas untracked (`??`) não disparam o gate.
+
 Apply the edit directly with Edit/Write tools. Minimal changes. Infer style from nearby code; consult GOTCHAS.md only when relevant to the touched area.
 
 ### Q3. Post-edit lint
@@ -153,6 +157,10 @@ If `--worktree` flag is present:
 Otherwise `projectRoot = <cwd>`.
 
 ### S5. Execute
+
+#### S5a. Pre-edit WIP check
+
+Antes do primeiro Edit/Write em cada arquivo tracked em `<projectRoot>`, rode `git -C <projectRoot> status --porcelain <file>`. Se o status começar com `M`, `A`, `MM`, `AM` ou `UU` (mudanças tracked não commitadas de uma sessão anterior), pause e faça `AskUserQuestion` com 3 opções: (a) bundle — incluir a WIP no commit desta sessão; (b) stash — `git stash -u <file>` e reaplicar depois do commit; (c) split — commitar a WIP sozinha primeiro e depois prosseguir. Arquivos apenas untracked (`??`) não disparam o gate.
 
 Apply edits directly with Edit/Write tools in `<projectRoot>`. Follow decisions from the gate. Minimal changes. Post-edit lint hook fires automatically.
 
@@ -229,7 +237,8 @@ After each wave returns: verify task completion via `TaskList`, extract `## Buil
 If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
 
 #### F3e. Phase summary + commit
-- `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>" [--satellites '<json>']` — include `--satellites` only when `<satellites>` is non-empty (build JSON as `[{name, path}, ...]` from the F2.8 output).
+- `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>" [--satellites '<json>']` — include `--satellites` only when `<satellites>` is non-empty (build JSON as `[{name, path, status}, ...]` where `path` is the satellite's `repoPath` (from F2.8 output's `satellites[].repoPath`)).
+- `phase-summary.ts` only uses `name` + `status`; the `path` field is carried for symmetry with `merge-worktree` and ignored here.
 - Commit with the returned message if there are changes in the primary worktree. For each satellite, also commit phase progress if it has changes: `git -C <satellite.worktreePath> add -A && git -C <satellite.worktreePath> commit -m "<phase-summary-message>"`.
 
 ### F4. Categorized adversarial review
@@ -244,6 +253,8 @@ Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single me
 - **flags** — adjacent items out of scope. For each flag: type (security | performance | architecture | ops), severity, detection (file:line), suggested fix, one-line alternative. Write all flags to `<mainRoot>/.devorch/flags-<name>.md` using the FLAGS.md format.
 
 ### F5. Apply review fixes
+
+Antes de classificar e dispatchar, compute a união de `<relevant-files>` de cada finding fix-level (via grep do conteúdo da finding ou inspeção direta dos arquivos citados). Se dois ou mais findings tocarem o mesmo arquivo, eles NÃO podem ser dispatchados no mesmo wave — sequencialize em waves separados, espelhando a disciplina que `validate-plan.ts` aplica em F3c. Findings sem overlap de arquivos seguem em paralelo.
 
 Classify each finding:
 - **Trivial** (1–2 files, obvious fix) → apply inline with Edit.
@@ -286,7 +297,7 @@ If verdict is PASS (or PASS with pendencies that are non-blocking), run the merg
 bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts --worktree <name> [--satellites '<json>']
 ```
 
-Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON shape built in F3e). The script rebases the primary worktree onto `origin/<mainBranch>`, runs `check-project --quick`, dry-runs merges across primary + all satellites BEFORE committing anything (atomicity guard), then merges sequentially with `--no-ff`, archives the plan, removes each worktree, and deletes each branch. Single call covers the full lifecycle.
+Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON shape built in F3e) — namely `[{name, path, status?}, ...]` where `path` is `repoPath`; `merge-worktree.ts` resolves `.worktrees/<name>` internally from that path. The script rebases the primary worktree onto `origin/<mainBranch>`, runs `check-project --quick`, dry-runs merges across primary + all satellites BEFORE committing anything (atomicity guard), then merges sequentially with `--no-ff`, archives the plan, removes each worktree, and deletes each branch. Single call covers the full lifecycle.
 
 Optional flags: `--squash`, `--keep-branch`, `--no-rebase`, `--dry-run`.
 

@@ -1,7 +1,7 @@
 # devorch State
-- Plan: Consolidate builders and split init-phase
-- Last completed phase: 1
-- Status: ready for review
+- Plan: fix-flow-friction-backlog
+- Last completed phase: 4
+- Status: all phases complete, ready for review
 
-## Phase 1 Summary
-Consolidated builders (eliminated spec variant) and split init-phase.ts into task-filter.ts + slice-builder.ts libs. CLI contract verified.
+## Phase 4 Summary
+list-worktrees.ts: prefer self-named plan (<name>.md); stderr warning on fallback. Last inbox entry removed.

@@ -70,6 +70,31 @@ export function getUncommittedFiles(repoPath: string): string[] {
 }
 
 /**
+ * Returns list of untracked files in the given repo, excluding paths under any of the given
+ * first-segment prefixes. Each excludePrefix is matched against the first path segment of the
+ * untracked file (e.g. ".worktrees/" excludes ".worktrees/foo/bar" but not "src/worktrees/x").
+ * Trailing slashes on prefixes are tolerated. Returns [] on any git error.
+ */
+export function getUntrackedFiles(repoPath: string, excludePrefixes: string[] = []): string[] {
+  try {
+    const proc = Bun.spawnSync(
+      ["git", "-C", repoPath, "ls-files", "--others", "--exclude-standard"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+    if (proc.exitCode !== 0) return [];
+    const files = proc.stdout.toString("utf-8").split("\n").filter(Boolean);
+    if (excludePrefixes.length === 0) return files;
+    const normalizedPrefixes = excludePrefixes.map((p) => p.replace(/\/+$/, ""));
+    return files.filter((f) => {
+      const firstSegment = f.split("/")[0];
+      return !normalizedPrefixes.includes(firstSegment);
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Checks if the given path is a git repository.
  */
 export function isGitRepo(repoPath: string): boolean {

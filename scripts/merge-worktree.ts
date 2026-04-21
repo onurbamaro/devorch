@@ -9,7 +9,7 @@
  * Output: JSON on stdout, logs on stderr.
  * Exit codes: 0 success, 1 handled error, 2 unexpected error.
  */
-import { existsSync, readdirSync } from "fs";
+import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
 import { join, resolve, basename } from "path";
 import { parseArgs } from "./lib/args";
 import { getMainBranch, isGitRepo, getUncommittedFiles } from "./lib/git-utils";
@@ -194,10 +194,45 @@ function resolveRepo(
     fail(`Path exists but is not a registered git worktree in ${role} "${name}": ${worktreePath}`);
   }
   const branchCheck = git(worktreePath, ["branch", "--show-current"]);
-  if (branchCheck.exitCode !== 0 || !branchCheck.stdout) {
-    fail(`Failed to resolve worktree branch for ${role} "${name}": ${branchCheck.stderr}`);
+  let actualBranch = branchCheck.stdout;
+  if (branchCheck.exitCode !== 0 || !actualBranch) {
+    // Detached-HEAD fallback only for primary (expectedBranch === null). Satellites
+    // with a named expected branch still fall through to the original failure path.
+    if (expectedBranch === null) {
+      const porcelain = git(repoMainPath, ["worktree", "list", "--porcelain"]);
+      const entries = porcelain.stdout.split(/\n\n+/);
+      let fallbackBranch: string | null = null;
+      for (const entry of entries) {
+        const lines = entry.split("\n").map((l) => l.trim()).filter(Boolean);
+        const wtLine = lines.find((l) => l.startsWith("worktree "));
+        const brLine = lines.find((l) => l.startsWith("branch "));
+        if (!wtLine) continue;
+        const entryPath = wtLine.slice(9).trim();
+        if (resolve(entryPath).replaceAll("\\", "/") !== normalizedWt) continue;
+        if (!brLine) break;
+        const ref = brLine.slice(7).trim();
+        fallbackBranch = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref;
+        break;
+      }
+      if (!fallbackBranch) {
+        fail(
+          `Failed to resolve worktree branch for ${role} "${name}": HEAD is detached; worktree list --porcelain did not resolve a matching branch.`,
+        );
+      }
+      const checkout = git(worktreePath, ["checkout", fallbackBranch]);
+      if (checkout.exitCode !== 0) {
+        fail(
+          `Failed to resolve worktree branch for ${role} "${name}": HEAD detached; re-attach to ${fallbackBranch} failed: ${checkout.stderr}`,
+        );
+      }
+      log(
+        `[${role}:${name}] HEAD was detached; re-attached to ${fallbackBranch} via git checkout.`,
+      );
+      actualBranch = fallbackBranch;
+    } else {
+      fail(`Failed to resolve worktree branch for ${role} "${name}": ${branchCheck.stderr}`);
+    }
   }
-  const actualBranch = branchCheck.stdout;
   if (expectedBranch !== null && actualBranch !== expectedBranch) {
     fail(
       `Worktree branch mismatch for ${role} "${name}": expected ${expectedBranch}, got ${actualBranch}`,
@@ -307,6 +342,46 @@ function ensureOnMainBranch(repo: RepoTarget): { ok: true } | { ok: false; reaso
   return { ok: true };
 }
 
+/**
+ * Removes untracked files in `repo.repoMainPath` that are byte-for-byte identical
+ * to the version of the same path in `repo.branch`. Non-identical or branch-absent
+ * paths are left alone. Non-blocking: any per-file error is logged and skipped.
+ *
+ * Returns the list of removed paths (relative to repoMainPath).
+ */
+function removeIdenticalUntracked(repo: RepoTarget): string[] {
+  const removed: string[] = [];
+  const lsUntracked = git(repo.repoMainPath, ["ls-files", "--others", "--exclude-standard"]);
+  if (lsUntracked.exitCode !== 0) return removed;
+  const paths = lsUntracked.stdout
+    .split("\n")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  for (const relPath of paths) {
+    try {
+      // Byte-exact fetch of the branch version (bypass the `git` wrapper which trims).
+      const showProc = Bun.spawnSync(
+        ["git", "-C", repo.repoMainPath, "show", `${repo.branch}:${relPath}`],
+        { stdout: "pipe", stderr: "pipe" },
+      );
+      if (showProc.exitCode !== 0) continue; // path not in branch — leave untouched
+      const branchBytes = showProc.stdout; // Buffer
+      const absPath = join(repo.repoMainPath, relPath);
+      const fileBytes = readFileSync(absPath);
+      if (branchBytes.length !== fileBytes.length) continue;
+      if (!branchBytes.equals(fileBytes)) continue;
+      unlinkSync(absPath);
+      log(`[${repo.name}] Removed identical-content untracked file: ${relPath}`);
+      removed.push(relPath);
+    } catch (err) {
+      log(
+        `[${repo.name}] Skipped untracked identity check for ${relPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return removed;
+}
+
 interface DryRunOutcome {
   ok: boolean;
   conflictFiles: string[];
@@ -314,6 +389,7 @@ interface DryRunOutcome {
 }
 
 function dryRunMerge(repo: RepoTarget): DryRunOutcome {
+  removeIdenticalUntracked(repo);
   const ensured = ensureOnMainBranch(repo);
   if (!ensured.ok) {
     return { ok: false, conflictFiles: [], reason: ensured.reason };
@@ -335,9 +411,11 @@ interface MergeOutcome {
   squash: boolean;
   reason?: string;
   conflictFiles?: string[];
+  skipped?: boolean;
 }
 
 function mergeRepo(repo: RepoTarget, mergeMsg: string, squash: boolean): MergeOutcome {
+  removeIdenticalUntracked(repo);
   const ensured = ensureOnMainBranch(repo);
   if (!ensured.ok) {
     return { ok: false, sha: null, squash, reason: ensured.reason };
@@ -490,6 +568,17 @@ async function main(): Promise<void> {
   }
   const primaryStats = statsByRepo.get(primary.name)!;
 
+  // --- Zero-commit-ahead skip: exclude from dry-run AND merge, but still cleanup. ---
+  const skippedRepos = new Set<string>();
+  for (const repo of repos) {
+    if (statsByRepo.get(repo.name)!.commitsIntegrated === 0) {
+      skippedRepos.add(repo.name);
+      log(
+        `[${repo.name}] 0 commits ahead of ${repo.mainBranch}; skipping merge, proceeding to cleanup.`,
+      );
+    }
+  }
+
   // --- Plan file (primary only) ---
   const plansDir = join(primary.worktreePath, ".devorch/plans");
   const planFile = findPlanFile(plansDir, name);
@@ -539,7 +628,8 @@ async function main(): Promise<void> {
   const hasSatellites = satellites.length > 0;
   if (hasSatellites) {
     log("Dry-run all repos before committing (atomicity guard)...");
-    const dryResults = repos.map((repo) => ({ repo, outcome: dryRunMerge(repo) }));
+    const dryRepos = repos.filter((r) => !skippedRepos.has(r.name));
+    const dryResults = dryRepos.map((repo) => ({ repo, outcome: dryRunMerge(repo) }));
     const failedDry = dryResults.filter((r) => !r.outcome.ok);
     if (failedDry.length > 0) {
       const okRepos = dryResults
@@ -569,6 +659,14 @@ async function main(): Promise<void> {
   }> = [];
 
   for (const repo of repos) {
+    if (skippedRepos.has(repo.name)) {
+      log(`[${repo.name}] Skipped merge (0 commits ahead); will still cleanup.`);
+      mergeResults.push({
+        repo,
+        outcome: { ok: true, sha: null, squash: args.squash, skipped: true },
+      });
+      continue;
+    }
     log(`[${repo.name}] Merging ${repo.branch} → ${repo.mainBranch} (${args.squash ? "--squash" : "--no-ff"})...`);
     const outcome = mergeRepo(repo, mergeMsg, args.squash);
     mergeResults.push({ repo, outcome });
@@ -737,6 +835,7 @@ async function main(): Promise<void> {
       name: repo.name,
       path: repo.repoMainPath,
       merged: outcome.sha,
+      skipped: outcome.skipped === true,
       commitsIntegrated: s.commitsIntegrated,
       filesChanged: s.filesChanged,
       additions: s.additions,

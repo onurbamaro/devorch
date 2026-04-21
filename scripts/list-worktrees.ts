@@ -158,8 +158,14 @@ for (const name of entries) {
   const plansDir = join(wtPath, ".devorch/plans");
   let planFile: string | undefined;
   try {
-    const planEntries = readdirSync(plansDir);
-    planFile = planEntries.find((f) => f.endsWith(".md") && f !== "archive");
+    const planEntries = readdirSync(plansDir).filter((f) => f.endsWith(".md") && f !== "archive");
+    const selfNamed = planEntries.find((f) => f === `${name}.md`);
+    if (selfNamed) {
+      planFile = selfNamed;
+    } else if (planEntries.length > 0) {
+      planFile = planEntries[0];
+      console.error(`Warning: ${wtPath}/.devorch/plans/ has no self-named plan (${name}.md); falling back to ${planFile}.`);
+    }
   } catch {
     // ignore — plans dir may not exist
   }
