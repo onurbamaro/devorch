@@ -10,7 +10,7 @@
  * Exit codes: 0 success, 1 handled error, 2 unexpected error.
  */
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
-import { join, resolve, basename } from "path";
+import { join, resolve, basename, dirname } from "path";
 import { parseArgs } from "./lib/args";
 import { getMainBranch, isGitRepo, getUncommittedFiles } from "./lib/git-utils";
 import { safeReadFile } from "./lib/fs-utils";
@@ -63,6 +63,36 @@ function emit(obj: Record<string, unknown>): void {
 function fail(error: string, extra: Record<string, unknown> = {}): never {
   emit({ ok: false, error, ...extra });
   process.exit(1);
+}
+
+/**
+ * Deterministic mainRoot resolver. Walks up from `process.cwd()` until it finds
+ * a directory `D` such that BOTH `D/.worktrees/<worktreeName>` exists AND
+ * `D/.git` exists (file or directory, satisfying the "is itself a git repo"
+ * condition). This works regardless of cwd: invocation from `<mainRoot>`,
+ * from inside the worktree, or from any nested subdirectory all resolve to
+ * the same `<mainRoot>`. Fails with a structured error if no such ancestor
+ * is found.
+ */
+function resolveMainRoot(worktreeName: string): string {
+  const start = resolve(process.cwd());
+  const visited: string[] = [];
+  let current = start;
+  while (true) {
+    visited.push(current);
+    const wtCandidate = join(current, ".worktrees", worktreeName);
+    const gitCandidate = join(current, ".git");
+    if (existsSync(wtCandidate) && existsSync(gitCandidate)) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  fail(
+    `Failed to resolve mainRoot: no ancestor of cwd contains both .worktrees/${worktreeName} and .git/`,
+    { phase: "resolve-main-root", cwd: start, worktree: worktreeName, searched: visited },
+  );
 }
 
 function findPlanFile(plansDir: string, worktreeName: string): string | null {
@@ -477,11 +507,17 @@ function cleanupRepo(repo: RepoTarget, keepBranch: boolean): CleanupOutcome {
 }
 
 async function main(): Promise<void> {
-  const mainRoot = process.cwd();
   const name = args.worktree;
+  const mainRoot = resolveMainRoot(name);
+  if (resolve(process.cwd()) !== mainRoot) {
+    log(`Resolved mainRoot = ${mainRoot} (cwd = ${process.cwd()}).`);
+  }
 
+  // resolveMainRoot already guarantees both .worktrees/<name> and .git/ exist
+  // in mainRoot, but we keep a defensive isGitRepo check to surface partial-init
+  // states (e.g. corrupted .git/) that existsSync alone wouldn't catch.
   if (!isGitRepo(mainRoot)) {
-    fail(`Current directory is not a git repository: ${mainRoot}`);
+    fail(`Resolved mainRoot is not a valid git repository: ${mainRoot}`);
   }
 
   const worktreePath = resolve(mainRoot, ".worktrees", name);
