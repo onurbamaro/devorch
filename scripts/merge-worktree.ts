@@ -10,7 +10,7 @@
  * Exit codes: 0 success, 1 handled error, 2 unexpected error.
  */
 import { existsSync, readdirSync, readFileSync, unlinkSync } from "fs";
-import { join, resolve, basename, dirname } from "path";
+import { join, resolve, basename, dirname, relative, sep } from "path";
 import { parseArgs } from "./lib/args";
 import { getMainBranch, isGitRepo, getUncommittedFiles } from "./lib/git-utils";
 import { safeReadFile } from "./lib/fs-utils";
@@ -531,6 +531,11 @@ async function main(): Promise<void> {
   const satellites: RepoTarget[] = [];
   for (const sat of satelliteInputs) {
     const satRepoMain = resolve(sat.path);
+    const rel = relative(mainRoot, satRepoMain);
+    const upSegments = rel.split(sep).filter((p) => p === "..").length;
+    if (upSegments > 2) {
+      throw new Error(`Satellite '${sat.name}' path '${sat.path}' resolves outside expected sibling depth (resolved: ${satRepoMain}); refuse for safety`);
+    }
     const satWorktreePath = join(satRepoMain, ".worktrees", name);
     const satBranch = sat.branch ?? `devorch/${name}`;
     const resolved = resolveRepo("satellite", sat.name, satRepoMain, satWorktreePath, satBranch);

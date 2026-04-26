@@ -8,7 +8,7 @@
  * With --add-secondary, adds satellite worktrees to an existing primary worktree.
  */
 import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync, statSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, relative, sep } from "path";
 import { parseArgs } from "./lib/args";
 import { isGitRepo, checkBranchExists, getUncommittedFiles, getUntrackedFiles } from "./lib/git-utils";
 
@@ -272,6 +272,12 @@ async function createSatellites(jsonStr: string, recreate: boolean): Promise<Sat
   // Validate all repos before creating any worktrees
   for (const repo of secondaryRepos) {
     const repoPath = resolve(cwd, repo.path);
+    const rel = relative(cwd, repoPath);
+    const upSegments = rel.split(sep).filter((p) => p === "..").length;
+    if (upSegments > 2) {
+      console.error(`Secondary repo "${repo.name}" path "${repo.path}" resolves outside expected sibling depth (resolved: ${repoPath}); refuse for safety`);
+      process.exit(1);
+    }
     if (!isGitRepo(repoPath)) {
       console.error(`Secondary repo "${repo.name}" at ${repoPath} is not a git repository`);
       process.exit(1);

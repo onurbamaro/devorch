@@ -281,8 +281,13 @@ async function runTldrAnalyze(): Promise<Record<string, string>> {
   const exitCode = await tldrProc.exited;
   if (exitCode === 0) {
     const output = await new Response(tldrProc.stdout).text();
-    const tldrResult: TldrResult = JSON.parse(output.trim());
-    return formatTldrAnalysis(tldrResult);
+    try {
+      const tldrResult: TldrResult = JSON.parse(output.trim());
+      return formatTldrAnalysis(tldrResult);
+    } catch {
+      console.error(`[init-phase] TLDR analysis returned malformed JSON — skipping code structure context`);
+      return {};
+    }
   }
   console.error(`[init-phase] TLDR analysis failed (exit ${exitCode}) — skipping code structure context`);
   return {};
