@@ -272,7 +272,12 @@ function resolveRepo(
   return { role, name, repoMainPath, worktreePath, branch: actualBranch, mainBranch };
 }
 
-function rebaseRepo(repo: RepoTarget): { ok: true } | { ok: false; conflictFiles: string[]; target: string } {
+type RebaseResult =
+  | { ok: true }
+  | { ok: false; reason: "rebase-conflict"; conflictFiles: string[]; target: string }
+  | { ok: false; reason: "dirty-worktree"; dirtyFiles: string[]; target: string };
+
+function rebaseRepo(repo: RepoTarget): RebaseResult {
   log(`[${repo.name}] Fetching origin...`);
   const fetch = git(repo.worktreePath, ["fetch", "origin"]);
   if (fetch.exitCode !== 0) {
@@ -308,12 +313,25 @@ function rebaseRepo(repo: RepoTarget): { ok: true } | { ok: false; conflictFiles
     }
   }
 
+  // Pre-flight: refuse to rebase a dirty worktree (tracked changes only — untracked is OK).
+  // `git rebase` would refuse without producing actual conflict markers, leaving
+  // `collectConflictFiles()` returning [] and yielding an opaque failure report.
+  const preStatus = git(repo.worktreePath, ["status", "--porcelain"]);
+  const dirtyFiles = preStatus.stdout
+    .split("\n")
+    .filter((l) => l.length > 0 && !l.startsWith("??"))
+    .map((l) => l.slice(3));
+  if (dirtyFiles.length > 0) {
+    log(`[${repo.name}] Dirty worktree (tracked changes) detected; refusing to rebase onto ${rebaseTarget}.`);
+    return { ok: false, reason: "dirty-worktree", dirtyFiles, target: rebaseTarget };
+  }
+
   log(`[${repo.name}] Rebasing onto ${rebaseTarget}...`);
   const rebase = git(repo.worktreePath, ["rebase", rebaseTarget]);
   if (rebase.exitCode !== 0) {
     const conflicts = collectConflictFiles(repo.worktreePath);
     git(repo.worktreePath, ["rebase", "--abort"]);
-    return { ok: false, conflictFiles: conflicts, target: rebaseTarget };
+    return { ok: false, reason: "rebase-conflict", conflictFiles: conflicts, target: rebaseTarget };
   }
   log(`[${repo.name}] Rebase successful.`);
   return { ok: true };
@@ -550,18 +568,33 @@ async function main(): Promise<void> {
     for (const repo of repos) {
       const res = rebaseRepo(repo);
       if (!res.ok) {
-        fail(`Rebase conflict in ${repo.role} "${repo.name}" against ${res.target}`, {
-          phase: "rebase",
-          failedRepos: [
-            {
-              role: repo.role,
-              name: repo.name,
-              path: repo.repoMainPath,
-              reason: "rebase-conflict",
-              conflictFiles: res.conflictFiles,
-            },
-          ],
-        });
+        if (res.reason === "dirty-worktree") {
+          fail(`Dirty worktree in ${repo.role} "${repo.name}" against ${res.target}`, {
+            phase: "rebase",
+            failedRepos: [
+              {
+                role: repo.role,
+                name: repo.name,
+                path: repo.repoMainPath,
+                reason: "dirty-worktree",
+                dirtyFiles: res.dirtyFiles,
+              },
+            ],
+          });
+        } else {
+          fail(`Rebase conflict in ${repo.role} "${repo.name}" against ${res.target}`, {
+            phase: "rebase",
+            failedRepos: [
+              {
+                role: repo.role,
+                name: repo.name,
+                path: repo.repoMainPath,
+                reason: "rebase-conflict",
+                conflictFiles: res.conflictFiles,
+              },
+            ],
+          });
+        }
       }
     }
   } else {
