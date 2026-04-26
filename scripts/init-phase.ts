@@ -243,16 +243,17 @@ async function runMapProject(): Promise<void> {
  * is the well-known key for the main repo.
  */
 function groupFilesByRepo(files: string[]): Record<string, string[]> {
+  // Build file→repo index once: O(T) extractFileRefs calls instead of O(F·T).
+  const fileToRepo = new Map<string, string>();
+  for (const task of Object.values(tasks)) {
+    const refs = extractFileRefs(task.content);
+    for (const ref of refs) {
+      if (!fileToRepo.has(ref)) fileToRepo.set(ref, task.repo || "primary");
+    }
+  }
   const groups: Record<string, string[]> = {};
   for (const file of files) {
-    let owningRepo = "primary";
-    for (const task of Object.values(tasks)) {
-      const refs = extractFileRefs(task.content);
-      if (refs.has(file)) {
-        owningRepo = task.repo || "primary";
-        break;
-      }
-    }
+    const owningRepo = fileToRepo.get(file) ?? "primary";
     if (!groups[owningRepo]) groups[owningRepo] = [];
     groups[owningRepo].push(file);
   }
@@ -513,7 +514,12 @@ for (const taskId of Object.keys(tasks)) {
 // Step 9c). Files are written regardless of mode (default or `--legacy-json`).
 const detailRel = `.devorch/cache/phase-init-${phaseNum}/`;
 const detailDirAbs = resolve(projectRoot, detailRel);
-mkdirSync(detailDirAbs, { recursive: true });
+try {
+  mkdirSync(detailDirAbs, { recursive: true });
+} catch (err) {
+  console.error(`[init-phase] failed to create detail dir ${detailDirAbs}: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+}
 
 for (const taskId of Object.keys(tasks)) {
   const sections: string[] = [];
@@ -562,7 +568,12 @@ for (const taskId of Object.keys(tasks)) {
   // Write even when sections is empty: keep the file present so the orchestrator
   // does not hit a missing-file error mid-dispatch. Empty body is a valid
   // signal that this task has no curated context to inject.
-  writeFileSync(detailFile, sections.join("\n"), "utf-8");
+  try {
+    writeFileSync(detailFile, sections.join("\n"), "utf-8");
+  } catch (err) {
+    console.error(`[init-phase] failed to write detail file ${detailFile}: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 }
 
 // --- Output ---
