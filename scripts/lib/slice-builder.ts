@@ -95,12 +95,12 @@ export function parseTasks(phaseText: string): Record<string, ParsedTask> {
     const effortMatch = sectionContent.match(/\*\*Effort\*\*:\s*(\S+)/i);
     const effort = effortMatch ? effortMatch[1].toLowerCase() : undefined;
 
-    const exemplarsMatch = sectionContent.match(/^\s*\*\*Exemplars\*\*:\s*(.+)$/im);
+    const exemplarsMatch = sectionContent.match(/^\s*(?:[-*]\s+)?\*\*Exemplars\*\*:\s*(.+)$/im);
     const exemplars = exemplarsMatch
       ? exemplarsMatch[1].split(",").map((e) => e.trim()).filter(Boolean)
       : [];
 
-    const nonGoalsMatch = sectionContent.match(/^\s*\*\*Non-goals\*\*:\s*(.+)$/im);
+    const nonGoalsMatch = sectionContent.match(/^\s*(?:[-*]\s+)?\*\*Non-goals\*\*:\s*(.+)$/im);
     const nonGoals = nonGoalsMatch ? nonGoalsMatch[1].trim() : "";
 
     const fullContent = `#### ${taskHeaders[i][0].match(/\d+/)?.[0] || i + 1}. ${title}\n${sectionContent.trimEnd()}`;

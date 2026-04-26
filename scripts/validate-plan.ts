@@ -442,7 +442,7 @@ if (phases.length === 0) {
       for (const [repoName, ids] of repoGroups) {
         if (ids.length >= 2) {
           errors.push(
-            `Wave ${waveNum} in phase ${phase.num} has 2+ tasks targeting Repo "${repoName}": [${ids.join(", ")}]. Builders sharing a worktree see each other's WIP during typecheck/lint — split into separate waves.`
+            `Wave ${waveNum} in phase ${phase.num} has 2+ tasks targeting Repo "${repoName}": [${ids.join(", ")}]. Builders sharing a worktree see each other's WIP during typecheck/lint — split into separate \`## Execution\` waves in the plan and re-validate.`
           );
         }
       }
