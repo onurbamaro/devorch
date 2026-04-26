@@ -136,6 +136,8 @@ Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `<projectRoot>/.devorch/pl
 
 The plan must reflect decisions captured in Step 6 — every user choice goes in `<decisions>` as a "Question → Answer" line.
 
+**Bundle trivial mechanical fixes**: when the plan would otherwise have 2+ tasks where each (a) has `Spec refs` totaling under ~500 tokens, AND (b) targets disjoint files, AND (c) shares the same `Repo`, prefer bundling them into a single task `mechanical-fixes-<scope>` with bullet-points listing the per-file changes. The builder receives all sub-fixes in one prompt and produces one commit. Bundling avoids paying coordination tax (separate dispatches, separate commits, slice-gate noise per task) for fixes that have no real cross-task dependency. Threshold rule of thumb: if the union of the candidate tasks' `<spec>` blocks fits in ~30 lines and the implementations are mechanical (flag adds, regex tweaks, hint strings, doc rewrites), bundle. Reserve separate tasks for genuinely independent units of judgment — refactors, behavior changes, anything where the builder needs to reason about cross-cutting design.
+
 ## Step 7.5 — Plan semantic check
 
 `validate-plan.ts` (Step 8) is a syntactic gate: it parses the plan and checks structural rules (waves declared, ids unique, `<relevant-files>` non-overlapping within a wave). It cannot infer **implicit** touches — files a task will edit that are not listed in `<relevant-files>` because the task description treats them as obvious (a barrel re-export, a hook registry, a generated migration filename, an index aggregator). Two tasks in the same wave that both implicitly touch `src/index.ts` will pass `validate-plan.ts` and then collide at build time.

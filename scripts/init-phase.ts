@@ -484,7 +484,10 @@ for (const [taskId, task] of Object.entries(tasks)) {
  * pre-declare how many tokens of `## Explore Findings` it plans to inject in
  * Step 9c per task. The slice gate adds those tokens to the script-counted
  * total, so the warning reflects the effective slice the builder will see —
- * not just what the script can measure on its own.
+ * not just what the script can measure on its own. `under` fires only when no
+ * injection is planned for the task: a task with injection > 0 is a signal
+ * the orchestrator already knows it will augment the slice, so a low
+ * script-side count is noise. `over` always fires regardless of injection.
  */
 
 const sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }> = [];
@@ -500,7 +503,11 @@ for (const taskId of Object.keys(tasks)) {
   const injectionTokens = exploreInjectionTokens[taskId] ?? 0;
   const tokens = scriptTokens + injectionTokens;
 
-  if (tokens < TOKEN_GATE_UNDER) {
+  // Suppress "under" warnings when the orchestrator declared explore-injection
+  // tokens for this task: the slice is augmented downstream, so a low script-side
+  // count is not a signal. "Over" still fires regardless — curation failed even
+  // with injection on top.
+  if (tokens < TOKEN_GATE_UNDER && injectionTokens === 0) {
     sliceWarnings.push({ taskId, tokens, direction: "under" });
   } else if (tokens > TOKEN_GATE_OVER) {
     sliceWarnings.push({ taskId, tokens, direction: "over" });
@@ -587,7 +594,7 @@ interface InitPhaseOutput {
   waves: ParsedWave[];
   /** Flat list of every task ID in the phase, in plan-declaration order. */
   taskIds: string[];
-  /** Per-task slice-size gate warnings. `under` = <TOKEN_GATE_UNDER tokens (likely under-contextualized); `over` = >TOKEN_GATE_OVER tokens (curation failed). Empty array when all tasks are within bounds. See Principle 2. */
+  /** Per-task slice-size gate warnings. `under` = <TOKEN_GATE_UNDER tokens AND no explore-injection planned (likely under-contextualized); `over` = >TOKEN_GATE_OVER tokens (curation failed, regardless of injection). Empty array when all tasks are within bounds. See Principle 2. */
   sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }>;
   /** Project-root-relative directory where per-task markdown detail files live. Trailing slash included. */
   detailPath: string;
