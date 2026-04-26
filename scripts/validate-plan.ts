@@ -355,6 +355,7 @@ if (phases.length === 0) {
     interface TaskFileInfo {
       id: string;
       files: string[];
+      repo: string;
     }
 
     const tasks: TaskFileInfo[] = [];
@@ -369,7 +370,10 @@ if (phases.length === 0) {
         .map((m) => m[1])
         .filter((f) => /\.\w{1,5}$/.test(f));
 
-      tasks.push({ id: taskId, files: fileRefs });
+      const repoMatch = section.match(/\*\*Repo\*\*:\s*(\S+)/i);
+      const repo = repoMatch ? repoMatch[1] : "primary";
+
+      tasks.push({ id: taskId, files: fileRefs, repo });
     }
 
     // --- Explore queries validation (optional section) ---
@@ -422,6 +426,24 @@ if (phases.length === 0) {
               `Phase ${phase.num}: Wave ${waveNum} conflict — tasks "${waveTasks[a].id}" and "${waveTasks[b].id}" both touch: ${overlap.join(", ")}`
             );
           }
+        }
+      }
+
+      // Same-Repo wave check: 2+ tasks targeting the same repo within a wave
+      // would force builders to share a worktree, exposing each other's WIP
+      // during typecheck/lint. Hard error.
+      const repoGroups = new Map<string, string[]>();
+      for (const wt of waveTasks) {
+        const repoKey = wt.repo || "primary";
+        const list = repoGroups.get(repoKey) ?? [];
+        list.push(wt.id);
+        repoGroups.set(repoKey, list);
+      }
+      for (const [repoName, ids] of repoGroups) {
+        if (ids.length >= 2) {
+          errors.push(
+            `Wave ${waveNum} in phase ${phase.num} has 2+ tasks targeting Repo "${repoName}": [${ids.join(", ")}]. Builders sharing a worktree see each other's WIP during typecheck/lint — split into separate waves.`
+          );
         }
       }
     }

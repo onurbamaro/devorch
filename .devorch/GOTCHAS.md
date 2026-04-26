@@ -1,0 +1,4 @@
+# Gotchas
+
+- **`git()` wrapper trims stdout** (`scripts/merge-worktree.ts:43-53`) — Callers needing byte-exact output (e.g. `removeIdenticalUntracked` comparing untracked file bytes to `git show <branch>:<path>`) must bypass the wrapper with raw `Bun.spawnSync`; the wrapper's `.trim()` silently alters trailing whitespace and newlines.
+- **`parseTasks` exemplars/non-goals regex misses bullet-prefixed lines** (`scripts/lib/slice-builder.ts:98,103`) — The regex `^\s*\*\*Exemplars\*\*:` (and analogous Non-goals) does not match `- **Exemplars**:`, the canonical bullet form used in PLAN-FORMAT.md. Result: `exemplarsByTask` and `nonGoalsByTask` silently return empty for valid plans, so the corresponding sections never reach builder prompts. When debugging missing exemplars/non-goals in a builder prompt, check the regex first before assuming the plan is wrong.

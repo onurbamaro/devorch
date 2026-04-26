@@ -1,10 +1,22 @@
 /**
- * init-phase.ts — Compound phase init: plan context + gotchas + state + waves/tasks.
+ * init-phase.ts — Compound phase init: plan context + gotchas + waves/tasks.
  * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N>
  *                                                    [--explore-injection-tokens '<json>']
- * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks,
- *         gotchasByTask (per-task filtered + sanitized), gotchas (legacy concat),
- *         and content (or contentFile if >50000 chars).
+ *                                                    [--legacy-json]
+ *
+ * Default output: compact stdout JSON with shape
+ *   `{ok, phaseNumber, phaseName, totalPhases, planTitle, satellites, waves,
+ *     taskIds, sliceWarnings, detailPath}`. Per-task detail (gotchas, specs,
+ *   code structure, exemplars, non-goals) is written to disk as one markdown
+ *   file per task at `<projectRoot>/.devorch/cache/phase-init-<N>/<task-id>.md`.
+ *   The orchestrator reads those files via Read tool when assembling builder
+ *   prompts (commands/devorch.md Step 9c). The legacy concatenated `content` /
+ *   `contentFile` field is not emitted in default mode.
+ *
+ * With `--legacy-json`: stdout JSON additionally includes the legacy per-task
+ * fields (`gotchasByTask`, `codeStructureByTask`, `specsByTask`,
+ * `exemplarsByTask`, `nonGoalsByTask`) plus the legacy concatenated `gotchas`
+ * field. Disk markdown files are written either way.
  *
  * `--explore-injection-tokens` accepts a `Record<taskId, number>` JSON payload
  * where each value is the orchestrator's pre-estimate of the `## Explore
@@ -20,7 +32,7 @@
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
+import { parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
 import {
   extractFileRefs,
@@ -38,23 +50,22 @@ import {
   parseTasks,
 } from "./lib/slice-builder";
 
-const CONTENT_THRESHOLD = 50000;
-const CONTEXT_FILE = ".devorch/cache/phase-context.md";
-
 interface SatelliteInfo {
   name: string;
   path: string;
   worktreePath: string;
 }
 
-const args = parseArgs<{ plan: string; phase: number; "explore-injection-tokens": string }>([
+const args = parseArgs<{ plan: string; phase: number; "explore-injection-tokens": string; "legacy-json": boolean }>([
   { name: "plan", type: "string", required: true },
   { name: "phase", type: "number", required: true },
   { name: "explore-injection-tokens", type: "string", required: false },
+  { name: "legacy-json", type: "boolean", required: false },
 ]);
 
 const planPath = args.plan;
 const phaseNum = args.phase;
+const legacyJson = args["legacy-json"];
 
 // Parse optional injection-tokens JSON. When absent or malformed, fall back to
 // an empty map (slice-gate behaves as before, sizing only what the script can
@@ -99,22 +110,8 @@ if (!targetPhase) {
 
 const planTitle = extractPlanTitle(content);
 
-// --- Extract plan-level fields ---
-const objective = extractTagContent(content, "objective") || "";
-const decisions = extractTagContent(content, "decisions") || "";
-const solutionApproach = extractTagContent(content, "solution-approach") || "";
-
 // --- Extract phase content ---
 const phaseContent = targetPhase.content;
-
-// --- Extract handoff from N-1 ---
-let handoff = "";
-if (phaseNum > 1) {
-  const prevPhase = phases.find((p) => p.phase === phaseNum - 1);
-  if (prevPhase) {
-    handoff = extractTagContent(prevPhase.content, "handoff") || "";
-  }
-}
 
 // --- Resolve plan directory for relative file paths ---
 const planDir = dirname(resolve(planPath));
@@ -167,33 +164,6 @@ function getSatelliteGotchas(repoName: string): GotchaEntry[] {
   return entries;
 }
 
-// --- Read state: prefer cache/state.json (new), fall back to legacy state.md ---
-const stateJsonPath = resolve(projectRoot, ".devorch/cache/state.json");
-const stateMdPath = resolve(projectRoot, ".devorch/state.md");
-let state = "";
-if (existsSync(stateJsonPath)) {
-  try {
-    const raw = safeReadFile(stateJsonPath);
-    const parsed = JSON.parse(raw) as { status?: string; lastPhase?: number; lastPhaseSummary?: string; updatedAt?: string };
-    const lines: string[] = ["# devorch State"];
-    if (typeof parsed.lastPhase === "number") lines.push(`- Last completed phase: ${parsed.lastPhase}`);
-    if (typeof parsed.status === "string") lines.push(`- Status: ${parsed.status}`);
-    if (typeof parsed.updatedAt === "string") lines.push(`- Updated: ${parsed.updatedAt}`);
-    if (typeof parsed.lastPhaseSummary === "string" && parsed.lastPhaseSummary.length > 0) {
-      const phaseHeader = typeof parsed.lastPhase === "number"
-        ? `## Phase ${parsed.lastPhase} Summary`
-        : "## Last Phase Summary";
-      lines.push("", phaseHeader, parsed.lastPhaseSummary);
-    }
-    state = lines.join("\n");
-  } catch {
-    // Malformed JSON — fall through to legacy read
-    state = safeReadFile(stateMdPath);
-  }
-} else {
-  state = safeReadFile(stateMdPath);
-}
-
 const waves: ParsedWave[] = parseWaves(phaseContent);
 const tasks: Record<string, ParsedTask> = parseTasks(phaseContent);
 
@@ -230,10 +200,9 @@ for (const sat of satellites) {
   }
 }
 
-// --- Run map-project.ts for project structure (cached) ---
+// --- Run map-project.ts for project structure (cached to disk for any tool that wants it) ---
 const scriptDir = import.meta.dirname;
 const projectMapPath = resolve(projectRoot, ".devorch/cache/project-map.md");
-let projectMap = "";
 
 function isProjectMapFresh(): boolean {
   try {
@@ -249,56 +218,126 @@ function isProjectMapFresh(): boolean {
 // --- Parallel subprocess execution: map-project + tldr-analyze ---
 const phaseTsFiles = extractTsFiles(phaseContent);
 
-async function runMapProject(): Promise<string> {
-  if (isProjectMapFresh()) {
-    return safeReadFile(projectMapPath);
-  }
+async function runMapProject(): Promise<void> {
+  if (isProjectMapFresh()) return;
   const mapProc = Bun.spawn(
     ["bun", resolve(scriptDir, "map-project.ts"), projectRoot],
     { cwd: projectRoot, stderr: "pipe" }
   );
   const exitCode = await mapProc.exited;
-  if (exitCode === 0) {
-    const output = await new Response(mapProc.stdout).text();
-    const trimmed = output.trim();
-    try {
-      mkdirSync(dirname(projectMapPath), { recursive: true });
-      writeFileSync(projectMapPath, trimmed, "utf-8");
-    } catch {
-      // ignore — caching is best-effort
-    }
-    return trimmed;
+  if (exitCode !== 0) return;
+  const output = await new Response(mapProc.stdout).text();
+  try {
+    mkdirSync(dirname(projectMapPath), { recursive: true });
+    writeFileSync(projectMapPath, output.trim(), "utf-8");
+  } catch {
+    // ignore — caching is best-effort
   }
-  return "";
+}
+
+/**
+ * Group `phaseTsFiles` by inferred owning task's `repo`. For each file, find
+ * the first task whose file refs include it and use that task's repo. Files
+ * not referenced by any task or referenced only by `"primary"` tasks belong
+ * to the primary group. Returns a Record<repoName, files[]> where `"primary"`
+ * is the well-known key for the main repo.
+ */
+function groupFilesByRepo(files: string[]): Record<string, string[]> {
+  // Build file→repo index once: O(T) extractFileRefs calls instead of O(F·T).
+  const fileToRepo = new Map<string, string>();
+  for (const task of Object.values(tasks)) {
+    const refs = extractFileRefs(task.content);
+    for (const ref of refs) {
+      if (!fileToRepo.has(ref)) fileToRepo.set(ref, task.repo || "primary");
+    }
+  }
+  const groups: Record<string, string[]> = {};
+  for (const file of files) {
+    const owningRepo = fileToRepo.get(file) ?? "primary";
+    if (!groups[owningRepo]) groups[owningRepo] = [];
+    groups[owningRepo].push(file);
+  }
+  return groups;
+}
+
+/**
+ * Run `tldr-analyze.ts` for one repo group. Returns a Record<absolutePath,
+ * markdownSection> with keys re-resolved against `repoRoot` (handles either
+ * absolute or relative keys returned by tldr-analyze).
+ */
+async function runTldrForRepo(repoFiles: string[], repoRoot: string, repoLabel: string): Promise<Record<string, string>> {
+  if (repoFiles.length === 0) return {};
+  const tldrProc = Bun.spawn(
+    ["bun", resolve(scriptDir, "tldr-analyze.ts"), "--files", repoFiles.join(","), "--root", repoRoot],
+    { cwd: repoRoot, stderr: "pipe" }
+  );
+  const exitCode = await tldrProc.exited;
+  if (exitCode !== 0) {
+    console.error(`[init-phase] TLDR analysis for repo '${repoLabel}' failed (exit ${exitCode}) — skipping code structure for that repo`);
+    return {};
+  }
+  const output = await new Response(tldrProc.stdout).text();
+  try {
+    const tldrResult: TldrResult = JSON.parse(output.trim());
+    const formatted = formatTldrAnalysis(tldrResult);
+    // Re-resolve every key against repoRoot. resolve() is idempotent when the
+    // path is already absolute, so this both normalises relative keys and
+    // leaves absolute keys untouched.
+    const remapped: Record<string, string> = {};
+    for (const [k, v] of Object.entries(formatted)) {
+      remapped[resolve(repoRoot, k)] = v;
+    }
+    return remapped;
+  } catch {
+    console.error(`[init-phase] TLDR analysis for repo '${repoLabel}' returned malformed JSON — skipping code structure for that repo`);
+    return {};
+  }
 }
 
 async function runTldrAnalyze(): Promise<Record<string, string>> {
   if (phaseTsFiles.length === 0) return {};
-  const tldrProc = Bun.spawn(
-    ["bun", resolve(scriptDir, "tldr-analyze.ts"), "--files", phaseTsFiles.join(","), "--root", projectRoot],
-    { cwd: projectRoot, stderr: "pipe" }
-  );
-  const exitCode = await tldrProc.exited;
-  if (exitCode === 0) {
-    const output = await new Response(tldrProc.stdout).text();
-    try {
-      const tldrResult: TldrResult = JSON.parse(output.trim());
-      return formatTldrAnalysis(tldrResult);
-    } catch {
-      console.error(`[init-phase] TLDR analysis returned malformed JSON — skipping code structure context`);
-      return {};
+  const fileGroups = groupFilesByRepo(phaseTsFiles);
+
+  // Map each non-empty group to a (repoLabel, repoRoot, files) tuple.
+  const jobs: Array<{ label: string; root: string; files: string[] }> = [];
+  for (const [repo, files] of Object.entries(fileGroups)) {
+    if (files.length === 0) continue;
+    if (repo === "primary") {
+      jobs.push({ label: "primary", root: projectRoot, files });
+    } else {
+      const sat = satellites.find((s) => s.name === repo);
+      if (!sat) {
+        // Unknown repo — fold into primary so files are still analyzed
+        // somewhere instead of being silently dropped.
+        console.error(`[init-phase] task references unknown repo '${repo}' for tldr — analyzing under primary root`);
+        jobs.push({ label: "primary", root: projectRoot, files });
+      } else {
+        jobs.push({ label: repo, root: sat.worktreePath, files });
+      }
     }
   }
-  console.error(`[init-phase] TLDR analysis failed (exit ${exitCode}) — skipping code structure context`);
-  return {};
+
+  if (jobs.length === 0) return {};
+
+  const settled = await Promise.allSettled(jobs.map((j) => runTldrForRepo(j.files, j.root, j.label)));
+
+  const merged: Record<string, string> = {};
+  for (let i = 0; i < settled.length; i++) {
+    const res = settled[i];
+    const job = jobs[i];
+    if (res.status === "fulfilled") {
+      Object.assign(merged, res.value);
+    } else {
+      console.error(`[init-phase] TLDR analysis for repo '${job.label}' rejected: ${res.reason instanceof Error ? res.reason.message : String(res.reason)}`);
+    }
+  }
+  return merged;
 }
 
 const [mapResult, tldrResult] = await Promise.allSettled([runMapProject(), runTldrAnalyze()]);
 
-if (mapResult.status === "fulfilled") {
-  projectMap = mapResult.value;
-} else {
-  console.error(`[init-phase] map-project error: ${mapResult.reason instanceof Error ? mapResult.reason.message : String(mapResult.reason)} — skipping project map`);
+if (mapResult.status === "rejected") {
+  console.error(`[init-phase] map-project error: ${mapResult.reason instanceof Error ? mapResult.reason.message : String(mapResult.reason)} — skipping project map cache refresh`);
 }
 
 let tldrByFile: Record<string, string> = {};
@@ -368,10 +407,7 @@ function formatTldrAnalysis(tldrResult: TldrResult): Record<string, string> {
   return formatted;
 }
 
-// tldrByFile and projectMap are populated above via parallel subprocess execution
-
-// --- Extract explore queries from phase content ---
-const exploreQueries = extractExploreQueries(phaseContent);
+// tldrByFile is populated above via parallel subprocess execution
 
 // --- Extract phase-level specs ---
 const phaseSpecContent = extractPhaseSpec(phaseContent) || "";
@@ -471,118 +507,122 @@ for (const taskId of Object.keys(tasks)) {
   }
 }
 
-// --- Build output content ---
-const parts: string[] = [];
-
-parts.push(`# Phase ${phaseNum}: ${targetPhase.name}`);
-parts.push("");
-
-if (objective) {
-  parts.push("## Objective");
-  parts.push("");
-  parts.push(objective);
-  parts.push("");
+// --- Per-task disk detail files ---
+// Always write one markdown file per task at
+// `<projectRoot>/.devorch/cache/phase-init-<N>/<task-id>.md`. The orchestrator
+// reads these via Read tool when assembling builder prompts (commands/devorch.md
+// Step 9c). Files are written regardless of mode (default or `--legacy-json`).
+const detailRel = `.devorch/cache/phase-init-${phaseNum}/`;
+const detailDirAbs = resolve(projectRoot, detailRel);
+try {
+  mkdirSync(detailDirAbs, { recursive: true });
+} catch (err) {
+  console.error(`[init-phase] failed to create detail dir ${detailDirAbs}: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
 }
 
-if (decisions) {
-  parts.push("## Decisions");
-  parts.push("");
-  parts.push(decisions);
-  parts.push("");
+for (const taskId of Object.keys(tasks)) {
+  const sections: string[] = [];
+
+  const specSection = specsByTask[taskId] ?? "";
+  if (specSection) {
+    sections.push("## Spec Contracts");
+    sections.push("");
+    sections.push(specSection);
+    sections.push("");
+  }
+
+  const codeSection = codeStructureByTask[taskId] ?? "";
+  if (codeSection) {
+    sections.push("## Code Structure");
+    sections.push("");
+    sections.push(codeSection);
+    sections.push("");
+  }
+
+  const gotchaSection = gotchasByTask[taskId] ?? "";
+  if (gotchaSection) {
+    sections.push("## Gotchas");
+    sections.push("");
+    sections.push(gotchaSection);
+    sections.push("");
+  }
+
+  const exemplarsList = exemplarsByTask[taskId] ?? [];
+  if (exemplarsList.length > 0) {
+    sections.push("## Exemplars");
+    sections.push("");
+    sections.push(exemplarsList.join("\n"));
+    sections.push("");
+  }
+
+  const nonGoalsSection = nonGoalsByTask[taskId] ?? "";
+  if (nonGoalsSection) {
+    sections.push("## Non-goals");
+    sections.push("");
+    sections.push(nonGoalsSection);
+    sections.push("");
+  }
+
+  const detailFile = resolve(detailDirAbs, `${taskId}.md`);
+  // Write even when sections is empty: keep the file present so the orchestrator
+  // does not hit a missing-file error mid-dispatch. Empty body is a valid
+  // signal that this task has no curated context to inject.
+  try {
+    writeFileSync(detailFile, sections.join("\n"), "utf-8");
+  } catch (err) {
+    console.error(`[init-phase] failed to write detail file ${detailFile}: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 }
-
-if (solutionApproach) {
-  parts.push("## Solution Approach");
-  parts.push("");
-  parts.push(solutionApproach);
-  parts.push("");
-}
-
-parts.push("## Phase Content");
-parts.push("");
-parts.push(phaseContent);
-parts.push("");
-
-if (handoff) {
-  parts.push("## Previous Handoff");
-  parts.push("");
-  parts.push(handoff);
-  parts.push("");
-}
-
-if (phaseSpecContent) {
-  parts.push("## Spec Contracts");
-  parts.push("");
-  parts.push(phaseSpecContent);
-  parts.push("");
-}
-
-if (state) {
-  parts.push("## Current State");
-  parts.push("");
-  parts.push(state);
-  parts.push("");
-}
-
-if (projectMap) {
-  parts.push("## Project Structure");
-  parts.push("> Fresh snapshot — generated at phase init. Trust this as the current project layout.");
-  parts.push("");
-  parts.push(projectMap);
-  parts.push("");
-}
-
-const fullContent = parts.join("\n");
 
 // --- Output ---
-const result: {
+interface InitPhaseOutput {
+  ok: true;
   phaseNumber: number;
   phaseName: string;
   totalPhases: number;
   planTitle: string;
   satellites: SatelliteInfo[];
   waves: ParsedWave[];
-  tasks: Record<string, ParsedTask>;
-  /** Legacy concatenated gotchas content (deduped union of all per-task entries). Kept for orchestrators built against the pre-`gotchasByTask` schema; new consumers should prefer `gotchasByTask`. */
-  gotchas?: string;
-  /** Per-task filtered + sanitized gotchas. Keys are task IDs. Value is a newline-joined list of entries: those whose file:line path overlaps the task's file refs (or are global, i.e. without explicit file:line). For tasks targeting a satellite repo, that repo's GOTCHAS.md is also merged. Empty string when nothing matches. */
-  gotchasByTask: Record<string, string>;
-  /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
-  specsByTask: Record<string, string>;
-  /** Per-task TLDR code structure analysis. Markdown-formatted summaries of exports, imports, functions, types. */
-  codeStructureByTask: Record<string, string>;
-  /** Per-task exemplar file paths parsed from `**Exemplars**:` line. Empty array when absent. Every task id has an entry. */
-  exemplarsByTask: Record<string, string[]>;
-  /** Per-task non-goals text parsed from `**Non-goals**:` line. Empty string when absent. Every task id has an entry. */
-  nonGoalsByTask: Record<string, string>;
-  /** Directed explore queries extracted from phase content. Each has a query text and associated taskId. */
-  exploreQueries: Array<{ query: string; taskId: string }>;
-  /** Per-task slice-size gate warnings. `under` = <3K tokens (likely under-contextualized); `over` = >30K tokens (curation failed). Empty array when all tasks are within bounds. See Principle 2. */
+  /** Flat list of every task ID in the phase, in plan-declaration order. */
+  taskIds: string[];
+  /** Per-task slice-size gate warnings. `under` = <TOKEN_GATE_UNDER tokens (likely under-contextualized); `over` = >TOKEN_GATE_OVER tokens (curation failed). Empty array when all tasks are within bounds. See Principle 2. */
   sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }>;
-  content?: string;
-  contentFile?: string;
-} = {
+  /** Project-root-relative directory where per-task markdown detail files live. Trailing slash included. */
+  detailPath: string;
+  // Legacy fields — only emitted when `--legacy-json` is set.
+  gotchasByTask?: Record<string, string>;
+  specsByTask?: Record<string, string>;
+  codeStructureByTask?: Record<string, string>;
+  exemplarsByTask?: Record<string, string[]>;
+  nonGoalsByTask?: Record<string, string>;
+  /** Legacy concatenated gotchas content (deduped union of all per-task entries). Only emitted under `--legacy-json`. */
+  gotchas?: string;
+}
+
+const result: InitPhaseOutput = {
+  ok: true,
   phaseNumber: phaseNum,
   phaseName: targetPhase.name,
   totalPhases: phases.length,
   planTitle,
   satellites,
   waves,
-  tasks,
-  gotchasByTask,
-  specsByTask,
-  codeStructureByTask,
-  exemplarsByTask,
-  nonGoalsByTask,
-  exploreQueries,
+  taskIds: Object.keys(tasks),
   sliceWarnings,
+  detailPath: detailRel,
 };
 
-// Legacy `gotchas` field: dedup'd concatenation of every per-task entry.
-// Spec contract `gotchas-by-task-schema` requires emitting both the new
-// per-task map and a concatenated string for orchestrators on the older
-// schema. Order follows first-appearance across tasks.
-{
+if (legacyJson) {
+  result.gotchasByTask = gotchasByTask;
+  result.specsByTask = specsByTask;
+  result.codeStructureByTask = codeStructureByTask;
+  result.exemplarsByTask = exemplarsByTask;
+  result.nonGoalsByTask = nonGoalsByTask;
+
+  // Legacy `gotchas` field: dedup'd concatenation of every per-task entry.
+  // Order follows first-appearance across tasks.
   const seen = new Set<string>();
   const ordered: string[] = [];
   for (const taskGotchas of Object.values(gotchasByTask)) {
@@ -597,15 +637,6 @@ const result: {
   if (ordered.length > 0) {
     result.gotchas = ordered.join("\n");
   }
-}
-
-if (fullContent.length > CONTENT_THRESHOLD) {
-  const contextPath = resolve(projectRoot, CONTEXT_FILE);
-  mkdirSync(dirname(contextPath), { recursive: true });
-  writeFileSync(contextPath, fullContent, "utf-8");
-  result.contentFile = CONTEXT_FILE;
-} else {
-  result.content = fullContent;
 }
 
 console.log(JSON.stringify(result, null, 2));

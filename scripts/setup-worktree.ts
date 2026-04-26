@@ -12,13 +12,14 @@ import { join, resolve, relative, sep } from "path";
 import { parseArgs } from "./lib/args";
 import { isGitRepo, checkBranchExists, getUncommittedFiles, getUntrackedFiles } from "./lib/git-utils";
 
-const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string; "sparse-paths": string; "no-env": boolean }>([
+const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string; "sparse-paths": string; "no-env": boolean; "allow-devorch-dirt": boolean }>([
   { name: "name", type: "string", required: true },
   { name: "secondary", type: "string", required: false },
   { name: "recreate", type: "boolean", required: false },
   { name: "add-secondary", type: "string", required: false },
   { name: "sparse-paths", type: "string", required: false },
   { name: "no-env", type: "boolean", required: false },
+  { name: "allow-devorch-dirt", type: "boolean", required: false },
 ]);
 
 // Mutual exclusion: --secondary and --add-secondary
@@ -288,15 +289,41 @@ async function createSatellites(jsonStr: string, recreate: boolean): Promise<Sat
   // Runs BEFORE any worktree mutation so no satellite is created when one is dirty.
   for (const repo of secondaryRepos) {
     const repoPath = resolve(cwd, repo.path);
-    const untracked = getUntrackedFiles(repoPath, [".worktrees/", "node_modules/", "dist/"]);
+    let untracked = getUntrackedFiles(repoPath, [
+      ".worktrees/",
+      "node_modules/",
+      "dist/",
+      ".devorch/cache/",
+      ".claude/worktrees/",
+      "scripts/out/",
+    ]);
+    if (args["allow-devorch-dirt"]) {
+      const filtered: string[] = [];
+      const kept: string[] = [];
+      for (const f of untracked) {
+        if (f.startsWith(".devorch/")) {
+          filtered.push(f);
+        } else {
+          kept.push(f);
+        }
+      }
+      for (const f of filtered) {
+        console.error(`[${repo.name}] ignored .devorch/* via --allow-devorch-dirt: ${f}`);
+      }
+      untracked = kept;
+    }
     if (untracked.length > 0) {
-      console.log(JSON.stringify({
+      const errorPayload: Record<string, unknown> = {
         ok: false,
         error: "satellite-untracked",
         satellite: repo.name,
         repoPath,
         untrackedFiles: untracked,
-      }));
+      };
+      if (!args["allow-devorch-dirt"] && untracked.some((f) => f.startsWith(".devorch/"))) {
+        errorPayload.hint = "Pass --allow-devorch-dirt to ignore .devorch/* files (devorch's own outputs).";
+      }
+      console.log(JSON.stringify(errorPayload));
       process.exit(1);
     }
   }
