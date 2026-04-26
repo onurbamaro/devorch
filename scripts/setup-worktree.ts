@@ -7,7 +7,7 @@
  * With --recreate, safely removes existing worktree + branch before recreating.
  * With --add-secondary, adds satellite worktrees to an existing primary worktree.
  */
-import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync, statSync } from "fs";
 import { join, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { isGitRepo, checkBranchExists, getUncommittedFiles, getUntrackedFiles } from "./lib/git-utils";
@@ -203,6 +203,39 @@ function createSingleWorktree(opts: CreateSingleWorktreeOpts): { warnings: strin
   if (wtProc.exitCode !== 0) {
     const stderr = wtProc.stderr.toString("utf-8").trim();
     console.error(`Failed to create worktree: ${stderr}`);
+    process.exit(1);
+  }
+
+  // Post-create assertions: verify the worktree was actually created on disk
+  // and is recognized by git as a working tree. Catches silent failures where
+  // `git worktree add` exits 0 but produces an unusable result.
+  let pathIsDir = false;
+  try {
+    pathIsDir = existsSync(wtPath) && statSync(wtPath).isDirectory();
+  } catch {
+    pathIsDir = false;
+  }
+  if (!pathIsDir) {
+    console.log(JSON.stringify({
+      ok: false,
+      error: "post-create-assertion-failed",
+      detail: `worktreePath ${wtPath} does not exist or is not a directory`,
+    }));
+    process.exit(1);
+  }
+
+  const revParseProc = Bun.spawnSync(
+    ["git", "-C", wtPath, "rev-parse", "--is-inside-work-tree"],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  const revParseOut = revParseProc.stdout.toString("utf-8").trim();
+  if (revParseProc.exitCode !== 0 || revParseOut !== "true") {
+    const stderr = revParseProc.stderr.toString("utf-8").trim();
+    console.log(JSON.stringify({
+      ok: false,
+      error: "post-create-assertion-failed",
+      detail: `rev-parse --is-inside-work-tree returned ${JSON.stringify(revParseOut)} (exit ${revParseProc.exitCode})${stderr ? `: ${stderr}` : ""}`,
+    }));
     process.exit(1);
   }
 
