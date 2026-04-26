@@ -15,10 +15,10 @@ so the guardian stops re-reporting them on every run.
 
 ## `flags-<plan>.md` format
 
-One file per plan, written during the `full`-mode adversarial review and
-appended to during `scoped`/`quick` runs when the guardian detects an
-adjacent item. Lives at `.devorch/flags-<plan>.md` where `<plan>` matches
-the plan's kebab-case name.
+One file per plan, written during the adversarial review (Step 10 of
+`/devorch`) and appended to on `--resume` runs when the guardian
+detects an adjacent item. Lives at `.devorch/flags-<plan>.md` where
+`<plan>` matches the plan's kebab-case name.
 
 ```markdown
 # Flags: <plan-name>
@@ -51,10 +51,10 @@ Field semantics:
 
 ## Lifecycle
 
-1. **Creation** — `full` mode always emits a `flags-<plan>.md` during the
-   final adversarial review, even if empty (file contains only the
-   header). `scoped` and `quick` modes create the file lazily, the first
-   time the guardian detects an adjacent item.
+1. **Creation** — `/devorch` always emits a `flags-<plan>.md` during
+   the adversarial review (Step 10), even if empty (file contains only
+   the header). Append happens on `--resume` runs that surface new
+   adjacent items against the same plan.
 2. **Append-only during execution** — if a later phase or a later `/devorch`
    invocation against the same plan detects new items, entries are
    appended. Existing entries with user-checked actions are not rewritten.

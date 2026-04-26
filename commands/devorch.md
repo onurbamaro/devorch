@@ -1,20 +1,19 @@
 ---
-description: "Unified entry — triage, guardian, build (quick/scoped/full)"
-argument-hint: "[--quick|--full|--resume|--worktree] <what to do>"
+description: "Plan-driven build with adaptive explore waves + adversarial review"
+argument-hint: "[--resume] <what to do>"
 model: opus
 effort: xhigh
 disallowed-tools: EnterPlanMode
 ---
 
-Unified entry point for devorch v3. Replaces talk+build+fix conceptually: classifies the request, applies a senior-guardian pass, then executes at the ceremony level the scope actually deserves.
+Single-mode entry point for devorch. Use it whenever you need orchestration of medium-to-large work — for trivial edits (single-file typo, rename in a known location), use vanilla Claude Code; devorch's ceremony does not pay off there.
 
-**Input**: `$ARGUMENTS` — description plus optional flags:
-- `--quick` — force quick mode (override triage)
-- `--full` — force full mode (override triage, always creates worktree)
-- `--worktree` — force worktree for scoped mode (opt-in)
+Pipeline is linear: load context → worktree → guardian pass → wave 1 explore (always) → wave 2 explore (conditional) → enumerate edge cases → plan → validate → phase loop with builders → adversarial review → apply fixes → verdict → merge → gotcha capture → flow friction capture.
+
+**Input**: `$ARGUMENTS` — description plus optional flag:
 - `--resume` — resume an active worktree (no description needed)
 
-After stripping known flags (`--quick`, `--full`, `--resume`, `--worktree`), if the remaining `$ARGUMENTS` is empty and `--resume` is not set, stop and ask the user.
+After stripping `--resume`, if the remaining `$ARGUMENTS` is empty and `--resume` is not set, stop and ask the user.
 
 ## Step 0 — Resume short-circuit
 
@@ -22,34 +21,31 @@ If `--resume` is present:
 1. Run `bun $CLAUDE_HOME/devorch-scripts/list-worktrees.ts` and parse JSON.
 2. If `count == 0` → report "Nenhum worktree ativo para retomar." and stop.
 3. If `count == 1` → resume that worktree directly. If `count > 1` → `AskUserQuestion` presenting each worktree (name + plan title) and pick one.
-4. Once a worktree is chosen, establish the full resume context before jumping to F3:
+4. Once a worktree is chosen, establish full resume context before jumping to Step 9 (phase loop):
    - `mainRoot = <cwd>` (the main repo root where `.worktrees/` lives)
    - `projectRoot = .worktrees/<name>`
    - `<name> = basename(projectRoot)`
    - `planPath` = the first `.md` under `<projectRoot>/.devorch/plans/` (excluding `archive/`)
    - `originalBranch` = run `git -C <mainRoot> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || echo main` and strip `origin/` prefix; fall back to `main` or `master` as available.
-5. Jump to full-mode Step F3 (phase loop) with these bindings. Note: on resume, the in-memory explore findings from the original F2 are gone — builders will still receive gotchas + specs + code structure, and you may launch a fresh Explore agent from F3 if a task needs broader context.
+5. Jump to Step 9 (phase loop) with these bindings. Note: on resume, the in-memory explore findings from the original waves are gone — builders will still receive gotchas + specs + code structure, and you may launch a fresh Explore agent from Step 9 if a task needs broader context.
 
-## Step 1 — Load minimal context
+## Step 1 — Load context
 
 Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
 
+## Step 2 — Worktree
 
-## Step 2 — Triage (Opus inline, short thinking)
+1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`.
+2. Record `mainRoot = <cwd>` and `originalBranch = git branch --show-current`.
+3. If the original branch has uncommitted changes (`git -C <mainRoot> status --porcelain` returns non-empty), surface them in a one-line note: `WIP no branch original: <N> arquivo(s) — preservados em <mainRoot>, não entram no worktree.` The user's WIP stays untouched on the original branch; the worktree starts from HEAD.
+4. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>` and parse JSON. Store `worktreePath`, set `projectRoot = worktreePath`.
+5. If `<mainRoot>/.devorch/GOTCHAS.md` exists, copy it to `<projectRoot>/.devorch/GOTCHAS.md`. If it doesn't but `<mainRoot>/.devorch/CONVENTIONS.md` exists (legacy), copy it to `<projectRoot>/.devorch/CONVENTIONS.md` — `init-phase.ts` reads both. GOTCHAS.md grows organically from session signal (see § Gotcha capture).
 
-Use short internal thinking (~500–1000 tokens) to classify `$ARGUMENTS` into exactly one mode:
+All subsequent edits, commits, and `git`/`bun` invocations during the build run with `cwd = <projectRoot>` (or `git -C <projectRoot>`).
 
-- **quick** — 1–3 known files, explicit action, no design ambiguity. Signals: typo, rename, localized bugfix, config tweak, edit in a clearly identified file.
-- **scoped** — 1 module (or a tight set of files within one), feature/fix with legitimate options, narrow exploration suffices (1–3 medium explores, not deep). Signals: bug with multiple possible causes, new endpoint in existing module, small feature, refactor in 1 file.
-- **full** — multi-module, new feature, broad refactor, worktree justifiable. Signals: new abstraction, multi-repo, term without precedent in the repo, cross-cutting change (auth, DB schema, API shape).
+## Step 3 — Guardian pass (inline)
 
-Output exactly one line: `Classification: <mode> — <1 line justification>`.
-
-**Flag override**: If `--quick` or `--full` is present, honor it regardless of classification and log: "Override: forced `<mode>` by flag."
-
-## Step 3 — Guardian pass (inline, all modes)
-
-Before proposing execution, apply this role internally:
+Apply this role internally before any explore:
 
 > You are a senior engineer pair reviewing work from a well-intentioned self-taught dev who is performance-first and values architectural elegance.
 >
@@ -70,73 +66,56 @@ Before proposing execution, apply this role internally:
 >
 > Domain checklist (mnemonic): auth · rate-limiting · input validation · error boundaries · caching · indexing · N+1 · pagination · realtime strategy · upload path · async/queue · observability · idempotency · secrets handling · cross-tenant isolation · multi-repo scope.
 >
-> **Multi-repo detection**: if `$ARGUMENTS` mentions multiple repo names (e.g. "sync between dochron and dochron-mobile"), or the Step 1 `map-project.ts` output included a `## Sibling Repos` section, or the task implies cross-repo coordination (shared types, API contract changes across client+server), flag this as a real bifurcation with the sibling repos as selectable options. Selected satellites flow into `<secondary-repos>` in the drafted plan and are created as satellite worktrees in F1 Step 8.
+> **Multi-repo detection**: if `$ARGUMENTS` mentions multiple repo names (e.g. "sync between dochron and dochron-mobile"), or the Step 1 `map-project.ts` output included a `## Sibling Repos` section, or the task implies cross-repo coordination (shared types, API contract changes across client+server), flag this as a real bifurcation with the sibling repos as selectable options. Selected satellites flow into `<secondary-repos>` in the drafted plan and become satellite worktrees in Step 8.
 >
 > If `<profile>` is set: `priorities` ordering breaks bifurcation ties; `biases` are additional hints. On performance-vs-simplicity trade-offs, show cost and let the user choose — do not assume simplicity.
 >
 > Also consult `.devorch/standards-silenced.md` if present — skip heads-ups matching silenced patterns.
 
-Silence is valid. If no critical heads-up and no real bifurcation exist, proceed without comment.
+The guardian pass runs inline. Silence is valid: if no critical heads-up and no real bifurcation surface here, proceed without comment. The guardian pass re-runs after Step 5 with fuller context; at this stage it operates only on `$ARGUMENTS` + map-project + GOTCHAS.
 
-## Step 4 — Route to mode
+## Step 4 — Wave 1 explore (always)
 
-Branch on the classification (or the flag override):
-- `quick` → Step Q1
-- `scoped` → Step S1
-- `full` → Step F1
+Launch **1–2 Explore agents** in parallel (`subagent_type="Explore"`, thoroughness **medium**) with a fixed broad focus:
 
----
+- **Agent 1 — architecture + existing patterns**: how the touched area is organized today, what conventions and abstractions already exist that the build must respect or mirror.
+- **Agent 2 (optional, only if the request spans 2+ modules) — risks/edges**: failure modes, edge cases, integration surfaces adjacent to the touched area.
 
-## QUICK mode (Steps Q1–Q5)
+Wave 1 is deliberately broad and cheap. Do not invent custom focuses here — that is wave 2's job. Wave 1 is the baseline that lets the orchestrator judge whether wave 2 is needed.
 
-Trivial edits, 1–3 files, obvious scope. No worktree.
+Wait for all wave 1 agents to return before deciding Step 5.
 
-### Q1. Heads-up gate
+## Step 5 — Wave 2 explore (conditional)
 
-If the guardian found a critical heads-up, pause and show it using the unified gate format (see Step 5 below). Otherwise proceed silently.
+Read wave 1 findings. Decide if any of these gatilhos apply (silently — do not interrupt the user):
 
-### Q2. Execute edit
+1. Wave 1 cited a relevant file or contract but did not actually read it.
+2. A pattern is ambiguous between two paths in the codebase — picking one without depth would be a guess.
+3. A risk was identified but its blast radius (which other modules / endpoints / consumers touch it) is unmapped.
+4. Multi-repo: wave 1 only saw the primary; satellite still needs focused exploration.
+5. The `$ARGUMENTS` references a contract / spec / behavior that wave 1 did not locate.
 
-#### Q2a. Pre-edit WIP check
+If **zero gatilhos** apply → log one line: `Wave 2: skipped — wave 1 cobriu <X, Y, Z>.` Skip Step 5 entirely.
 
-Antes do primeiro Edit/Write em cada arquivo tracked, rode `git -C <projectRoot> status --porcelain <file>`. Se o status começar com `M`, `A`, `MM`, `AM` ou `UU` (mudanças tracked não commitadas de uma sessão anterior), pause e faça `AskUserQuestion` com 3 opções: (a) bundle — incluir a WIP no commit desta sessão; (b) stash — `git stash -u <file>` e reaplicar depois do commit; (c) split — commitar a WIP sozinha primeiro e depois prosseguir. Arquivos apenas untracked (`??`) não disparam o gate.
+If **at least one gatilho** applies → launch up to **2 Explore agents** (`subagent_type="Explore"`, thoroughness **very thorough**), each with a focus extracted from a specific gatilho. Log before dispatch: `Wave 2: <N> agent(s) focados em <gatilho> — motivo: <one-line>.`
 
-Apply the edit directly with Edit/Write tools. Minimal changes. Infer style from nearby code; consult GOTCHAS.md only when relevant to the touched area.
+**Hard cap**: 4 explore agents total per session (wave 1 + wave 2 combined). If you reach the cap and still feel under-informed, that is a signal the request itself is malformed — surface it to the user instead of launching more.
 
-### Q3. Post-edit lint
+After wave 2 returns, consolidate all findings (wave 1 + wave 2) in your own context. Do not persist to disk — Step 9c will curate per-task subsets into each builder prompt.
 
-The post-edit lint hook fires automatically via `PostToolUse`. If it surfaces errors, fix them inline.
+Re-run the guardian pass internally with the fuller exploration context to refine bifurcations and heads-ups for Step 6.
 
-### Q4. Commit
-
-Conventional commit, stage only touched files.
-
-### Q5. Report + gotcha capture
-
-One-line report: what changed, commit hash. Then apply the gotcha-capture rule (§ Gotcha capture below). Run the flow-friction capture (§ F9) — typically nothing to log for a clean quick edit. Stop.
-
----
-
-## SCOPED mode (Steps S1–S8)
-
-1 module, small feature or fix with options. No worktree unless `--worktree` flag.
-
-### S1. Quick explore
-
-Derive a kebab-case `<name>` from `$ARGUMENTS` (3–5 words). Launch **1–3 Explore agents** (`subagent_type="Explore"`, thoroughness **medium**) in parallel — adapt the count and focuses to what the request actually needs: a localized bugfix in a known area may warrant 1 focused explore; a bug with unclear cause across suspect modules, or a small feature touching multiple layers, may warrant 2–3 explores with distinct focuses (e.g. architecture, risks/edges, existing patterns). Err on the side of fewer — scoped mode is meant to be lighter than full (F2 uses 2–3 **very thorough**); if you find yourself wanting more, reconsider whether the request is actually `full`. Wait for all returns before Step S2.
-
-### S2. Enumerate edge cases (3 buckets)
+## Step 6 — Enumerate edge cases + unified gate
 
 Based on `$ARGUMENTS`, explore findings, GOTCHAS.md (if present), and the guardian pass, enumerate edge cases into 3 buckets:
+
 - **Resolved by code/gotcha/request** — count only
 - **Critical heads-up** (guardian) — show with redirect
 - **Real bifurcation** — show with A/B/... options and a recommendation
 
-### S3. Transparency block + unified gate
+**Skip-when-silent**: if `K + J == 0` (no real bifurcations, no critical heads-ups), skip this step entirely — neither the transparency block nor `AskUserQuestion`. Go straight to Step 7. Zero questions is a valid outcome (Principle 5).
 
-**Skip-when-silent**: if `K + J == 0` (nenhuma bifurcação real e nenhum heads-up crítico após S2), pule este passo por completo — nem bloco de transparência nem `AskUserQuestion`. Siga direto para S4. Princípio 5: zero questions is a valid outcome.
-
-Emit only the counts block (plain markdown — no box-drawing):
+Otherwise emit only the counts block (plain markdown — no box-drawing):
 
 ```
 Edge cases considerados: N
@@ -145,103 +124,63 @@ Bifurcações reais: K
 Heads up crítico: J
 ```
 
-Não liste bifurcações nem heads-ups como texto aqui — eles são apresentados como `AskUserQuestion` diretas no Step 5. Aplique o unified gate (§ Step 5 abaixo).
+Do not list bifurcations or heads-ups as text here — they are surfaced as `AskUserQuestion` directly via the unified gate (§ Unified gate UX below).
 
-### S4. Worktree (opt-in)
+## Step 7 — Plan
 
-If `--worktree` flag is present:
-1. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>` and parse JSON.
-2. Set `projectRoot = <worktreePath>`. If `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) exists in `mainRoot`, copy it to the worktree.
-3. All subsequent edits/commits run with `cwd` = `projectRoot`.
+Always write a plan. Even a build of 2 files gets a plan with 1 phase / 1 task — the plan is the source of truth for parallelization decisions, wave dependencies, builder context, and the completeness reviewer in Step 10.
 
-Otherwise `projectRoot = <cwd>`.
+Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `<projectRoot>/.devorch/plans/<name>.md`. Every task uses `Assigned To: devorch-builder`.
 
-### S5. Execute
+**Multi-repo detection**: if Step 1 `map-project.ts` included `## Sibling Repos`, or `$ARGUMENTS` names multiple repos, or the guardian flagged multi-repo intent and the user selected satellites in Step 6, include `<secondary-repos>` in the plan. Siblings are typically at `../<name>/` relative to `<mainRoot>`.
 
-#### S5a. Pre-edit WIP check
+The plan must reflect decisions captured in Step 6 — every user choice goes in `<decisions>` as a "Question → Answer" line.
 
-Antes do primeiro Edit/Write em cada arquivo tracked em `<projectRoot>`, rode `git -C <projectRoot> status --porcelain <file>`. Se o status começar com `M`, `A`, `MM`, `AM` ou `UU` (mudanças tracked não commitadas de uma sessão anterior), pause e faça `AskUserQuestion` com 3 opções: (a) bundle — incluir a WIP no commit desta sessão; (b) stash — `git stash -u <file>` e reaplicar depois do commit; (c) split — commitar a WIP sozinha primeiro e depois prosseguir. Arquivos apenas untracked (`??`) não disparam o gate.
+## Step 8 — Validate plan + commit + satellite worktrees
 
-Apply edits directly with Edit/Write tools in `<projectRoot>`. Follow decisions from the gate. Minimal changes. Post-edit lint hook fires automatically.
+1. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked (waves with overlap, missing fields, etc.).
+2. Commit the plan in the worktree: stage `.devorch/plans/<name>.md` plus `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) if either was copied in Step 2, then `git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`.
+3. Set `planPath = <projectRoot>/.devorch/plans/<name>.md`.
+4. **Satellite worktree setup** (only when plan includes `<secondary-repos>`): parse the list of sibling repos from the plan. Build a JSON array `[{name, path}, ...]` with resolved absolute paths. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --add-secondary '<json>'`. Parse the returned `satellites` array and store it as `<satellites>` for Steps 9 and 13. If any satellite fails to create (missing repo, uncommitted changes, branch collision), stop and surface the error — do not proceed to Step 9.
 
-### S6. Check
-
-Run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. On failure, fix once; if still failing, report and stop.
-
-### S7. Commit
-
-Conventional commit in `<projectRoot>`, stage only touched files.
-
-### S8. Report + gotcha capture
-
-Concise summary: edge cases count, bifurcations resolved, files changed, check result. Apply the gotcha-capture rule (§ Gotcha capture below). Run the flow-friction capture (§ F9). Stop.
-
----
-
-## FULL mode (Steps F1–F8)
-
-Multi-module, new feature, or broad refactor. Worktree is mandatory.
-
-### F1. Worktree + plan scaffold
-
-1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`.
-2. Record `mainRoot = <cwd>` and `originalBranch = git branch --show-current`.
-3. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>` and parse JSON. Store `worktreePath`, set `projectRoot = worktreePath`.
-4. If `<mainRoot>/.devorch/GOTCHAS.md` exists, copy it to `<projectRoot>/.devorch/GOTCHAS.md`. If it doesn't but `<mainRoot>/.devorch/CONVENTIONS.md` exists (legacy), copy it to `<projectRoot>/.devorch/CONVENTIONS.md` — `init-phase.ts` reads both. GOTCHAS.md grows organically from session signal (see § Gotcha capture); never bulk-generated by script.
-
-### F2. Deep explore + guardian + gate
-
-1. Launch 2–3 Explore agents (`subagent_type="Explore"`, thoroughness **very thorough**) in parallel with distinct focuses (architecture, risks/edges, existing patterns). Consolidate findings in your own context — do not persist to disk. In F3c you will curate per-task subsets into each builder prompt.
-2. Re-run the guardian pass with full exploration context. Enumerate edge cases into the same 3 buckets as scoped mode.
-3. Emit the transparency block (see Step S3) and apply the unified gate (§ Step 5). Skip-when-silent applies here too.
-4. Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `<projectRoot>/.devorch/plans/<name>.md`. Every task uses `Assigned To: devorch-builder`.
-
-   **Multi-repo detection**: If Step 1 `map-project.ts` included `## Sibling Repos`, `$ARGUMENTS` names multiple repos, or the guardian flagged multi-repo intent, include `<secondary-repos>` in the plan. Siblings are typically at `../<name>/` relative to `<mainRoot>`.
-
-5. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked.
-6. Commit the plan in the worktree: stage `.devorch/plans/<name>.md` plus `.devorch/GOTCHAS.md` (or legacy `.devorch/CONVENTIONS.md`) if either was copied in F1.4, then `git -C <projectRoot> commit -m "chore(devorch): plan — <name>"`.
-7. Set `planPath = <projectRoot>/.devorch/plans/<name>.md`.
-
-8. **Satellite worktree setup** (only when plan includes `<secondary-repos>`): parse the list of sibling repos from the plan. Build a JSON array `[{name, path}, ...]` with resolved absolute paths. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name> --add-secondary '<json>'`. Parse the returned `satellites` array and store it as `<satellites>` for F3e and F7. If any satellite fails to create (missing repo, uncommitted changes, branch collision), stop and surface the error — do not proceed to F3.
-
-### F3. Phase loop
+## Step 9 — Phase loop
 
 For each phase N sequentially:
 
-#### F3a. Init phase
+### 9a. Init phase
 Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N`. Parse JSON. If `contentFile` is present, read it for full context.
 
-#### F3b. Filter size gate
-Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). The init-phase check sizes only what the script can see (gotchas + specs + code structure) — it runs **before** F3c curates and injects F2 Explore Findings into each builder prompt, so `under` warnings are expected whenever you have relevant findings queued for injection.
+### 9b. Filter size gate
+Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). The init-phase check sizes only what the script can see (gotchas + specs + code structure) — it runs **before** Step 9c curates and injects Explore Findings into each builder prompt, so `under` warnings are expected whenever you have relevant findings queued for injection.
 
 Handling per direction:
-- **`under`** — for each warning, decide if the Explore Findings you plan to inject for that task in F3c will materially raise the effective slice size. If yes, auto-resolve silently and log a single line: `Slice <task-id> marcado under (<N>K); vou engordar via Explore Findings na F3c.` If no injection is planned for that task (or the planned injection is trivial), pause and offer the user: continue / split the task / re-curate the slice (narrow gotchas, tighten specs) / inject additional findings.
+- **`under`** — for each warning, decide if the Explore Findings you plan to inject for that task in 9c will materially raise the effective slice size. If yes, auto-resolve silently and log a single line: `Slice <task-id> marcado under (<N>K); vou engordar via Explore Findings na 9c.` If no injection is planned for that task (or the planned injection is trivial), pause and offer the user: continue / split the task / re-curate the slice (narrow gotchas, tighten specs) / inject additional findings.
 - **`over`** — always pause. Show task id, approximate token count, and offer: continue / split the task / trim the slice (narrow gotchas, tighten specs, reduce injected findings).
 
 Do not dispatch builders until every remaining warning is either auto-resolved (with the log line) or explicitly accepted by the user.
 
-#### F3c. Dispatch builders (parallel waves)
+### 9c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool, each with `subagent_type="devorch-builder"`. Issue one Task tool call per task inside the same assistant message so they run in parallel.
 
-Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), and `## Explore Findings` — the subset of F2 explore results you judge relevant to this specific task (files mentioned, patterns touched). Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → Explore Findings.
+Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), and `## Explore Findings` — the subset of wave 1 + wave 2 results you judge relevant to this specific task (files mentioned, patterns touched). Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → Explore Findings.
 
 After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
 
 **Multi-repo tasks**: when `<satellites>` is non-empty and a task has `Repo: <name>` matching a satellite, prepend to the builder prompt: `Working directory: <satellite.worktreePath>` and `Use git -C <satellite.worktreePath> for all git commands`. Tasks without `Repo:` (or with `Repo: primary`) use `<projectRoot>` as their working directory.
 
-**On builder failure** (no matching commit or reported failure): retry per task (max 3 attempts). Each retry appends a `## Previous Failure Context` section to the builder prompt: retry count, last 50 lines of prior output, git diff from the failed attempt (or "no commits"), and an instruction to diagnose the root cause. On retry exhaustion: stop the phase, emit a structured failure report and suggest `/devorch --full` re-planning.
+**On builder failure** (no matching commit or reported failure): retry per task (max 3 attempts). Each retry appends a `## Previous Failure Context` section to the builder prompt: retry count, last 50 lines of prior output, git diff from the failed attempt (or "no commits"), and an instruction to diagnose the root cause. On retry exhaustion: stop the phase, emit a structured failure report and suggest a fresh `/devorch` invocation for re-planning.
 
 **On agent resolution failure** (Task tool returns `Agent type not found` and no commit was made): the agent is not registered in the current session — typically because it was installed after session start. Do not count as a failure or consume a retry slot. Surface the session-registration issue to the user and suggest restarting Claude Code after `bun install.ts`.
 
-#### F3d. Per-phase check
-If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop.
+### 9d. Per-phase check
+If `totalPhases > 1`: run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <projectRoot> --quick`. Fix all errors or report and stop. (`--quick` here is a flag of `check-project.ts` — lint + typecheck only — not a mode of devorch.)
 
-#### F3e. Phase summary + commit
-- `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>" [--satellites '<json>']` — include `--satellites` only when `<satellites>` is non-empty (build JSON as `[{name, path, status}, ...]` where `path` is the satellite's `repoPath` (from F2.8 output's `satellites[].repoPath`)).
+### 9e. Phase summary + commit
+- `bun $CLAUDE_HOME/devorch-scripts/phase-summary.ts --plan <planPath> --phase N --status "ready for phase $((N+1))" --summary "<concise>" [--satellites '<json>']` — include `--satellites` only when `<satellites>` is non-empty (build JSON as `[{name, path, status}, ...]` where `path` is the satellite's `repoPath` (from Step 8.4 output's `satellites[].repoPath`)).
 - `phase-summary.ts` only uses `name` + `status`; the `path` field is carried for symmetry with `merge-worktree` and ignored here.
 - Commit with the returned message if there are changes in the primary worktree. For each satellite, also commit phase progress if it has changes: `git -C <satellite.worktreePath> add -A && git -C <satellite.worktreePath> commit -m "<phase-summary-message>"`.
 
-### F4. Categorized adversarial review
+## Step 10 — Adversarial review
 
 After all phases complete, determine changed files via `git -C <projectRoot> diff --name-only <originalBranch>...HEAD`. Grep for `TODO|FIXME|HACK|XXX` across changed files (residual scan).
 
@@ -254,18 +193,18 @@ Launch 4 reviewers in parallel (`subagent_type="Explore"`, foreground, single me
 - **completeness** — spec vs delivery: every `<spec>` element satisfied? cross-phase integration intact? handoffs honored? Required method: for each `<behavior>`/`<invariant>` in the plan, grep the changed files for its identifying symbol (function name, flag name, new phrase) AND verify with a direct Read on the relevant line range. Do not infer from absence at a master-era line number.
 - **flags** — adjacent items out of scope. For each flag: type (security | performance | architecture | ops), severity, detection (file:line), suggested fix, one-line alternative. Write all flags to `<mainRoot>/.devorch/flags-<name>.md` using the FLAGS.md format.
 
-### F5. Apply review fixes
+## Step 11 — Apply review fixes
 
-Antes de classificar e dispatchar, compute a união de `<relevant-files>` de cada finding fix-level (via grep do conteúdo da finding ou inspeção direta dos arquivos citados). Se dois ou mais findings tocarem o mesmo arquivo, eles NÃO podem ser dispatchados no mesmo wave — sequencialize em waves separados, espelhando a disciplina que `validate-plan.ts` aplica em F3c. Findings sem overlap de arquivos seguem em paralelo.
+Antes de classificar e dispatchar, compute a união de `<relevant-files>` de cada finding fix-level (via grep do conteúdo da finding ou inspeção direta dos arquivos citados). Se dois ou mais findings tocarem o mesmo arquivo, eles NÃO podem ser dispatchados no mesmo wave — sequencialize em waves separados, espelhando a disciplina que `validate-plan.ts` aplica em Step 9c. Findings sem overlap de arquivos seguem em paralelo.
 
 Classify each finding:
 - **Trivial** (1–2 files, obvious fix) → apply inline with Edit.
-- **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder` agents in parallel.
-- **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested `/devorch --full` prompt.
+- **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder` agents in parallel (respecting non-overlap).
+- **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested fresh `/devorch` prompt.
 
 Skip review execution entirely if all reviewers and residual scan reported zero findings. After fixes, run `check-project.ts <projectRoot>` (full if fix-level launched, `--quick` if trivial only). One retry on failure.
 
-### F6. Verdict report
+## Step 12 — Verdict report
 
 ```
 ## Verificação Final: <name>
@@ -286,12 +225,12 @@ Flags: <count — ver .devorch/flags-<name>.md ou "nenhuma">
 Lint / Typecheck / Build / Tests: status
 
 ### Issues Pendentes
-<talk-level items com prompt /devorch --full sugerido ou "Nenhum">
+<talk-level items com prompt /devorch sugerido ou "Nenhum">
 
 ### Verdict: PASS / PASS com N pendências / FAIL
 ```
 
-### F7. Merge flow
+## Step 13 — Merge flow
 
 If verdict is PASS (or PASS with pendencies that are non-blocking), run the merge-worktree script from `<mainRoot>`:
 
@@ -299,7 +238,7 @@ If verdict is PASS (or PASS with pendencies that are non-blocking), run the merg
 bun $CLAUDE_HOME/devorch-scripts/merge-worktree.ts --worktree <name> [--satellites '<json>']
 ```
 
-Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON shape built in F3e) — namely `[{name, path, status?}, ...]` where `path` is `repoPath`; `merge-worktree.ts` resolves `.worktrees/<name>` internally from that path. The script rebases the primary worktree onto `origin/<mainBranch>`, runs `check-project --quick`, dry-runs merges across primary + all satellites BEFORE committing anything (atomicity guard), then merges sequentially with `--no-ff`, archives the plan, removes each worktree, and deletes each branch. Single call covers the full lifecycle.
+Pass `--satellites '<json>'` only when `<satellites>` is non-empty (same JSON shape built in Step 9e) — namely `[{name, path, status?}, ...]` where `path` is `repoPath`; `merge-worktree.ts` resolves `.worktrees/<name>` internally from that path. The script rebases the primary worktree onto `origin/<mainBranch>`, runs `check-project --quick`, dry-runs merges across primary + all satellites BEFORE committing anything (atomicity guard), then merges sequentially with `--no-ff`, archives the plan, removes each worktree, and deletes each branch. Single call covers the full lifecycle.
 
 Optional flags: `--squash`, `--keep-branch`, `--no-rebase`, `--dry-run`.
 
@@ -313,27 +252,27 @@ Parse JSON output and route by `ok`:
 
 Plan archival is done inside `merge-worktree.ts`. Self-build install (when the merged repo's `package.json` has `"name": "devorch"`) is also handled inside the script — it re-runs `install.ts` from `mainRoot` so `~/.claude/{agents,commands,devorch-scripts,hooks}` reflect the merged state. Nothing extra to run.
 
-On FAIL → do not merge, preserve worktrees, suggest `/devorch --resume` to retry or `/devorch --full "<fix description>"` for a new attempt.
+On FAIL → do not merge, preserve worktrees, suggest `/devorch --resume` to retry or a fresh `/devorch "<fix description>"` for a new attempt.
 
-### F8. Gotcha capture (full mode)
+## Step 14 — Gotcha capture
 
-Apply the gotcha-capture rule (§ Gotcha capture below). Full mode has the richest signal — builder retries, reviewer surprises, guardian flags on untyped contracts — so this step is especially valuable here.
+Apply the gotcha-capture rule (§ Gotcha capture below). Devorch's pipeline has the richest signal — builder retries, reviewer surprises, guardian flags on untyped contracts — so this step routinely produces real entries.
 
-### F9. Flow friction capture (todos os modos)
+## Step 15 — Flow friction capture
 
 Roda antes do report final. Captura atritos no próprio fluxo do devorch — não em código do usuário. Conta: script errou ou retornou JSON malformado, retry loop precisou >1 tentativa, gate precisou ser reinvocado, hook não disparou quando devia, você improvisou porque a instrução estava ambígua, bifurcação sem precedente nem resposta da indústria.
 
 **Inbox path** (primeiro que casar): `$DEVORCH_REPO/.devorch/flow-issues-inbox/` → `../devorch/.devorch/flow-issues-inbox/` → `<mainRoot>/.devorch/flow-issues-inbox/`.
 
-**Um arquivo por atrito**, nomeado `<YYYY-MM-DD>-<slug>.md`, contendo: título, timestamp, `Mode`, `Severity` (blocker/gap/nit), prompt pronto (`/devorch ... "<fix>"`), contexto mínimo (onde/o que aconteceu/esperado/workaround).
+**Um arquivo por atrito**, nomeado `<YYYY-MM-DD>-<slug>.md`, contendo: título, timestamp, `Severity` (blocker/gap/nit), prompt pronto (`/devorch "<fix>"`), contexto mínimo (onde/o que aconteceu/esperado/workaround).
 
 **Zero atritos**: não escreva nada e omita qualquer menção no report. **≥1 atrito**: adicione ao report `### Flow friction capture: N item(s) em <inbox-path>/`.
 
 ---
 
-## Step 5 — Unified gate UX (used by quick, scoped, and full)
+## Unified gate UX (used by Step 6)
 
-**Precondition**: este gate só roda quando há pelo menos uma bifurcação real ou um heads-up crítico (`K + J > 0`). Se ambos forem zero, Q1/S3/F2 já terão pulado este passo silenciosamente — não invoque `AskUserQuestion` apenas para confirmar defaults. Se só heads-ups existirem (`J > 0`, `K == 0`), rode apenas o heads-up pass; se só bifurcações existirem (`K > 0`, `J == 0`), rode apenas o bifurcations pass.
+**Precondition**: este gate só roda quando há pelo menos uma bifurcação real ou um heads-up crítico (`K + J > 0`). Se ambos forem zero, Step 6 já terá pulado este gate silenciosamente — não invoque `AskUserQuestion` apenas para confirmar defaults. Se só heads-ups existirem (`J > 0`, `K == 0`), rode apenas o heads-up pass; se só bifurcações existirem (`K > 0`, `J == 0`), rode apenas o bifurcations pass.
 
 ### Heads-up pass (quando `J > 0`)
 
@@ -377,17 +316,19 @@ Exemplo de pergunta bem formada:
 >   - label "Cookie httpOnly (recomendada)", description: "Gravar o token em cookie httpOnly + SameSite=Strict; backend lê via header automático. Evita exposição a XSS ao custo de exigir CSRF token em forms. Preferível por alinhar com a `priority: security` do profile."
 >   - label "localStorage", description: "JS lê/escreve o token em `localStorage`. Implementação mais simples e sobrevive a refresh, mas qualquer XSS rouba a sessão inteira. Escolha só se CSRF for caro e risco XSS for mitigado por outro meio."
 
-Zero questions é resultado válido — se `K == 0` e `J == 0`, Q1/S3/F2 já pularam esta fase inteira.
+Zero questions é resultado válido — se `K == 0` e `J == 0`, Step 6 já pulou este gate inteiro.
 
 ## Gotcha capture
 
-Gotchas are invariants the code does not self-document — non-obvious behaviors a fresh reader would discover only by hitting a bug. GOTCHAS.md grows organically: the orchestrator curates candidates during the run and, silently, writes those that clear the quality bar. No script bulk-generates entries; no `AskUserQuestion` gates the write. Each entry is earned by a real surprise observed in the current session, and the user's retroactive control is git (the commit is diffable; pruning happens on demand via `/devorch --full "review gotchas"`).
+Gotchas are invariants the code does not self-document — non-obvious behaviors a fresh reader would discover only by hitting a bug. GOTCHAS.md grows organically: the orchestrator curates candidates during the run and, silently, writes those that clear the quality bar. No script bulk-generates entries; no `AskUserQuestion` gates the write. Each entry is earned by a real surprise observed in the current session, and the user's retroactive control is git (the commit is diffable; pruning happens on demand via `/devorch "review gotchas"`).
 
-**When to accumulate candidates**:
+**When to accumulate candidates** (any of the following during the run):
 
-- **Quick mode**: the edit required reading non-adjacent files to understand a behavior, OR a type/interface did not describe real runtime state.
-- **Scoped mode**: any of the above, OR the guardian flagged an invariant not enforced by types/tests/linter, OR a retry happened because of surprise behavior.
-- **Full mode**: any of the above across builders, OR an F4 reviewer (security / performance / completeness / flags) explicitly marked a finding as "this surprised me" or "non-obvious", OR a builder hit a retry caused by undocumented behavior.
+- A builder needed a retry caused by undocumented behavior.
+- A reviewer (security / performance / completeness / flags) explicitly marked a finding as "this surprised me" or "non-obvious".
+- The guardian flagged an invariant not enforced by types/tests/linter.
+- A type or interface did not describe real runtime state.
+- Understanding a touched area required reading non-adjacent files for a non-obvious reason.
 
 **Quality bar** — every accepted candidate must satisfy all four. If any fails, drop silently; do not soften the entry to make it fit.
 
@@ -420,24 +361,22 @@ Commit once per session (not per candidate), inside `<projectRoot>`:
 
 When zero entries were written, omit the section entirely — no "nenhum gotcha capturado" line.
 
-**Prune on demand, not automatically**: staleness is not detected by script. `/devorch --full "review gotchas"` re-reads each entry against current code and proposes removals for ones that no longer apply.
+**Prune on demand, not automatically**: staleness is not detected by script. `/devorch "review gotchas"` re-reads each entry against current code and proposes removals for ones that no longer apply.
 
 ## Worktree policy
 
-- `quick` → no worktree; edits in `cwd`.
-- `scoped` → no worktree by default; `--worktree` opt-in creates one via `setup-worktree.ts`.
-- `full` → worktree **mandatory**, created before the plan in Step F1.
+- Worktree is **always** created in Step 2, before any explore or build.
 - Naming: `.worktrees/<name>` where `<name>` is kebab-case (3–5 words derived from `$ARGUMENTS`).
 - Branch: `devorch/<name>`.
-- Merge: via `merge-worktree.ts` (rebase → check → review → `--no-ff` → cleanup).
+- Merge: via `merge-worktree.ts` in Step 13 (rebase → check → review → `--no-ff` → cleanup).
 
 ## Rules
 
 - Do not narrate actions. Execute directly without preamble.
-- The orchestrator reads `.devorch/*` files and Explore/review agent output; it does not read source files directly (except for applying trivial fixes in full-mode review F5 and for quick/scoped edits in Q2/S5).
-- All `git` and `bun` commands during full-mode phase execution run with `cwd = <projectRoot>` (or `git -C <projectRoot>`).
+- The orchestrator reads `.devorch/*` files and Explore/review agent output; it does not read source files directly except for applying trivial fixes in Step 11.
+- All `git` and `bun` commands during phase execution run with `cwd = <projectRoot>` (or `git -C <projectRoot>`).
 - Silence is valid in the guardian pass — do not fabricate heads-ups.
-- Post-edit lint hook is always active across modes.
+- Post-edit lint hook is always active (registered on the builder agent).
 - **Language policy**: User-facing output (questions, reports, summaries) in Portuguese pt-BR with correct accentuation. Code, git commits, internal files, and technical comments in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese sentences.
 - **Output format**: Plain markdown only. No box-drawing, no ASCII art, no decorative characters.
-- Coexists with `/devorch:talk|build|fix` — existing v2 plans continue to work through those commands.
+- Coexists with legacy `/devorch:talk|build|fix` (v2) — those existing commands continue to work for projects mid-flight on v2 plans.

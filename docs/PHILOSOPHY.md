@@ -29,7 +29,7 @@ noise. The 1M window removes the excuse for ceremonial delegation, not
 the cost of contextual dilution.
 
 **How devorch enforces this:**
-- Triage classification happens inline in the orchestrator (Opus, short thinking)
+- Guardian pass and edge-case enumeration happen inline in the orchestrator (Opus, short thinking)
 - Scripts return structured JSON; raw file content does not enter the orchestrator
 - Builder agents run in isolated contexts destroyed after each task
 - Explorations return cached summaries, not inlined source
@@ -75,7 +75,7 @@ Scripts beat LLMs at filesystem walks, git operations, parsing, hashing,
 and deterministic execution. LLMs beat scripts at intent classification,
 edge case enumeration, semantic detection, and architectural judgment.
 The line is not "less LLM is better" -- it is "put each job where it
-wins." Triage classification is judgment; it belongs in Opus inline.
+wins." Edge case bucketization is judgment; it belongs in Opus inline.
 Directory traversal is mechanical; it belongs in a script.
 
 **Why this matters:** Every token spent on mechanical work is a token
@@ -87,8 +87,9 @@ Misplacing work in either direction costs quality.
 
 **How devorch enforces this:**
 - `map-project.ts`, `init-phase.ts`, `check-project.ts`,
-  `validate-plan.ts`, `phase-summary.ts`, `manage-cache.ts` -- mechanical
-- Triage (quick/scoped/full classification) -- judgment, inline Opus
+  `validate-plan.ts`, `phase-summary.ts`, `setup-worktree.ts`,
+  `merge-worktree.ts`, `list-worktrees.ts` -- mechanical
+- Wave 2 explore sizing (whether to launch, what to focus on) -- judgment, inline Opus
 - Guardian review (industry standards vs code reality) -- judgment, inline
 - Edge case enumeration and bucketing -- judgment, inline
 - Post-edit lint hook -- mechanical
@@ -102,10 +103,13 @@ pretending to exercise judgment?"_ Either misplacement is a defect.
 
 Parallel waves, parallel explorations, and parallel satellite agents are
 powerful and expensive. They pay off when scope is broad enough that
-serial execution would waste real time. They do not pay off on a typo
-fix or a three-file scoped edit, where the setup cost dwarfs the saving.
-`quick` runs linear. `scoped` runs mostly linear with a single explore.
-`full` earns parallelism across waves, explorations, and satellites.
+serial execution would waste real time. They do not pay off when wave 1
+already covered the territory, or when a plan declares a single task.
+Devorch earns parallelism adaptively: wave 2 only fires when wave 1
+surfaces a real information gap; build waves run in parallel only when
+the plan declares non-overlapping file boundaries; satellites spin up
+only when the plan includes secondary repos. Nothing is parallel by
+ritual.
 
 **Why this matters:** Parallelism has a tax -- coordination overhead,
 more context slices to curate, more checkpoints to reconcile. On large
@@ -114,11 +118,12 @@ small work, the tax dominates the benefit and adds noise. Applying
 parallelism uniformly is ceremony, not rigor.
 
 **How devorch enforces this:**
-- `quick` mode: single edit, no waves, no parallel explore
-- `scoped` mode: one explore agent (medium thoroughness), linear execution
-- `full` mode: 2-3 parallel explorers with distinct foci, parallel waves, parallel satellites
-- Waves are defined by explicit file-boundary non-overlap in the plan
+- Wave 1 explore: 1–2 medium-thoroughness agents with fixed broad focus, always runs
+- Wave 2 explore: 0–2 very-thorough agents focused on specific gaps surfaced by wave 1; skipped silently when no gap applies
+- Hard cap of 4 explore agents per session — beyond that signals a malformed request
+- Build waves are defined by explicit file-boundary non-overlap in the plan
 - `validate-plan.ts` rejects waves that share write targets
+- Satellite worktrees only when the plan declares `<secondary-repos>`
 
 **Validation question:** _"Does the scope of this work justify the
 coordination cost of parallel execution?"_ If not, run linear.
@@ -236,7 +241,7 @@ these. A guardian posture catches them before they become production
 incidents without turning every session into a lecture.
 
 **How devorch enforces this:**
-- Guardian instruction block runs in all modes, not only in `full`
+- Guardian instruction block runs every invocation, before and after explore
 - Domain checklist: auth, rate-limiting, input validation, error boundaries,
   caching, indexing, N+1, pagination, realtime, upload path, async/queue,
   observability, idempotency, secrets, cross-tenant isolation
@@ -253,11 +258,13 @@ Silence is correct only when the code already meets the bar.
 ## Principle 9: Ceremony proportional to scope
 
 A typo fix does not need a plan, a worktree, and a phase boundary.
-A three-module refactor does. Devorch offers three modes with
-proportional cost: `quick` skips plan, clarify, and worktree; `scoped`
-skips the formal plan but keeps enumeration and the guardian; `full`
-runs the full pipeline with worktree, phases, waves, and adversarial
-review. The mode is chosen by triage, not by ritual.
+A three-module refactor does. Devorch resolves this not by mode-grading
+internally, but by drawing a sharp line at its own invocation: trivial
+work runs in vanilla Claude Code; devorch is the path for medium-to-large
+work that earns the full pipeline. Inside devorch, the pipeline is
+single and linear -- worktree, plan, phases, adversarial review --
+because by the time you invoked it, that ceremony is in scope.
+Right-sizing happens at the front door, not via internal toggles.
 
 **Why this matters:** Ceremony for small tasks is not rigor -- it is
 theater that trains the user to route around the tool. If `/devorch`
@@ -266,16 +273,17 @@ variable by hand and the guardian never sees the session. The tool
 that survives is the one whose cost is shaped to the task.
 
 **How devorch enforces this:**
-- Triage classifies every invocation into quick/scoped/full with a one-line justification
-- `--quick` and `--full` flags override the classifier when the user disagrees
-- `quick` mode: classify, guardian sweep, edit, lint hook, commit
-- `scoped` mode: classify, one explore, enumerate, gate, execute, check, commit
-- `full` mode: worktree, plan, phases, waves, parallel explore, adversarial review, merge flow
-- Worktree is obligatory only for `full`; opt-in for `scoped`; skipped for `quick`
+- Single linear pipeline: load → worktree → guardian → wave 1 → wave 2 (cond) → enumerate → plan → validate → phases → review → fixes → verdict → merge → gotchas → friction
+- Worktree always created — every devorch run is isolated from `<mainRoot>` before any explore
+- Plan always written, even for 1-task builds — anchors the completeness reviewer and explicit wave coordination
+- Wave 2 is the only adaptive cost inside the pipeline; everything else is constant
+- Trivial work (single-file typo, rename in a known location) does not invoke devorch — vanilla Claude Code is the right tool there
 
-**Validation question:** _"Does the ceremony cost match the task size,
-or am I paying full-mode overhead for a quick-mode task?"_ When in
-doubt, classify smaller; the user can always escalate with `--full`.
+**Validation question:** _"Is this work medium-or-large enough that
+the full pipeline pays off, or should it run in vanilla Claude Code?"_
+When in doubt of the answer, the work probably belongs in vanilla --
+devorch's ceremony amortizes only when there is real coordination to
+manage.
 
 ---
 
@@ -285,7 +293,7 @@ doubt, classify smaller; the user can always escalate with `--full`.
 
 Larger context is a dispatch enabler, not a quality substitute. A 1M
 window lets the orchestrator hold coordination inline -- scripts,
-triage, validation. It does not let the orchestrator hold source code,
+guardian pass, validation. It does not let the orchestrator hold source code,
 debug traces, and builder retries without paying the lost-in-the-middle
 tax. The distinction: coordination context benefits from centralization;
 implementation context must stay focused and isolated in builders.
@@ -321,10 +329,13 @@ and the fix surface informed.
 
 A plan, a worktree, a review cycle, and a phase boundary are not
 inherently rigorous -- they are inherently expensive. Applying them
-to a three-line typo fix is theater, not diligence. It trains the
-user to bypass the tool, which means the guardian never runs, which
-means the anti-patterns the tool was built to catch never get caught.
-Rigor is ceremony shaped to the task. Uniform ceremony is cosplay.
+to a three-line typo fix is theater, not diligence. The shaping
+happens at the invocation boundary: vanilla Claude Code for trivial
+edits, devorch for medium-to-large work. Internal mode toggles --
+"lite devorch", "quick devorch" -- create a different failure: a tool
+with no clear identity, where users can't predict the cost and end up
+routing around it. The clean interface is one ceremony level per
+tool, with the user picking the right tool for the job.
 
 ---
 
@@ -335,7 +346,7 @@ Review these principles when:
 - A devorch build produces lower quality than expected -- name the violated principle
 - Considering whether to replace a devorch component with a native alternative
 - The context window changes significantly (2M, 10M, effectively unbounded)
-- A mode's ceremony cost drifts out of proportion with its target scope
+- The pipeline's ceremony cost drifts out of proportion with the medium-to-large target scope
 
 The principles themselves may evolve, but changes should be deliberate
 and justified -- not reactive to feature announcements or one-off

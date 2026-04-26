@@ -1,6 +1,6 @@
 # Plan Format
 
-Canonical plan format for `/devorch --full`. Plans live at
+Canonical plan format for `/devorch`. Plans live at
 `<worktreePath>/.devorch/plans/<name>.md` and are validated by
 `scripts/validate-plan.ts`. The builder dispatcher (`scripts/init-phase.ts`)
 parses the structure below to produce per-task context slices.
@@ -143,7 +143,7 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 - Task **Repo** is optional; omit it for primary-repo tasks. Required when the
   task targets a satellite (must match a name from `<secondary-repos>`).
 - `<secondary-repos>` is the single source of truth for satellites. If present,
-  `/devorch --full` creates satellite worktrees before build starts.
+  `/devorch` creates satellite worktrees in Step 8 before the phase loop starts.
 - `<global-invariants>` applies to every phase but is not delivered per-task to
   builders — surface it via Spec refs where needed.
 
