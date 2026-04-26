@@ -1,18 +1,34 @@
 /**
  * init-phase.ts — Compound phase init: plan context + gotchas + state + waves/tasks.
  * Usage: bun ~/.claude/devorch-scripts/init-phase.ts --plan <path> --phase <N>
- * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks, and content (or contentFile if >50000 chars).
+ *                                                    [--explore-injection-tokens '<json>']
+ * Output: JSON with phaseNumber, phaseName, totalPhases, planTitle, waves, tasks,
+ *         gotchasByTask (per-task filtered + sanitized), gotchas (legacy concat),
+ *         and content (or contentFile if >50000 chars).
  *
- * Explore findings are held by the orchestrator in-context and curated into
- * per-task builder prompts directly — no persistence, no script-mediated
- * filtering.
+ * `--explore-injection-tokens` accepts a `Record<taskId, number>` JSON payload
+ * where each value is the orchestrator's pre-estimate of the `## Explore
+ * Findings` token cost it intends to inject for that task. When supplied, the
+ * slice-size gate scores each task's effective slice as
+ * `script-counted-tokens + (injection[taskId] ?? 0)` so warnings reflect what
+ * the builder actually sees, not what the script can independently measure.
+ *
+ * Explore findings themselves are held by the orchestrator in-context and
+ * curated into per-task builder prompts directly — no persistence, no
+ * script-mediated filtering of finding content.
  */
 import { existsSync, writeFileSync, mkdirSync, statSync } from "fs";
 import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { extractTagContent, parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs, extractExploreQueries } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
-import { extractFileRefs } from "./lib/task-filter";
+import {
+  extractFileRefs,
+  parseGotchaEntries,
+  sanitizeGotchaEntries,
+  gotchaMatchesTask,
+  type GotchaEntry,
+} from "./lib/task-filter";
 import {
   type ParsedWave,
   type ParsedTask,
@@ -23,7 +39,7 @@ import {
 } from "./lib/slice-builder";
 
 const CONTENT_THRESHOLD = 50000;
-const CONTEXT_FILE = ".devorch/.phase-context.md";
+const CONTEXT_FILE = ".devorch/cache/phase-context.md";
 
 interface SatelliteInfo {
   name: string;
@@ -31,13 +47,41 @@ interface SatelliteInfo {
   worktreePath: string;
 }
 
-const args = parseArgs<{ plan: string; phase: number }>([
+const args = parseArgs<{ plan: string; phase: number; "explore-injection-tokens": string }>([
   { name: "plan", type: "string", required: true },
   { name: "phase", type: "number", required: true },
+  { name: "explore-injection-tokens", type: "string", required: false },
 ]);
 
 const planPath = args.plan;
 const phaseNum = args.phase;
+
+// Parse optional injection-tokens JSON. When absent or malformed, fall back to
+// an empty map (slice-gate behaves as before, sizing only what the script can
+// see). A malformed payload prints a stderr warning but is non-fatal so the
+// orchestrator's pipeline keeps moving — the worst case is a slightly noisier
+// `under` warning that the orchestrator's Step 9c logic already handles.
+const exploreInjectionTokens: Record<string, number> = (() => {
+  const raw = args["explore-injection-tokens"];
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const out: Record<string, number> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+          out[k] = v;
+        }
+      }
+      return out;
+    }
+    console.error("[init-phase] --explore-injection-tokens: expected a JSON object of {taskId: number} — ignoring");
+    return {};
+  } catch (err) {
+    console.error(`[init-phase] --explore-injection-tokens: failed to parse JSON (${err instanceof Error ? err.message : String(err)}) — ignoring`);
+    return {};
+  }
+})();
 
 const content = readPlan(planPath);
 const phases = parsePhaseBounds(content);
@@ -101,8 +145,54 @@ const satellites: SatelliteInfo[] = secondaryRepos.map((repo) => {
 // --- Read optional files (prefer GOTCHAS.md; fall back to legacy CONVENTIONS.md) ---
 const gotchasPath = resolve(projectRoot, ".devorch/GOTCHAS.md");
 const legacyConventionsPath = resolve(projectRoot, ".devorch/CONVENTIONS.md");
-const gotchas = safeReadFile(existsSync(gotchasPath) ? gotchasPath : legacyConventionsPath);
-const state = safeReadFile(resolve(projectRoot, ".devorch/state.md"));
+const primaryGotchasRaw = safeReadFile(existsSync(gotchasPath) ? gotchasPath : legacyConventionsPath);
+const primaryGotchaEntries = sanitizeGotchaEntries(parseGotchaEntries(primaryGotchasRaw));
+
+// Lazy per-satellite cache: only read each satellite's GOTCHAS.md when first
+// task targeting that repo is processed. Keyed by satellite name.
+const satelliteGotchaCache = new Map<string, GotchaEntry[]>();
+function getSatelliteGotchas(repoName: string): GotchaEntry[] {
+  const cached = satelliteGotchaCache.get(repoName);
+  if (cached !== undefined) return cached;
+  const sat = satellites.find((s) => s.name === repoName);
+  if (!sat) {
+    satelliteGotchaCache.set(repoName, []);
+    return [];
+  }
+  const satGotchasPath = resolve(sat.worktreePath, ".devorch/GOTCHAS.md");
+  const satLegacyPath = resolve(sat.worktreePath, ".devorch/CONVENTIONS.md");
+  const raw = safeReadFile(existsSync(satGotchasPath) ? satGotchasPath : satLegacyPath);
+  const entries = sanitizeGotchaEntries(parseGotchaEntries(raw));
+  satelliteGotchaCache.set(repoName, entries);
+  return entries;
+}
+
+// --- Read state: prefer cache/state.json (new), fall back to legacy state.md ---
+const stateJsonPath = resolve(projectRoot, ".devorch/cache/state.json");
+const stateMdPath = resolve(projectRoot, ".devorch/state.md");
+let state = "";
+if (existsSync(stateJsonPath)) {
+  try {
+    const raw = safeReadFile(stateJsonPath);
+    const parsed = JSON.parse(raw) as { status?: string; lastPhase?: number; lastPhaseSummary?: string; updatedAt?: string };
+    const lines: string[] = ["# devorch State"];
+    if (typeof parsed.lastPhase === "number") lines.push(`- Last completed phase: ${parsed.lastPhase}`);
+    if (typeof parsed.status === "string") lines.push(`- Status: ${parsed.status}`);
+    if (typeof parsed.updatedAt === "string") lines.push(`- Updated: ${parsed.updatedAt}`);
+    if (typeof parsed.lastPhaseSummary === "string" && parsed.lastPhaseSummary.length > 0) {
+      const phaseHeader = typeof parsed.lastPhase === "number"
+        ? `## Phase ${parsed.lastPhase} Summary`
+        : "## Last Phase Summary";
+      lines.push("", phaseHeader, parsed.lastPhaseSummary);
+    }
+    state = lines.join("\n");
+  } catch {
+    // Malformed JSON — fall through to legacy read
+    state = safeReadFile(stateMdPath);
+  }
+} else {
+  state = safeReadFile(stateMdPath);
+}
 
 const waves: ParsedWave[] = parseWaves(phaseContent);
 const tasks: Record<string, ParsedTask> = parseTasks(phaseContent);
@@ -142,7 +232,7 @@ for (const sat of satellites) {
 
 // --- Run map-project.ts for project structure (cached) ---
 const scriptDir = import.meta.dirname;
-const projectMapPath = resolve(projectRoot, ".devorch/project-map.md");
+const projectMapPath = resolve(projectRoot, ".devorch/cache/project-map.md");
 let projectMap = "";
 
 function isProjectMapFresh(): boolean {
@@ -191,8 +281,13 @@ async function runTldrAnalyze(): Promise<Record<string, string>> {
   const exitCode = await tldrProc.exited;
   if (exitCode === 0) {
     const output = await new Response(tldrProc.stdout).text();
-    const tldrResult: TldrResult = JSON.parse(output.trim());
-    return formatTldrAnalysis(tldrResult);
+    try {
+      const tldrResult: TldrResult = JSON.parse(output.trim());
+      return formatTldrAnalysis(tldrResult);
+    } catch {
+      console.error(`[init-phase] TLDR analysis returned malformed JSON — skipping code structure context`);
+      return {};
+    }
   }
   console.error(`[init-phase] TLDR analysis failed (exit ${exitCode}) — skipping code structure context`);
   return {};
@@ -286,6 +381,7 @@ const specsByTask: Record<string, string> = {};
 const codeStructureByTask: Record<string, string> = {};
 const exemplarsByTask: Record<string, string[]> = {};
 const nonGoalsByTask: Record<string, string> = {};
+const gotchasByTask: Record<string, string> = {};
 
 for (const [taskId, task] of Object.entries(tasks)) {
   const taskRefs = extractFileRefs(task.content);
@@ -315,6 +411,23 @@ for (const [taskId, task] of Object.entries(tasks)) {
     }
     codeStructureByTask[taskId] = matchedSections.join("\n\n");
   }
+
+  // Build per-task gotchas: primary entries always considered + satellite
+  // entries when the task targets a satellite. Filter by task file refs;
+  // entries without a file:line are global and pass through unconditionally.
+  const candidateEntries: GotchaEntry[] = [...primaryGotchaEntries];
+  if (task.repo && task.repo !== "primary") {
+    candidateEntries.push(...getSatelliteGotchas(task.repo));
+  }
+  const matched: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of candidateEntries) {
+    if (!gotchaMatchesTask(entry, taskRefs)) continue;
+    if (seen.has(entry.raw)) continue;
+    seen.add(entry.raw);
+    matched.push(entry.raw);
+  }
+  gotchasByTask[taskId] = matched.join("\n");
 }
 
 // --- Per-task slice size gates (Principle 2: fresh context with filter gates) ---
@@ -328,8 +441,14 @@ for (const [taskId, task] of Object.entries(tasks)) {
  * uses `Math.ceil(charCount / 4)` — good enough to triage; exact counts are not
  * worth a tiktoken dependency here.
  *
- * Gotchas is a whole-file artifact (small by construction) — included in full
- * in every task's slice size computation rather than sectioned per task.
+ * Gotchas are now per-task (filtered + sanitized) so each task's slice size
+ * reflects only the entries actually injected into its builder prompt.
+ *
+ * The optional `--explore-injection-tokens` flag lets the orchestrator
+ * pre-declare how many tokens of `## Explore Findings` it plans to inject in
+ * Step 9c per task. The slice gate adds those tokens to the script-counted
+ * total, so the warning reflects the effective slice the builder will see —
+ * not just what the script can measure on its own.
  */
 
 const sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" | "over" }> = [];
@@ -337,16 +456,14 @@ const sliceWarnings: Array<{ taskId: string; tokens: number; direction: "under" 
 for (const taskId of Object.keys(tasks)) {
   const specSlice = specsByTask[taskId] ?? "";
   const codeStructureSlice = codeStructureByTask[taskId] ?? "";
+  const gotchaSlice = gotchasByTask[taskId] ?? "";
 
-  const combined = gotchas + specSlice + codeStructureSlice;
+  const combined = gotchaSlice + specSlice + codeStructureSlice;
   const charCount = combined.length;
+  const scriptTokens = charCount === 0 ? 0 : Math.ceil(charCount / 4);
+  const injectionTokens = exploreInjectionTokens[taskId] ?? 0;
+  const tokens = scriptTokens + injectionTokens;
 
-  if (charCount === 0) {
-    sliceWarnings.push({ taskId, tokens: 0, direction: "under" });
-    continue;
-  }
-
-  const tokens = Math.ceil(charCount / 4);
   if (tokens < TOKEN_GATE_UNDER) {
     sliceWarnings.push({ taskId, tokens, direction: "under" });
   } else if (tokens > TOKEN_GATE_OVER) {
@@ -426,7 +543,10 @@ const result: {
   satellites: SatelliteInfo[];
   waves: ParsedWave[];
   tasks: Record<string, ParsedTask>;
+  /** Legacy concatenated gotchas content (deduped union of all per-task entries). Kept for orchestrators built against the pre-`gotchasByTask` schema; new consumers should prefer `gotchasByTask`. */
   gotchas?: string;
+  /** Per-task filtered + sanitized gotchas. Keys are task IDs. Value is a newline-joined list of entries: those whose file:line path overlaps the task's file refs (or are global, i.e. without explicit file:line). For tasks targeting a satellite repo, that repo's GOTCHAS.md is also merged. Empty string when nothing matches. */
+  gotchasByTask: Record<string, string>;
   /** Per-task filtered spec contracts. Keys are task IDs. If a task has Spec refs, only matching specs are included; otherwise the full phase spec section. */
   specsByTask: Record<string, string>;
   /** Per-task TLDR code structure analysis. Markdown-formatted summaries of exports, imports, functions, types. */
@@ -449,6 +569,7 @@ const result: {
   satellites,
   waves,
   tasks,
+  gotchasByTask,
   specsByTask,
   codeStructureByTask,
   exemplarsByTask,
@@ -457,8 +578,25 @@ const result: {
   sliceWarnings,
 };
 
-if (gotchas) {
-  result.gotchas = gotchas;
+// Legacy `gotchas` field: dedup'd concatenation of every per-task entry.
+// Spec contract `gotchas-by-task-schema` requires emitting both the new
+// per-task map and a concatenated string for orchestrators on the older
+// schema. Order follows first-appearance across tasks.
+{
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const taskGotchas of Object.values(gotchasByTask)) {
+    if (!taskGotchas) continue;
+    for (const line of taskGotchas.split("\n")) {
+      if (!line) continue;
+      if (seen.has(line)) continue;
+      seen.add(line);
+      ordered.push(line);
+    }
+  }
+  if (ordered.length > 0) {
+    result.gotchas = ordered.join("\n");
+  }
 }
 
 if (fullContent.length > CONTENT_THRESHOLD) {

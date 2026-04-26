@@ -310,7 +310,11 @@ if (phases.length === 0) {
             if (!specNamesSet.has(ref)) {
               const tid = taskIdMatch ? taskIdMatch[1] : "unknown";
               const availableSpecs = Array.from(specNamesSet).join(", ");
-              errors.push(`Phase ${phase.num}: task '${tid}' references unknown spec '${ref}'. Available specs in this phase: [${availableSpecs}]`);
+              if (availableSpecs.length === 0) {
+                errors.push(`Task ${tid} references spec '${ref}' which is not defined. No specs defined in phase ${phase.num}; either define one or remove the Spec ref.`);
+              } else {
+                errors.push(`Task ${tid} references spec '${ref}' which is not defined. Available specs in phase ${phase.num}: ${availableSpecs}`);
+              }
             }
           }
         }

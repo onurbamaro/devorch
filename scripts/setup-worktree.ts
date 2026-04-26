@@ -7,8 +7,8 @@
  * With --recreate, safely removes existing worktree + branch before recreating.
  * With --add-secondary, adds satellite worktrees to an existing primary worktree.
  */
-import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileSync, statSync } from "fs";
+import { join, resolve, relative, sep } from "path";
 import { parseArgs } from "./lib/args";
 import { isGitRepo, checkBranchExists, getUncommittedFiles, getUntrackedFiles } from "./lib/git-utils";
 
@@ -206,6 +206,39 @@ function createSingleWorktree(opts: CreateSingleWorktreeOpts): { warnings: strin
     process.exit(1);
   }
 
+  // Post-create assertions: verify the worktree was actually created on disk
+  // and is recognized by git as a working tree. Catches silent failures where
+  // `git worktree add` exits 0 but produces an unusable result.
+  let pathIsDir = false;
+  try {
+    pathIsDir = existsSync(wtPath) && statSync(wtPath).isDirectory();
+  } catch {
+    pathIsDir = false;
+  }
+  if (!pathIsDir) {
+    console.log(JSON.stringify({
+      ok: false,
+      error: "post-create-assertion-failed",
+      detail: `worktreePath ${wtPath} does not exist or is not a directory`,
+    }));
+    process.exit(1);
+  }
+
+  const revParseProc = Bun.spawnSync(
+    ["git", "-C", wtPath, "rev-parse", "--is-inside-work-tree"],
+    { stdout: "pipe", stderr: "pipe" }
+  );
+  const revParseOut = revParseProc.stdout.toString("utf-8").trim();
+  if (revParseProc.exitCode !== 0 || revParseOut !== "true") {
+    const stderr = revParseProc.stderr.toString("utf-8").trim();
+    console.log(JSON.stringify({
+      ok: false,
+      error: "post-create-assertion-failed",
+      detail: `rev-parse --is-inside-work-tree returned ${JSON.stringify(revParseOut)} (exit ${revParseProc.exitCode})${stderr ? `: ${stderr}` : ""}`,
+    }));
+    process.exit(1);
+  }
+
   // Apply sparse-checkout if provided
   if (sparsePaths) {
     const sparseResult = applySparseCheckout(wtPath, sparsePaths, repoPath);
@@ -239,6 +272,12 @@ async function createSatellites(jsonStr: string, recreate: boolean): Promise<Sat
   // Validate all repos before creating any worktrees
   for (const repo of secondaryRepos) {
     const repoPath = resolve(cwd, repo.path);
+    const rel = relative(cwd, repoPath);
+    const upSegments = rel.split(sep).filter((p) => p === "..").length;
+    if (upSegments > 2) {
+      console.error(`Secondary repo "${repo.name}" path "${repo.path}" resolves outside expected sibling depth (resolved: ${repoPath}); refuse for safety`);
+      process.exit(1);
+    }
     if (!isGitRepo(repoPath)) {
       console.error(`Secondary repo "${repo.name}" at ${repoPath} is not a git repository`);
       process.exit(1);
@@ -356,8 +395,7 @@ if (existsSync(devorchSrc)) {
 
   const changedFiles = diffProc.stdout.toString().trim().split("\n").filter(Boolean);
   const untrackedFiles = untrackedProc.stdout.toString().trim().split("\n").filter(Boolean);
-  const filesToCopy = [...changedFiles, ...untrackedFiles]
-    .filter((f) => !/explore-cache.*\.md$/.test(f));
+  const filesToCopy = [...changedFiles, ...untrackedFiles];
 
   for (const relPath of filesToCopy) {
     const src = join(cwd, relPath);

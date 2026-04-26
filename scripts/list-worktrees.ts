@@ -35,7 +35,7 @@ function countPhases(planContent: string): number {
   return matches ? matches.length : 0;
 }
 
-function extractStatus(stateContent: string): { status: string; lastPhase: number } {
+function extractStatusFromMarkdown(stateContent: string): { status: string; lastPhase: number } {
   if (!stateContent) return { status: "not started", lastPhase: 0 };
 
   const statusMatch = stateContent.match(/^Status:\s*(.+)$/m);
@@ -45,6 +45,23 @@ function extractStatus(stateContent: string): { status: string; lastPhase: numbe
     status: statusMatch ? statusMatch[1].trim() : "not started",
     lastPhase: phaseMatch ? parseInt(phaseMatch[1], 10) : 0,
   };
+}
+
+function readState(wtPath: string): { status: string; lastPhase: number } {
+  // Prefer new cache/state.json; fall back to legacy state.md.
+  const stateJsonContent = safeReadFile(join(wtPath, ".devorch/cache/state.json"));
+  if (stateJsonContent) {
+    try {
+      const parsed = JSON.parse(stateJsonContent) as { status?: unknown; lastPhase?: unknown };
+      const status = typeof parsed.status === "string" ? parsed.status : "not started";
+      const lastPhase = typeof parsed.lastPhase === "number" ? parsed.lastPhase : 0;
+      return { status, lastPhase };
+    } catch {
+      // Malformed JSON — fall through to legacy markdown read
+    }
+  }
+  const stateMdContent = safeReadFile(join(wtPath, ".devorch/state.md"));
+  return extractStatusFromMarkdown(stateMdContent);
 }
 
 function getBranch(worktreePath: string): string {
@@ -172,11 +189,9 @@ for (const name of entries) {
   const planContent = planFile
     ? safeReadFile(join(plansDir, planFile))
     : safeReadFile(join(wtPath, ".devorch/plans/current.md"));
-  const stateContent = safeReadFile(join(wtPath, ".devorch/state.md"));
-
   const planTitle = planContent ? extractPlanTitle(planContent) : "(no plan)";
   const totalPhases = planContent ? countPhases(planContent) : 0;
-  const { status, lastPhase } = extractStatus(stateContent);
+  const { status, lastPhase } = readState(wtPath);
   const branch = getBranch(wtPath);
   const absPath = resolve(wtPath).replaceAll("\\", "/");
   const valid = validPaths.has(absPath);

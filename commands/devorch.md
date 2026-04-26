@@ -136,6 +136,35 @@ Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `<projectRoot>/.devorch/pl
 
 The plan must reflect decisions captured in Step 6 — every user choice goes in `<decisions>` as a "Question → Answer" line.
 
+## Step 7.5 — Plan semantic check
+
+`validate-plan.ts` (Step 8) is a syntactic gate: it parses the plan and checks structural rules (waves declared, ids unique, `<relevant-files>` non-overlapping within a wave). It cannot infer **implicit** touches — files a task will edit that are not listed in `<relevant-files>` because the task description treats them as obvious (a barrel re-export, a hook registry, a generated migration filename, an index aggregator). Two tasks in the same wave that both implicitly touch `src/index.ts` will pass `validate-plan.ts` and then collide at build time.
+
+Step 7.5 catches those before the syntactic gate runs. It is pure orchestrator-side reasoning + mechanical grep — no script. Run it after Step 7 has written the plan to disk and before Step 8 invokes `validate-plan.ts`.
+
+For each task in the plan, perform the four sub-rules:
+
+1. **Implicit-touch inference (LLM judgment)** — read the task description and `<relevant-files>`. List candidate implicit touches the task will likely modify even though they are not in `<relevant-files>`. Common shapes:
+   - Barrel files / index aggregators (`src/index.ts`, `src/lib/index.ts`, `mod.ts`) when the task adds or renames an exported symbol.
+   - Hook registries (`hooks/index.ts`, `useFoo` registries) when the task adds a hook.
+   - Plugin / command / route registries when the task adds a new entry.
+   - Migration filenames (`db/migrations/NNNN_*.sql`) when the task adds a schema change — even if the exact filename is generated.
+   - Type re-exports (`types.ts`, `index.d.ts`) when the task adds a new type that other modules import.
+
+2. **Grep verification (deterministic)** — for each candidate from sub-rule 1, run a Bash grep against the worktree to confirm the file actually exists and is plausibly touched. Example: `git -C <projectRoot> ls-files | grep -E '(^|/)index\.ts$'` to enumerate barrels, or `grep -rn "export \* from" <projectRoot>/src` to find re-export sites. Do not propagate a candidate that grep cannot confirm.
+
+3. **Silent re-wave (overlap resolution)** — if two or more tasks in the same wave share a verified implicit touch, move the later tasks to a subsequent wave so each wave's effective file set (declared + implicit) stays disjoint. Rewrite the plan file in place, then log a single line — no `AskUserQuestion`, no user gate. Example log line:
+   ```
+   Wave reorganizada: tasks 2 e 4 dividem src/index.ts implícito.
+   ```
+   This is the expected case: implicit overlap is mechanical, not a design decision. The orchestrator resolves it without consulting the user.
+
+4. **Migration collision check (cross-wave)** — for each repo (primary + each entry in `<satellites>`) that has at least one task adding a migration, list the migration filenames committed on the base branch via `git -C <repo> ls-tree origin/<mainBranch>:<satellite>/db/migrations/` (use the satellite-specific path when the task is on a satellite; for the primary repo use `git -C <projectRoot> ls-tree origin/<mainBranch>:db/migrations/` or whatever migrations directory the repo uses). If a planned migration filename collides with an existing one on origin, auto-bump the planned filename's numeric prefix to the next free slot and rewrite the plan accordingly. Log a single line: `Migration bumped: NNNN → MMMM em <repo> (collision com origin/<mainBranch>).`
+
+After sub-rules run, the plan file on disk reflects any re-waves and migration bumps. Step 8 then runs against the rewritten plan.
+
+**Rare case — genuine bifurcation surfaces here**: if Step 7.5 discovers a real ambiguity that requires user input (e.g., two tasks both want to own the same exported symbol and the resolution is a design choice, not just sequencing), surface it via the unified gate (§ Unified gate UX) as a late bifurcation. Step 6's gate already passed for the originally-known bifurcations; this is the rare path where new context (the implicit touches) reveals a bifurcation that wasn't visible during Step 6. In practice this is uncommon — most overlaps are sequencing-only and resolved silently by sub-rule 3.
+
 ## Step 8 — Validate plan + commit + satellite worktrees
 
 1. Run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <projectRoot>/.devorch/plans/<name>.md`. Fix issues if blocked (waves with overlap, missing fields, etc.).
@@ -148,7 +177,9 @@ The plan must reflect decisions captured in Step 6 — every user choice goes in
 For each phase N sequentially:
 
 ### 9a. Init phase
-Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N`. Parse JSON. If `contentFile` is present, read it for full context.
+Before invoking `init-phase.ts`, estimate the token count of the `## Explore Findings` subset you intend to inject into each task's builder prompt in 9c (consolidated wave 1 + wave 2 findings filtered per task). Build a JSON object keyed by task-id with the per-task estimate, e.g. `{"task-a": 1200, "task-b": 0}`. On the resume path (Step 4–5), the original waves are gone — pass `{}`.
+
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --explore-injection-tokens '<json>'`. Parse JSON. If `contentFile` is present, read it for full context.
 
 ### 9b. Filter size gate
 Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). The init-phase check sizes only what the script can see (gotchas + specs + code structure) — it runs **before** Step 9c curates and injects Explore Findings into each builder prompt, so `under` warnings are expected whenever you have relevant findings queued for injection.
@@ -162,7 +193,7 @@ Do not dispatch builders until every remaining warning is either auto-resolved (
 ### 9c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool, each with `subagent_type="devorch-builder"`. Issue one Task tool call per task inside the same assistant message so they run in parallel.
 
-Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchas` field, if non-empty), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), and `## Explore Findings` — the subset of wave 1 + wave 2 results you judge relevant to this specific task (files mentioned, patterns touched). Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → Explore Findings.
+Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchasByTask[task-id]` field — omit the section entirely if empty for that task), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), and `## Explore Findings` — the subset of wave 1 + wave 2 results you judge relevant to this specific task (files mentioned, patterns touched). Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → Explore Findings.
 
 After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
 
@@ -372,6 +403,7 @@ When zero entries were written, omit the section entirely — no "nenhum gotcha 
 
 ## Rules
 
+- **Explore claim re-verification**: when an Explore agent (Wave 1, Wave 2, or any later launch) reports a deterministic claim — counts, absences, or presences as fact ("zero importers", "no usages found", "no callers", "deprecated", "0 references", "only referenced by X") — the orchestrator MUST verify with a deterministic grep before quoting the claim to a builder, surfacing it in `<decisions>`, or using it to justify a Step 6 silence. Run the grep yourself (`git -C <projectRoot> grep -n <symbol>`, `grep -rn`, etc.) and compare. If the grep contradicts the Explore claim, prefer the grep result and surface the discrepancy as a one-line note in the affected slice (e.g. `Note: Explore reported 0 importers; grep encontrou 2 em foo.ts:12, bar.ts:34`). Do not propagate uncertain claims as certainties — Explore is a hypothesis generator, grep is the oracle.
 - Do not narrate actions. Execute directly without preamble.
 - The orchestrator reads `.devorch/*` files and Explore/review agent output; it does not read source files directly except for applying trivial fixes in Step 11.
 - All `git` and `bun` commands during phase execution run with `cwd = <projectRoot>` (or `git -C <projectRoot>`).
