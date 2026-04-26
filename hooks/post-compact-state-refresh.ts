@@ -15,12 +15,18 @@ try {
   const input = await new Response(Bun.stdin.stream()).text();
   // We don't need to parse the input — just consume it
 
-  // Find .devorch/state.md by walking up from cwd
+  // Find a .devorch project root by walking up; prefer cache/state.json, fall back to legacy state.md
+  function hasDevorchState(dir: string): boolean {
+    return (
+      existsSync(join(dir, ".devorch", "cache", "state.json")) ||
+      existsSync(join(dir, ".devorch", "state.md"))
+    );
+  }
+
   function findStateDir(start: string): string | null {
     let dir = start;
     for (let i = 0; i < 20; i++) {
-      const statePath = join(dir, ".devorch", "state.md");
-      if (existsSync(statePath)) return dir;
+      if (hasDevorchState(dir)) return dir;
       const parent = dirname(dir);
       if (parent === dir) break;
       dir = parent;
@@ -40,8 +46,7 @@ try {
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
           const candidate = join(worktreesDir, entry.name);
-          const statePath = join(candidate, ".devorch", "state.md");
-          if (existsSync(statePath)) {
+          if (hasDevorchState(candidate)) {
             projectRoot = candidate;
             break;
           }
@@ -56,18 +61,38 @@ try {
     process.exit(0);
   }
 
-  const statePath = join(projectRoot, ".devorch", "state.md");
-  const stateContent = readFileSync(statePath, "utf-8");
+  // Prefer JSON state; fall back to legacy markdown
+  let phase = "?";
+  let status = "unknown";
+  let summary = "";
 
-  // Extract phase info from state.md
-  const phaseMatch = stateContent.match(/Last completed phase:\s*(\d+)/);
-  const statusMatch = stateContent.match(/Status:\s*(.+)/);
-  const phase = phaseMatch ? phaseMatch[1] : "?";
-  const status = statusMatch ? statusMatch[1].trim() : "unknown";
+  const jsonStatePath = join(projectRoot, ".devorch", "cache", "state.json");
+  const mdStatePath = join(projectRoot, ".devorch", "state.md");
 
-  // Extract handoff/summary
-  const summaryMatch = stateContent.match(/## Phase \d+ Summary\n([\s\S]*?)(?:\n##|$)/);
-  const summary = summaryMatch ? summaryMatch[1].trim().split("\n")[0] : "";
+  if (existsSync(jsonStatePath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(jsonStatePath, "utf-8")) as {
+        status?: string;
+        lastPhase?: number;
+        lastPhaseSummary?: string;
+      };
+      if (typeof parsed.lastPhase === "number") phase = String(parsed.lastPhase);
+      if (parsed.status) status = parsed.status;
+      if (parsed.lastPhaseSummary) summary = parsed.lastPhaseSummary.split("\n")[0]?.trim() ?? "";
+    } catch {
+      // malformed JSON — fall through to legacy parser below
+    }
+  }
+
+  if ((phase === "?" || status === "unknown") && existsSync(mdStatePath)) {
+    const stateContent = readFileSync(mdStatePath, "utf-8");
+    const phaseMatch = stateContent.match(/Last completed phase:\s*(\d+)/);
+    const statusMatch = stateContent.match(/Status:\s*(.+)/);
+    if (phase === "?" && phaseMatch) phase = phaseMatch[1];
+    if (status === "unknown" && statusMatch) status = statusMatch[1].trim();
+    const summaryMatch = stateContent.match(/## Phase \d+ Summary\n([\s\S]*?)(?:\n##|$)/);
+    if (!summary && summaryMatch) summary = summaryMatch[1].trim().split("\n")[0];
+  }
 
   // Read plan title and count phases from the plan file (single read)
   let planTitle = "unknown";

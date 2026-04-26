@@ -1,7 +1,7 @@
 /**
  * map-project.ts — Collects structural project info for orchestrator dispatch.
  * Usage: bun ~/.claude/devorch-scripts/map-project.ts [project-dir] [--persist]
- * --persist: writes output to .devorch/project-map.md in addition to stdout.
+ * --persist: writes output to .devorch/cache/project-map.md in addition to stdout.
  *
  * Sections: Structure (3-level tree), Scripts, Makefile Targets, Sibling Repos.
  * Tech stack and dependencies are intentionally omitted — they're one Read away
@@ -199,7 +199,7 @@ const finalOutput = lines.join("\n");
 console.log(finalOutput);
 
 if (persist) {
-  const mapPath = join(cwd, ".devorch", "project-map.md");
+  const mapPath = join(cwd, ".devorch", "cache", "project-map.md");
   mkdirSync(dirname(mapPath), { recursive: true });
   writeFileSync(mapPath, finalOutput, "utf-8");
 }

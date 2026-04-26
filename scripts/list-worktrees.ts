@@ -38,8 +38,10 @@ function countPhases(planContent: string): number {
 function extractStatusFromMarkdown(stateContent: string): { status: string; lastPhase: number } {
   if (!stateContent) return { status: "not started", lastPhase: 0 };
 
-  const statusMatch = stateContent.match(/^Status:\s*(.+)$/m);
-  const phaseMatch = stateContent.match(/^Last completed phase:\s*(\d+)/m);
+  // phase-summary.ts emits these fields as markdown bullets (`- Status: ...`).
+  // Accept both bullet and bare prefixes for backwards-compat.
+  const statusMatch = stateContent.match(/^\s*(?:[-*]\s+)?Status:\s*(.+)$/m);
+  const phaseMatch = stateContent.match(/^\s*(?:[-*]\s+)?Last completed phase:\s*(\d+)/m);
 
   return {
     status: statusMatch ? statusMatch[1].trim() : "not started",
