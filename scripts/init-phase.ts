@@ -23,7 +23,7 @@ import {
 } from "./lib/slice-builder";
 
 const CONTENT_THRESHOLD = 50000;
-const CONTEXT_FILE = ".devorch/.phase-context.md";
+const CONTEXT_FILE = ".devorch/cache/phase-context.md";
 
 interface SatelliteInfo {
   name: string;
@@ -102,7 +102,33 @@ const satellites: SatelliteInfo[] = secondaryRepos.map((repo) => {
 const gotchasPath = resolve(projectRoot, ".devorch/GOTCHAS.md");
 const legacyConventionsPath = resolve(projectRoot, ".devorch/CONVENTIONS.md");
 const gotchas = safeReadFile(existsSync(gotchasPath) ? gotchasPath : legacyConventionsPath);
-const state = safeReadFile(resolve(projectRoot, ".devorch/state.md"));
+
+// --- Read state: prefer cache/state.json (new), fall back to legacy state.md ---
+const stateJsonPath = resolve(projectRoot, ".devorch/cache/state.json");
+const stateMdPath = resolve(projectRoot, ".devorch/state.md");
+let state = "";
+if (existsSync(stateJsonPath)) {
+  try {
+    const raw = safeReadFile(stateJsonPath);
+    const parsed = JSON.parse(raw) as { status?: string; lastPhase?: number; lastPhaseSummary?: string; updatedAt?: string };
+    const lines: string[] = ["# devorch State"];
+    if (typeof parsed.lastPhase === "number") lines.push(`- Last completed phase: ${parsed.lastPhase}`);
+    if (typeof parsed.status === "string") lines.push(`- Status: ${parsed.status}`);
+    if (typeof parsed.updatedAt === "string") lines.push(`- Updated: ${parsed.updatedAt}`);
+    if (typeof parsed.lastPhaseSummary === "string" && parsed.lastPhaseSummary.length > 0) {
+      const phaseHeader = typeof parsed.lastPhase === "number"
+        ? `## Phase ${parsed.lastPhase} Summary`
+        : "## Last Phase Summary";
+      lines.push("", phaseHeader, parsed.lastPhaseSummary);
+    }
+    state = lines.join("\n");
+  } catch {
+    // Malformed JSON — fall through to legacy read
+    state = safeReadFile(stateMdPath);
+  }
+} else {
+  state = safeReadFile(stateMdPath);
+}
 
 const waves: ParsedWave[] = parseWaves(phaseContent);
 const tasks: Record<string, ParsedTask> = parseTasks(phaseContent);
@@ -142,7 +168,7 @@ for (const sat of satellites) {
 
 // --- Run map-project.ts for project structure (cached) ---
 const scriptDir = import.meta.dirname;
-const projectMapPath = resolve(projectRoot, ".devorch/project-map.md");
+const projectMapPath = resolve(projectRoot, ".devorch/cache/project-map.md");
 let projectMap = "";
 
 function isProjectMapFresh(): boolean {
