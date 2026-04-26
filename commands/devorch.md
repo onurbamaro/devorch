@@ -179,7 +179,7 @@ For each phase N sequentially:
 ### 9a. Init phase
 Before invoking `init-phase.ts`, estimate the token count of the `## Explore Findings` subset you intend to inject into each task's builder prompt in 9c (consolidated wave 1 + wave 2 findings filtered per task). Build a JSON object keyed by task-id with the per-task estimate, e.g. `{"task-a": 1200, "task-b": 0}`. On the resume path (Step 4–5), the original waves are gone — pass `{}`.
 
-Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --explore-injection-tokens '<json>'`. Parse JSON. If `contentFile` is present, read it for full context.
+Run `bun $CLAUDE_HOME/devorch-scripts/init-phase.ts --plan <planPath> --phase N --explore-injection-tokens '<json>'`. Parse JSON. Default-mode output is compact (`{ok, phaseNumber, phaseName, totalPhases, planTitle, satellites, waves, taskIds, sliceWarnings, detailPath}`); per-task content is written to `<detailPath>/<task-id>.md` on disk for Step 9c to read. The `--legacy-json` flag still emits the verbose shape (with inline `tasks`, `gotchasByTask`, `specsByTask`, `codeStructureByTask`, `exemplarsByTask`, `nonGoalsByTask`, and a `contentFile` overflow path) but the orchestrator does not pass it by default.
 
 ### 9b. Filter size gate
 Read `sliceWarnings` from the init-phase JSON output (authoritative thresholds: <3K = `under`, >30K = `over`). The init-phase check sizes only what the script can see (gotchas + specs + code structure) — it runs **before** Step 9c curates and injects Explore Findings into each builder prompt, so `under` warnings are expected whenever you have relevant findings queued for injection.
@@ -193,7 +193,13 @@ Do not dispatch builders until every remaining warning is either auto-resolved (
 ### 9c. Dispatch builders (parallel waves)
 For each wave from the init-phase output, launch all `taskIds` in a single message via the Task tool, each with `subagent_type="devorch-builder"`. Issue one Task tool call per task inside the same assistant message so they run in parallel.
 
-Each builder prompt includes: `Working directory: <projectRoot>`, Plan Objective + Solution Approach + Decisions, full task details, `## Gotchas` (from init-phase `gotchasByTask[task-id]` field — omit the section entirely if empty for that task), `## Code Structure` (if non-empty), `## Exemplars` (if non-empty), `## Spec Contracts` (if non-empty), `## Non-goals` (if non-empty), and `## Explore Findings` — the subset of wave 1 + wave 2 results you judge relevant to this specific task (files mentioned, patterns touched). Order: Gotchas → Code Structure → Exemplars → Spec Contracts → Non-goals → Explore Findings.
+For each task in the wave, assemble the builder prompt as follows:
+
+1. **Full task details** — read the plan file at `<planPath>` and extract the section for this task by matching its `**ID**: <task-id>` line under a `#### N. <Title>` header. Capture the entire section (title + ID + Assigned To + Spec refs + Non-goals + Exemplars + body) up to the next `#### ` or `### ` boundary. This is the source of truth for the task's content. While extracting, also read the optional `**Repo**: <name>` field on the same task (default `primary` when absent) — used below for working-directory selection.
+2. **Phase Context** — read `<detailPath>/<task-id>.md` from disk via the Read tool. The file already groups Spec Contracts / Code Structure / Gotchas / Exemplars / Non-goals under `## ` headers; the orchestrator injects the markdown verbatim under a single `## Phase Context` section and does NOT re-parse or split it.
+3. **Explore Findings** — orchestrator-curated subset of wave 1 + wave 2 results you judge relevant to this specific task (files mentioned, patterns touched). Kept separate from `## Phase Context` because findings are dynamic and not in the disk file.
+
+Final builder prompt order: `Working directory: <projectRoot>` → Plan Objective + Solution Approach + Decisions → Full task details (from plan file) → `## Phase Context` (from disk detail) → `## Explore Findings` (orchestrator-curated). Omit `## Explore Findings` entirely when no findings are relevant for the task.
 
 After each wave returns: verify task completion via `TaskList`, extract `## Build Report` blocks from each builder's output (regex from `## Build Report` to the next `##` header), key them by task-id. For each successful task (matching commit in `git log`), call `TaskUpdate` with `status: "completed"`.
 
