@@ -166,21 +166,6 @@ export function filterSpecsByRefs(specContent: string, refs: string[]): string {
   return matched.join("\n");
 }
 
-export function extractExploreQueries(phaseContent: string): Array<{ query: string; taskId: string }> {
-  const block = extractTagContent(phaseContent, "explore-queries");
-  if (!block) return [];
-
-  const results: Array<{ query: string; taskId: string }> = [];
-  const lineRegex = /^-\s+"(.+?)"\s+[—\-]{1,2}\s+for task\s+(.+)$/gm;
-  let match: RegExpExecArray | null;
-
-  while ((match = lineRegex.exec(block)) !== null) {
-    results.push({ query: match[1], taskId: match[2].trim() });
-  }
-
-  return results;
-}
-
 export function extractSecondaryRepos(planContent: string): SecondaryRepo[] {
   const block = extractTagContent(planContent, "secondary-repos");
   if (!block) return [];
