@@ -90,12 +90,6 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 </entity>
 </spec>
 
-<!-- optional — directed exploration for build phase: -->
-<explore-queries>
-- "public API and exports of src/modules/auth" — for task auth-refactor
-- "error handling patterns in src/api/handlers" — for task error-handling
-</explore-queries>
-
 <tasks>
 #### 1. <Task Name>
 - **ID**: <kebab-case>

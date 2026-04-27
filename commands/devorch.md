@@ -31,9 +31,13 @@ If `--resume` is present:
 
 ## Step 1 — Load context
 
-Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
+Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Also redirect its stdout to `<mainRoot>/.devorch/cache/project-map.md` (run `mkdir -p <mainRoot>/.devorch/cache` first if needed) — this primes the cache that `setup-worktree.ts` copies into the worktree. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
+
+Step 1 and Step 2 can run in parallel — dispatch them in the same message via multiple tool calls. Both operate against `<mainRoot>` and neither depends on the other's output.
 
 ## Step 2 — Worktree
+
+Step 2 can be dispatched in parallel with Step 1 — there is no dependency between them.
 
 1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`.
 2. Record `mainRoot = <cwd>` and `originalBranch = git branch --show-current`.
@@ -73,6 +77,8 @@ Apply this role internally before any explore:
 > Also consult `.devorch/standards-silenced.md` if present — skip heads-ups matching silenced patterns.
 
 The guardian pass runs inline. Silence is valid: if no critical heads-up and no real bifurcation surface here, proceed without comment. The guardian pass re-runs after Step 5 with fuller context; at this stage it operates only on `$ARGUMENTS` + map-project + GOTCHAS.
+
+Step 4 (Wave 1 explore) can be dispatched before or in parallel with the guardian pass — both consume the same inputs (`$ARGUMENTS` + map-project + GOTCHAS) and the guardian is refined again in Step 5 once explore findings land.
 
 ## Step 4 — Wave 1 explore (always)
 
@@ -153,7 +159,7 @@ For each task in the plan, perform the four sub-rules:
    - Migration filenames (`db/migrations/NNNN_*.sql`) when the task adds a schema change — even if the exact filename is generated.
    - Type re-exports (`types.ts`, `index.d.ts`) when the task adds a new type that other modules import.
 
-2. **Grep verification (deterministic)** — for each candidate from sub-rule 1, run a Bash grep against the worktree to confirm the file actually exists and is plausibly touched. Example: `git -C <projectRoot> ls-files | grep -E '(^|/)index\.ts$'` to enumerate barrels, or `grep -rn "export \* from" <projectRoot>/src` to find re-export sites. Do not propagate a candidate that grep cannot confirm.
+2. **Grep verification (deterministic)** — for each candidate from sub-rule 1, run a Bash grep against the worktree to confirm the file actually exists and is plausibly touched. Example: `git -C <projectRoot> ls-files | grep -E '(^|/)index\.ts$'` to enumerate barrels, or `grep -rn "export \* from" <projectRoot>/src` to find re-export sites. Do not propagate a candidate that grep cannot confirm. Batch greps across tasks into a single Bash invocation when patterns/paths permit (e.g. `git -C <projectRoot> ls-files | grep -E '<pat1>|<pat2>|<pat3>'`) instead of one Bash call per task — the regex alternation covers the union and the orchestrator demultiplexes results back to each task locally.
 
 3. **Silent re-wave (overlap resolution)** — if two or more tasks in the same wave share a verified implicit touch, move the later tasks to a subsequent wave so each wave's effective file set (declared + implicit) stays disjoint. Rewrite the plan file in place, then log a single line — no `AskUserQuestion`, no user gate. Example log line:
    ```

@@ -5,7 +5,7 @@
  */
 import { createHash } from "crypto";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, extractExploreQueries, readPlan } from "./lib/plan-parser";
+import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, readPlan } from "./lib/plan-parser";
 
 const args = parseArgs<{ plan: string }>([
   { name: "plan", type: "string", required: true },
@@ -376,26 +376,6 @@ if (phases.length === 0) {
       tasks.push({ id: taskId, files: fileRefs, repo });
     }
 
-    // --- Explore queries validation (optional section) ---
-    const exploreQueries = extractExploreQueries(phaseContent);
-    if (exploreQueries.length > 0) {
-      const phaseTaskIds = tasks.map((t) => t.id);
-      const seenQueries = new Set<string>();
-
-      for (const eq of exploreQueries) {
-        if (!eq.query) {
-          warnings.push(`Phase ${phase.num}: <explore-queries> has an empty query text`);
-        }
-        if (!phaseTaskIds.includes(eq.taskId)) {
-          warnings.push(`Phase ${phase.num}: <explore-queries> references unknown task-id "${eq.taskId}"`);
-        }
-        if (seenQueries.has(eq.query)) {
-          warnings.push(`Phase ${phase.num}: <explore-queries> has duplicate query "${eq.query}"`);
-        }
-        seenQueries.add(eq.query);
-      }
-    }
-
     const executionBlock = extractTagContent(phaseContent, "execution") || "";
     const waveRegex = /\*\*Wave\s+(\d+)\*\*[^:]*:\s*(.+)/gi;
     const waveMatches = [...executionBlock.matchAll(waveRegex)];
@@ -416,33 +396,53 @@ if (phases.length === 0) {
       }
 
       const waveTasks = tasks.filter((t) => taskIds.includes(t.id));
+
+      // File-overlap detection. Same-repo overlap is a hard error (two builders
+      // editing the same file in the same worktree corrupt each other's diffs);
+      // cross-repo overlap is just a coincidence warning.
       for (let a = 0; a < waveTasks.length; a++) {
         for (let b = a + 1; b < waveTasks.length; b++) {
           const overlap = waveTasks[a].files.filter((f) =>
             waveTasks[b].files.includes(f)
           );
           if (overlap.length > 0) {
-            warnings.push(
-              `Phase ${phase.num}: Wave ${waveNum} conflict — tasks "${waveTasks[a].id}" and "${waveTasks[b].id}" both touch: ${overlap.join(", ")}`
-            );
+            const repoA = waveTasks[a].repo || "primary";
+            const repoB = waveTasks[b].repo || "primary";
+            if (repoA === repoB) {
+              errors.push(
+                `Wave ${waveNum} in phase ${phase.num}: tasks "${waveTasks[a].id}" and "${waveTasks[b].id}" target same Repo "${repoA}" and overlap on: ${overlap.join(", ")}. Split into separate \`## Execution\` waves in the plan and re-validate.`
+              );
+            } else {
+              warnings.push(
+                `Phase ${phase.num}: Wave ${waveNum} conflict — tasks "${waveTasks[a].id}" and "${waveTasks[b].id}" both touch: ${overlap.join(", ")}`
+              );
+            }
           }
         }
       }
 
-      // Same-Repo wave check: 2+ tasks targeting the same repo within a wave
-      // would force builders to share a worktree, exposing each other's WIP
-      // during typecheck/lint. Hard error.
-      const repoGroups = new Map<string, string[]>();
+      // Same-repo, disjoint files: builders share a worktree but edit
+      // different files. Allowed, but typecheck/lint may see each other's WIP
+      // — surface a warning so the author can split waves if needed.
+      const repoGroups = new Map<string, TaskFileInfo[]>();
       for (const wt of waveTasks) {
         const repoKey = wt.repo || "primary";
         const list = repoGroups.get(repoKey) ?? [];
-        list.push(wt.id);
+        list.push(wt);
         repoGroups.set(repoKey, list);
       }
-      for (const [repoName, ids] of repoGroups) {
-        if (ids.length >= 2) {
-          errors.push(
-            `Wave ${waveNum} in phase ${phase.num} has 2+ tasks targeting Repo "${repoName}": [${ids.join(", ")}]. Builders sharing a worktree see each other's WIP during typecheck/lint — split into separate \`## Execution\` waves in the plan and re-validate.`
+      for (const [repoName, ts] of repoGroups) {
+        if (ts.length < 2) continue;
+        let hasDisjointPair = false;
+        for (let a = 0; a < ts.length && !hasDisjointPair; a++) {
+          for (let b = a + 1; b < ts.length && !hasDisjointPair; b++) {
+            const overlap = ts[a].files.filter((f) => ts[b].files.includes(f));
+            if (overlap.length === 0) hasDisjointPair = true;
+          }
+        }
+        if (hasDisjointPair) {
+          warnings.push(
+            `Phase ${phase.num}: Wave ${waveNum} has ${ts.length} tasks targeting Repo "${repoName}" with disjoint files: [${ts.map((t) => t.id).join(", ")}]. Builders share a worktree — typecheck/lint may surface contention from concurrent WIP.`
           );
         }
       }
