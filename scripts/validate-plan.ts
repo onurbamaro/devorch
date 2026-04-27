@@ -5,7 +5,7 @@
  */
 import { createHash } from "crypto";
 import { parseArgs } from "./lib/args";
-import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, readPlan } from "./lib/plan-parser";
+import { extractTagContent, extractPhaseSpec, parseSpecNames, extractSecondaryRepos, extractFileEntries, readPlan } from "./lib/plan-parser";
 
 const args = parseArgs<{ plan: string }>([
   { name: "plan", type: "string", required: true },
@@ -23,6 +23,16 @@ try {
 
 const errors: string[] = [];
 const warnings: string[] = [];
+
+// Plan-level declared paths (relevant-files + new-files) — used by the per-task
+// warn rule that flags body-cited paths not declared at the plan level (so
+// wave-overlap detection sees them).
+const planRelevantFilesBlock = extractTagContent(content, "relevant-files") || "";
+const planNewFilesBlock = extractTagContent(content, "new-files") || "";
+const planDeclaredPaths = new Set([
+  ...extractFileEntries(planRelevantFilesBlock).map((e) => e.path),
+  ...extractFileEntries(planNewFilesBlock).map((e) => e.path),
+]);
 
 // --- Required top-level tags ---
 const requiredTags = [
@@ -130,6 +140,10 @@ if (phases.length === 0) {
 
     // Task metadata checks
     const tasksContent = extractTagContent(phaseContent, "tasks") || "";
+
+    // Split tasks once — reused below for spec ref integrity, Assigned To
+    // validation, wave conflict detection, and the empty-relevant-files warn rule.
+    const taskSections = tasksContent.split(/####\s+\d+\.\s+/);
 
     const taskBlocks = tasksContent.match(/####\s+\d+\./g);
     if (taskBlocks && taskBlocks.length > 0) {
@@ -300,8 +314,7 @@ if (phases.length === 0) {
 
       // Ref integrity: tasks referencing specs that don't exist
       const specNamesSet = new Set(specNames);
-      const taskSectionsForRefs = tasksContent.split(/####\s+\d+\.\s+/);
-      for (const section of taskSectionsForRefs.slice(1)) {
+      for (const section of taskSections.slice(1)) {
         const taskIdMatch = section.match(/\*\*ID\*\*:\s*(\S+)/i);
         const refsMatch = section.match(/\*\*Spec refs\*\*:\s*(.+)/i);
         if (refsMatch) {
@@ -323,8 +336,7 @@ if (phases.length === 0) {
     }
 
     // --- Assigned To validation (single builder: devorch-builder) ---
-    const taskSectionsForME = tasksContent.split(/####\s+\d+\.\s+/);
-    for (const section of taskSectionsForME.slice(1)) {
+    for (const section of taskSections.slice(1)) {
       const taskIdMatchME = section.match(/\*\*ID\*\*:\s*(\S+)/i);
       const tid = taskIdMatchME ? taskIdMatchME[1] : "unknown";
 
@@ -351,6 +363,29 @@ if (phases.length === 0) {
       }
     }
 
+    // --- Empty <relevant-files> warn rule ---
+    // Tasks may cite paths in their body via backticks with a known extension.
+    // If the plan-level <relevant-files> block does NOT declare those paths,
+    // wave-overlap detection cannot reason about them — emit a warning so the
+    // author declares them explicitly. Defense-in-depth above the backtick-only
+    // fileRefs regex used by wave-overlap detection below.
+    // Path-shaped backtick contents only — no whitespace (excludes shell commands
+    // like `bun script.ts --flag x.md`), no template placeholders (excludes
+    // `<worktreePath>/foo.md`), and ends with a known source extension.
+    const fileMentionRegex = /`([^`\s<>]+\.(?:ts|tsx|js|jsx|md|sql|json|yaml|yml|sh|py|css|html))`/g;
+    for (const section of taskSections.slice(1)) {
+      const idMatch = section.match(/\*\*ID\*\*:\s*(\S+)/i);
+      const tid = idMatch ? idMatch[1] : "unknown";
+      const bodyPaths = [...section.matchAll(fileMentionRegex)].map((m) => m[1]);
+      if (bodyPaths.length === 0) continue;
+      const undeclared = [...new Set(bodyPaths)].filter((p) => !planDeclaredPaths.has(p));
+      if (undeclared.length > 0) {
+        warnings.push(
+          `Task ${tid} tem <relevant-files> vazio mas menciona paths no body: ${undeclared.join(", ")}. Declare-os explicitamente em <relevant-files> para que wave-overlap detection funcione.`
+        );
+      }
+    }
+
     // --- Wave conflict detection ---
     interface TaskFileInfo {
       id: string;
@@ -359,7 +394,6 @@ if (phases.length === 0) {
     }
 
     const tasks: TaskFileInfo[] = [];
-    const taskSections = tasksContent.split(/####\s+\d+\.\s+/);
 
     for (const section of taskSections.slice(1)) {
       const idMatch = section.match(/\*\*ID\*\*:\s*(\S+)/i);
