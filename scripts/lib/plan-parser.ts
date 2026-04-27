@@ -95,6 +95,20 @@ export function extractPhaseSpec(phaseContent: string): string | null {
   return match ? match[1].trim() || null : null;
 }
 
+/**
+ * Extracts spec element names from a `<spec>` block.
+ *
+ * Spec types iterated:
+ * - Named tags (`interface`, `error-contract`, `behavior`, `entity`): require an
+ *   explicit `name="..."` attribute, which is used verbatim as the spec name.
+ * - Invariant: an implicit ordinal `invariant-N` (1-indexed by document order) is
+ *   always emitted; if the tag also carries `name="..."`, that explicit name is
+ *   emitted alongside the ordinal (both survive to the dedup step).
+ * - Endpoint: implicit `METHOD-/path` derived from the `method` and `path`
+ *   attributes (method uppercased; either attribute order accepted).
+ *
+ * Returns: deduplicated array preserving first-occurrence order.
+ */
 export function parseSpecNames(specContent: string): string[] {
   const names: string[] = [];
 
