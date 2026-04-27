@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, cpSync, readFileSync, appendFileSync, writeFileS
 import { join, resolve, relative, sep } from "path";
 import { parseArgs } from "./lib/args";
 import { isGitRepo, checkBranchExists, getUncommittedFiles, getUntrackedFiles } from "./lib/git-utils";
+import { CACHE_FRESHNESS_MS } from "./lib/constants";
 
 const args = parseArgs<{ name: string; secondary: string; recreate: boolean; "add-secondary": string; "sparse-paths": string; "no-env": boolean; "allow-devorch-dirt": boolean }>([
   { name: "name", type: "string", required: true },
@@ -420,9 +421,14 @@ if (existsSync(devorchSrc)) {
     stderr: "pipe",
   });
 
-  const changedFiles = diffProc.stdout.toString().trim().split("\n").filter(Boolean);
-  const untrackedFiles = untrackedProc.stdout.toString().trim().split("\n").filter(Boolean);
-  const filesToCopy = [...changedFiles, ...untrackedFiles];
+  let filesToCopy: string[] = [];
+  if (diffProc.exitCode !== 0 || untrackedProc.exitCode !== 0) {
+    console.error(`[setup-worktree] git spawn failed (diff: ${diffProc.exitCode}, untracked: ${untrackedProc.exitCode}) — skipping .devorch copy`);
+  } else {
+    const changedFiles = diffProc.stdout.toString().trim().split("\n").filter(Boolean);
+    const untrackedFiles = untrackedProc.stdout.toString().trim().split("\n").filter(Boolean);
+    filesToCopy = [...changedFiles, ...untrackedFiles];
+  }
 
   for (const relPath of filesToCopy) {
     const src = join(cwd, relPath);
@@ -438,22 +444,47 @@ if (existsSync(devorchSrc)) {
   mkdirSync(join(devorchDst, "plans"), { recursive: true });
 }
 
-// Pre-warm project-map.md cache in the worktree when mainRoot has a fresh copy.
-// Step 1 of the orchestrator writes map-project.ts output to <mainRoot>/.devorch/cache/;
-// copying it here avoids init-phase.ts having to spawn map-project from scratch on the first phase.
+// Pre-warm project-map.md cache in the worktree.
+// setup-worktree owns invocation of map-project.ts: when <mainRoot>/.devorch/cache/project-map.md
+// is missing or stale, spawn `bun map-project.ts <mainRoot> --persist` synchronously to refresh it,
+// then copy the fresh result to <worktreePath>/.devorch/cache/. This keeps init-phase's resume path
+// independent (it still has its own fallback via runMapProject), but avoids duplicate work in the
+// common cold-start case.
 const cacheSrc = join(cwd, ".devorch", "cache", "project-map.md");
-if (existsSync(cacheSrc)) {
+let cachePrewarmSkipped = false;
+
+function isCacheFresh(): boolean {
   try {
-    const mtimeMs = statSync(cacheSrc).mtimeMs;
-    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
-    if (mtimeMs > fiveMinAgo) {
-      const cacheDstDir = join(worktreePath, ".devorch", "cache");
-      mkdirSync(cacheDstDir, { recursive: true });
-      cpSync(cacheSrc, join(cacheDstDir, "project-map.md"), { preserveTimestamps: true });
-    }
-  } catch (err) {
-    console.error(`[setup-worktree] cache pre-warm failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (!existsSync(cacheSrc)) return false;
+    return statSync(cacheSrc).mtimeMs > Date.now() - CACHE_FRESHNESS_MS;
+  } catch {
+    return false;
   }
+}
+
+try {
+  let fresh = isCacheFresh();
+  if (!fresh) {
+    const mapProjectScript = resolve(import.meta.dir, "map-project.ts");
+    const mapProc = Bun.spawnSync(["bun", mapProjectScript, cwd, "--persist"], {
+      cwd,
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    if (mapProc.exitCode === 0) {
+      fresh = isCacheFresh();
+    } else {
+      console.error(`[setup-worktree] map-project spawn exited ${mapProc.exitCode} — cache not refreshed`);
+    }
+  }
+  if (fresh) {
+    const cacheDstDir = join(worktreePath, ".devorch", "cache");
+    mkdirSync(cacheDstDir, { recursive: true });
+    cpSync(cacheSrc, join(cacheDstDir, "project-map.md"), { preserveTimestamps: true });
+  }
+} catch (err) {
+  console.error(`[setup-worktree] cache pre-warm skipped: ${err instanceof Error ? err.message : String(err)}`);
+  cachePrewarmSkipped = true;
 }
 
 // Setup satellite worktrees if --secondary provided
@@ -476,6 +507,10 @@ if (primaryWarnings.length > 0) {
 
 if (satellites.length > 0) {
   output.satellites = satellites;
+}
+
+if (cachePrewarmSkipped) {
+  output.cachePrewarmSkipped = true;
 }
 
 console.log(JSON.stringify(output, null, 2));

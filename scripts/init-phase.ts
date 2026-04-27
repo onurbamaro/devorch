@@ -34,6 +34,7 @@ import { dirname, resolve } from "path";
 import { parseArgs } from "./lib/args";
 import { parsePhaseBounds, readPlan, extractPlanTitle, extractSecondaryRepos, extractPhaseSpec, filterSpecsByRefs } from "./lib/plan-parser";
 import { safeReadFile } from "./lib/fs-utils";
+import { CACHE_FRESHNESS_MS } from "./lib/constants";
 import {
   extractFileRefs,
   parseGotchaEntries,
@@ -208,8 +209,7 @@ function isProjectMapFresh(): boolean {
   try {
     if (!existsSync(projectMapPath)) return false;
     const mtime = statSync(projectMapPath).mtimeMs;
-    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
-    return mtime > fiveMinAgo;
+    return mtime > Date.now() - CACHE_FRESHNESS_MS;
   } catch {
     return false;
   }
