@@ -483,7 +483,8 @@ try {
     cpSync(cacheSrc, join(cacheDstDir, "project-map.md"), { preserveTimestamps: true });
   }
 } catch (err) {
-  console.error(`[setup-worktree] cache pre-warm skipped: ${err instanceof Error ? err.message : String(err)}`);
+  const errMsg = err instanceof Error ? err.message : String(err);
+  console.error(`[setup-worktree] cache pre-warm skipped: ${errMsg.slice(0, 200)}`);
   cachePrewarmSkipped = true;
 }
 
