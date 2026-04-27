@@ -41,6 +41,7 @@ Risk: <risk>
 
 <relevant-files>
 - `path/to/file` — why it's relevant
+</relevant-files>
 
 <new-files>
 - `path/to/new/file` — what it is
@@ -54,7 +55,6 @@ Risk: <risk>
      phase-summary.ts and merge-worktree.ts, where `path` is the satellite's
      repoPath (the repo root). merge-worktree.ts resolves `.worktrees/<name>`
      internally; phase-summary.ts reads only name + status. -->
-</relevant-files>
 
 <!-- optional — cross-cutting invariants: -->
 <global-invariants>
