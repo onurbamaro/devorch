@@ -31,13 +31,13 @@ If `--resume` is present:
 
 ## Step 1 — Load context
 
-Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Also redirect its stdout to `<mainRoot>/.devorch/cache/project-map.md` (run `mkdir -p <mainRoot>/.devorch/cache` first if needed) — this primes the cache that `setup-worktree.ts` copies into the worktree. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
+Read `<mainRoot>/.devorch/cache/project-map.md` (escrito por `setup-worktree.ts` em Step 2 quando cache não fresh). Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
 
-Step 1 and Step 2 can run in parallel — dispatch them in the same message via multiple tool calls. Both operate against `<mainRoot>` and neither depends on the other's output.
+Step 1 lê o cache que Step 2 garante. Dispatch ordering: Step 2 primeiro (quando cache stale, ele spawneia map-project sync); Step 1 lê o arquivo após Step 2 retornar. As demais leituras de Step 1 (GOTCHAS, profile) podem rodar em paralelo com Step 2 — não dependem do cache.
 
 ## Step 2 — Worktree
 
-Step 2 can be dispatched in parallel with Step 1 — there is no dependency between them.
+`setup-worktree.ts` agora é dono da invocação de `map-project`. Quando o cache em `<mainRoot>/.devorch/cache/project-map.md` não está fresh (ausente ou mtime > `CACHE_FRESHNESS_MS`), ele spawneia `map-project` sync com `--persist` antes de copiar pro worktree. Sob falha de copy (mainRoot read-only em CI/sandbox), o JSON output retorna `cachePrewarmSkipped: true` — surface como warning.
 
 1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`.
 2. Record `mainRoot = <cwd>` and `originalBranch = git branch --show-current`.
