@@ -438,6 +438,24 @@ if (existsSync(devorchSrc)) {
   mkdirSync(join(devorchDst, "plans"), { recursive: true });
 }
 
+// Pre-warm project-map.md cache in the worktree when mainRoot has a fresh copy.
+// Step 1 of the orchestrator writes map-project.ts output to <mainRoot>/.devorch/cache/;
+// copying it here avoids init-phase.ts having to spawn map-project from scratch on the first phase.
+const cacheSrc = join(cwd, ".devorch", "cache", "project-map.md");
+if (existsSync(cacheSrc)) {
+  try {
+    const mtimeMs = statSync(cacheSrc).mtimeMs;
+    const fiveMinAgo = Date.now() - 5 * 60 * 1000;
+    if (mtimeMs > fiveMinAgo) {
+      const cacheDstDir = join(worktreePath, ".devorch", "cache");
+      mkdirSync(cacheDstDir, { recursive: true });
+      cpSync(cacheSrc, join(cacheDstDir, "project-map.md"), { preserveTimestamps: true });
+    }
+  } catch (err) {
+    console.error(`[setup-worktree] cache pre-warm failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // Setup satellite worktrees if --secondary provided
 const satellites: SatelliteResult[] = [];
 
