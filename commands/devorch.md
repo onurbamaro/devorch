@@ -31,13 +31,13 @@ If `--resume` is present:
 
 ## Step 1 — Load context
 
-Run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts` to collect folder structure, scripts, and sibling repos inline. Also redirect its stdout to `<mainRoot>/.devorch/cache/project-map.md` (run `mkdir -p <mainRoot>/.devorch/cache` first if needed) — this primes the cache that `setup-worktree.ts` copies into the worktree. Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
+Read `<mainRoot>/.devorch/cache/project-map.md` (escrito por `setup-worktree.ts` em Step 2 quando cache não fresh). Read `.devorch/GOTCHAS.md` if it exists (fall back to `.devorch/CONVENTIONS.md` for legacy projects). Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`) and keep its content as `<profile>` for the guardian prompt. If neither exists, use the implicit defaults documented in `docs/PROFILE.md` § Defaults when absent (`priorities: [security, performance, dx, cost]`, no biases).
 
-Step 1 and Step 2 can run in parallel — dispatch them in the same message via multiple tool calls. Both operate against `<mainRoot>` and neither depends on the other's output.
+Step 1 lê o cache que Step 2 garante. Dispatch ordering: Step 2 primeiro (quando cache stale, ele spawneia map-project sync); Step 1 lê o arquivo após Step 2 retornar. As demais leituras de Step 1 (GOTCHAS, profile) podem rodar em paralelo com Step 2 — não dependem do cache.
 
 ## Step 2 — Worktree
 
-Step 2 can be dispatched in parallel with Step 1 — there is no dependency between them.
+`setup-worktree.ts` agora é dono da invocação de `map-project`. Quando o cache em `<mainRoot>/.devorch/cache/project-map.md` não está fresh (ausente ou mtime > `CACHE_FRESHNESS_MS`), ele spawneia `map-project` sync com `--persist` antes de copiar pro worktree. Sob falha de copy (mainRoot read-only em CI/sandbox), o JSON output retorna `cachePrewarmSkipped: true` — surface como warning.
 
 1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`.
 2. Record `mainRoot = <cwd>` and `originalBranch = git branch --show-current`.
@@ -159,7 +159,7 @@ For each task in the plan, perform the four sub-rules:
    - Migration filenames (`db/migrations/NNNN_*.sql`) when the task adds a schema change — even if the exact filename is generated.
    - Type re-exports (`types.ts`, `index.d.ts`) when the task adds a new type that other modules import.
 
-2. **Grep verification (deterministic)** — for each candidate from sub-rule 1, run a Bash grep against the worktree to confirm the file actually exists and is plausibly touched. Example: `git -C <projectRoot> ls-files | grep -E '(^|/)index\.ts$'` to enumerate barrels, or `grep -rn "export \* from" <projectRoot>/src` to find re-export sites. Do not propagate a candidate that grep cannot confirm. Batch greps across tasks into a single Bash invocation when patterns/paths permit (e.g. `git -C <projectRoot> ls-files | grep -E '<pat1>|<pat2>|<pat3>'`) instead of one Bash call per task — the regex alternation covers the union and the orchestrator demultiplexes results back to each task locally.
+2. **Grep verification (deterministic)** — for each candidate from sub-rule 1, run a Bash grep against the worktree to confirm the file actually exists and is plausibly touched. Example: `git -C <projectRoot> ls-files | grep -E '(^|/)index\.ts$'` to enumerate barrels, or `grep -rn "export \* from" <projectRoot>/src` to find re-export sites. Do not propagate a candidate that grep cannot confirm. Batch greps across tasks into a single Bash invocation when patterns/paths permit (e.g. `git -C <projectRoot> ls-files | grep -E '<pat1>|<pat2>|<pat3>'`) instead of one Bash call per task — the regex alternation covers the union and the orchestrator demultiplexes results back to each task locally. Escapar metachars (`.`, `*`, `+`, `[`) nos patterns — alternation só cobre paths literais simples; para paths com chars especiais, separe em greps individuais.
 
 3. **Silent re-wave (overlap resolution)** — if two or more tasks in the same wave share a verified implicit touch, move the later tasks to a subsequent wave so each wave's effective file set (declared + implicit) stays disjoint. Rewrite the plan file in place, then log a single line — no `AskUserQuestion`, no user gate. Example log line:
    ```
@@ -167,7 +167,7 @@ For each task in the plan, perform the four sub-rules:
    ```
    This is the expected case: implicit overlap is mechanical, not a design decision. The orchestrator resolves it without consulting the user.
 
-4. **Migration collision check (cross-wave)** — for each repo (primary + each entry in `<satellites>`) that has at least one task adding a migration, list the migration filenames committed on the base branch via `git -C <repo> ls-tree origin/<mainBranch>:<satellite>/db/migrations/` (use the satellite-specific path when the task is on a satellite; for the primary repo use `git -C <projectRoot> ls-tree origin/<mainBranch>:db/migrations/` or whatever migrations directory the repo uses). If a planned migration filename collides with an existing one on origin, auto-bump the planned filename's numeric prefix to the next free slot and rewrite the plan accordingly. Log a single line: `Migration bumped: NNNN → MMMM em <repo> (collision com origin/<mainBranch>).`
+4. **Migration collision check (cross-wave)** — for each repo (primary + each entry in `<satellites>`) that has at least one task adding a migration, list the migration filenames committed on the base branch via `git -C <satellite.repoPath> ls-tree origin/<mainBranch>:db/migrations/` (use the satellite-specific path when the task is on a satellite; for the primary repo use `git -C <projectRoot> ls-tree origin/<mainBranch>:db/migrations/` or whatever migrations directory the repo uses). (git roda dentro do satellite repo via `-C`, então o tree path é relativo a esse repo — não prefixar com `<satellite>/`.) If a planned migration filename collides with an existing one on origin, auto-bump the planned filename's numeric prefix to the next free slot and rewrite the plan accordingly. Log a single line: `Migration bumped: NNNN → MMMM em <repo> (collision com origin/<mainBranch>).`
 
 After sub-rules run, the plan file on disk reflects any re-waves and migration bumps. Step 8 then runs against the rewritten plan.
 
