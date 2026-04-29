@@ -217,11 +217,13 @@ After the DAG completes, run all of the following in parallel in a single assist
 Before classifying and dispatching, compute file overlap between findings. Two findings touching the same file CANNOT be dispatched in parallel — sequence them. Findings on disjoint files run in parallel.
 
 Classify each finding:
-- **Trivial** (1–2 files, obvious fix) → apply inline with Edit.
-- **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder` agents in parallel (respecting non-overlap).
+- **Trivial** (1–2 files, obvious fix) → batch ALL trivial findings into a SINGLE `devorch-builder` agent prompt with bullet-points. Do NOT use inline Edit — that pollutes the orchestrator context with file contents that aren't needed for downstream stages. The builder handles all trivial fixes in isolated context and returns a clean Build Report.
+- **Fix-level** (well-defined, 3+ files or non-trivial) → launch one `devorch-builder` per finding in parallel (respecting non-overlap with other fix-level findings AND the trivial batch's files).
 - **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested fresh `/devorch` prompt.
 
-Skip this stage entirely if every reviewer + residual scan reported zero findings. After fixes, re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath>` (full if any fix-level launched, append `--quick` if trivial only). One retry on failure.
+Dispatch shape: in a single assistant message, launch the trivial-batch builder (if any) plus all non-overlapping fix-level builders in parallel. Sequence overlapping fix-level findings into subsequent dispatches.
+
+Skip this stage entirely if every reviewer + residual scan reported zero findings. After fixes, re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath>` (full if any fix-level launched, append `--quick` if trivial-only). One retry on failure.
 
 ## Stage 5 — Verdict + save flags
 
