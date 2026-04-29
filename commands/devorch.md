@@ -18,26 +18,24 @@ After stripping `--resume`, if the remaining `$ARGUMENTS` is empty and `--resume
 ## Stage 0 — Resume short-circuit
 
 If `--resume` is present:
-1. List active worktrees that have an in-progress plan: scan `.worktrees/*/.devorch/plans/*.md` (excluding `archive/`), skipping plans where every `<phase>` already has `status="done"`.
+1. Run `bun $CLAUDE_HOME/devorch-scripts/list-active-plans.ts`. Parse JSON `{count, plans: [{worktree, planPath, planTitle, donePhases, totalPhases}]}`.
 2. If `count == 0` → report "Nenhum plano em progresso para retomar." and stop.
-3. If `count == 1` → resume that worktree directly. If `count > 1` → `AskUserQuestion` listing each worktree name + plan title and pick one.
-4. Bind: `mainRoot = <cwd>`, `worktreePath = <mainRoot>/.worktrees/<name>`, `originalBranch` = `git -C <mainRoot> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` stripped of `origin/` (fall back to `main`/`master`/whatever HEAD pointed at when the worktree was created — read from `<worktreePath>/.devorch/cache/origin-branch.txt` if present, else default to current branch of mainRoot).
-5. Set `planPath = <worktreePath>/.devorch/plans/<active-plan>.md`. All subsequent operations use `<worktreePath>` as the working directory. Skip Stages 1 and 2; jump to Stage 3 (build scheduler), which reads the plan and resumes from the first non-done phase.
+3. If `count == 1` → resume that worktree directly. If `count > 1` → `AskUserQuestion` listing each `<planTitle>` (worktree `<worktree>`, `<donePhases>/<totalPhases>` phases done) and pick one.
+4. Bind: `mainRoot = <cwd>`, `worktreePath = <mainRoot>/.worktrees/<chosen.worktree>`, `planPath = <chosen.planPath>`. Read `originalBranch` from `<worktreePath>/.devorch/cache/origin-branch.txt` (written by `setup-worktree.ts` at session start). If missing, fall back to `git -C <mainRoot> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` stripped of `origin/`, then `main`, then `master`.
+5. All subsequent operations use `<worktreePath>` as the working directory. If `<worktreePath>/.devorch/cache/explore.json` exists (persisted at end of Stage 1), parse it and treat its `findings` as the resume-mode explore context for builder prompts. Skip Stages 1 and 2; jump to Stage 3 (build scheduler), which reads the plan and resumes from the first non-done phase.
 
-Note: on resume, the original explore findings are gone. The scheduler proceeds with whatever the plan and gotchas already encode. If a remaining phase needs broader context, the scheduler may launch a fresh Explore agent inline before dispatching that phase.
+Note: even when `explore.json` is absent (older worktrees), the scheduler proceeds with plan + gotchas. If a remaining phase needs broader context, it may launch a fresh Explore agent inline before dispatching that phase.
 
 ## Stage 0.5 — Worktree setup (always, unless resuming)
 
-If Stage 0 did NOT short-circuit, every fresh `/devorch` invocation creates a worktree before any other work:
+If Stage 0 did NOT short-circuit, every fresh `/devorch` invocation creates a worktree before any other work via `setup-worktree.ts`:
 
-1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`. Reused as the plan filename in Stage 2 and the branch name `devorch/<name>`.
-2. Record `mainRoot = <cwd>` and `originalBranch = git -C <mainRoot> branch --show-current`.
-3. If `<mainRoot>` has uncommitted changes (`git -C <mainRoot> status --porcelain` non-empty), surface a one-line note: `WIP no branch original: <N> arquivo(s) — preservados em <mainRoot>, não entram no worktree.` The worktree starts from `HEAD`; the user's WIP stays untouched on the original branch.
-4. If `.worktrees/<name>` already exists or branch `devorch/<name>` already exists: append a numeric suffix (`<name>-2`, `-3`, ...) until both are free.
-5. Run `git -C <mainRoot> worktree add .worktrees/<name> -b devorch/<name>`. Set `worktreePath = <mainRoot>/.worktrees/<name>`.
-6. Persist resume metadata: write `<originalBranch>` to `<worktreePath>/.devorch/cache/origin-branch.txt` (mkdir as needed). This lets `--resume` recover the merge target without re-asking.
-7. If `<mainRoot>/.devorch/GOTCHAS.md` exists but the worktree's copy is missing, copy it: `mkdir -p <worktreePath>/.devorch && cp <mainRoot>/.devorch/GOTCHAS.md <worktreePath>/.devorch/GOTCHAS.md`.
-8. From here forward, every Bash/git/script invocation uses `<worktreePath>` as the working directory (or `git -C <worktreePath>`). Builders receive `Working directory: <worktreePath>` in their prompts.
+1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`. Reused as the plan filename in Stage 2.
+2. Record `mainRoot = <cwd>`.
+3. Run `bun $CLAUDE_HOME/devorch-scripts/setup-worktree.ts --name <name>`. Parse JSON `{worktreePath, branchName, originalBranch, uncommittedFilesCount, gotchasCopied, suffixed}`. The script handles atomically: collision suffixing if `.worktrees/<name>` or branch `devorch/<name>` already exist, `git worktree add` on a new branch, persisting `originalBranch` to `<worktreePath>/.devorch/cache/origin-branch.txt`, and copying `GOTCHAS.md` forward.
+4. If `uncommittedFilesCount > 0`, surface a one-line note: `WIP no branch original: <N> arquivo(s) — preservados em <mainRoot>, não entram no worktree.` The user's WIP stays untouched on the original branch.
+5. If `suffixed` is true, log: `Nome <baseName> em uso, usando <worktreePath>.`
+6. From here forward, every Bash/git/script invocation uses `<worktreePath>` as the working directory (or `git -C <worktreePath>`). Builders receive `Working directory: <worktreePath>` in their prompts.
 
 ## Stage 1 — Discovery (parallel)
 
