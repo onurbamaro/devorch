@@ -8,30 +8,44 @@ disallowed-tools: EnterPlanMode
 
 Single-mode entry point for devorch. Use it whenever you need orchestration of medium-to-large work — for trivial edits (single-file typo, rename in a known location), use vanilla Claude Code; devorch's ceremony does not pay off there.
 
-Pipeline has 5 stages: discovery → plan → build (DAG scheduler) → quality gates → save flags. Worktrees are NOT a devorch internal — if you want two parallel sessions on the same repo, create them yourself with `git worktree add` and run a separate Claude Code in each. Devorch always commits directly to the current branch.
+Pipeline has 6 stages: worktree setup → discovery → plan → build (DAG scheduler) → quality gates → merge + save flags. **Every devorch session runs inside a fresh `git worktree`** so your WIP on the current branch is never disturbed and any session can be discarded by deleting the worktree. The orchestrator merges back into your original branch at the end with smart conflict resolution.
 
 **Input**: `$ARGUMENTS` — description plus optional flag:
-- `--resume` — resume an in-progress plan on the current branch (no description needed)
+- `--resume` — resume an in-progress session (auto-finds the active worktree; no description needed)
 
 After stripping `--resume`, if the remaining `$ARGUMENTS` is empty and `--resume` is not set, stop and ask the user.
 
 ## Stage 0 — Resume short-circuit
 
 If `--resume` is present:
-1. List `.md` files under `.devorch/plans/` (excluding `archive/`) where the file does not have all phases marked `status="done"`.
+1. List active worktrees that have an in-progress plan: scan `.worktrees/*/.devorch/plans/*.md` (excluding `archive/`), skipping plans where every `<phase>` already has `status="done"`.
 2. If `count == 0` → report "Nenhum plano em progresso para retomar." and stop.
-3. If `count == 1` → resume that plan directly. If `count > 1` → `AskUserQuestion` listing each plan title and pick one.
-4. Set `planPath = .devorch/plans/<chosen>.md`. Skip Stages 1 and 2 entirely; jump to Stage 3 (build scheduler) which reads the plan and resumes from the first non-done phase.
+3. If `count == 1` → resume that worktree directly. If `count > 1` → `AskUserQuestion` listing each worktree name + plan title and pick one.
+4. Bind: `mainRoot = <cwd>`, `worktreePath = <mainRoot>/.worktrees/<name>`, `originalBranch` = `git -C <mainRoot> symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` stripped of `origin/` (fall back to `main`/`master`/whatever HEAD pointed at when the worktree was created — read from `<worktreePath>/.devorch/cache/origin-branch.txt` if present, else default to current branch of mainRoot).
+5. Set `planPath = <worktreePath>/.devorch/plans/<active-plan>.md`. All subsequent operations use `<worktreePath>` as the working directory. Skip Stages 1 and 2; jump to Stage 3 (build scheduler), which reads the plan and resumes from the first non-done phase.
 
 Note: on resume, the original explore findings are gone. The scheduler proceeds with whatever the plan and gotchas already encode. If a remaining phase needs broader context, the scheduler may launch a fresh Explore agent inline before dispatching that phase.
 
+## Stage 0.5 — Worktree setup (always, unless resuming)
+
+If Stage 0 did NOT short-circuit, every fresh `/devorch` invocation creates a worktree before any other work:
+
+1. Derive `<name>` (kebab-case, 3–5 words) from `$ARGUMENTS`. Reused as the plan filename in Stage 2 and the branch name `devorch/<name>`.
+2. Record `mainRoot = <cwd>` and `originalBranch = git -C <mainRoot> branch --show-current`.
+3. If `<mainRoot>` has uncommitted changes (`git -C <mainRoot> status --porcelain` non-empty), surface a one-line note: `WIP no branch original: <N> arquivo(s) — preservados em <mainRoot>, não entram no worktree.` The worktree starts from `HEAD`; the user's WIP stays untouched on the original branch.
+4. If `.worktrees/<name>` already exists or branch `devorch/<name>` already exists: append a numeric suffix (`<name>-2`, `-3`, ...) until both are free.
+5. Run `git -C <mainRoot> worktree add .worktrees/<name> -b devorch/<name>`. Set `worktreePath = <mainRoot>/.worktrees/<name>`.
+6. Persist resume metadata: write `<originalBranch>` to `<worktreePath>/.devorch/cache/origin-branch.txt` (mkdir as needed). This lets `--resume` recover the merge target without re-asking.
+7. If `<mainRoot>/.devorch/GOTCHAS.md` exists but the worktree's copy is missing, copy it: `mkdir -p <worktreePath>/.devorch && cp <mainRoot>/.devorch/GOTCHAS.md <worktreePath>/.devorch/GOTCHAS.md`.
+8. From here forward, every Bash/git/script invocation uses `<worktreePath>` as the working directory (or `git -C <worktreePath>`). Builders receive `Working directory: <worktreePath>` in their prompts.
+
 ## Stage 1 — Discovery (parallel)
 
-All of the following run in parallel — single assistant message with multiple tool calls. Both Bash calls are robust (always exit 0 on missing optional inputs) so a failure in one does NOT cancel the parallel Explore agents:
+All of the following run in parallel — single assistant message with multiple tool calls. Both Bash calls are robust (always exit 0 on missing optional inputs) so a failure in one does NOT cancel the parallel Explore agents. **Both scripts receive `<worktreePath>` as positional arg** so they read/write inside the worktree, not mainRoot.
 
-1. **Project map** — run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --persist`. The script writes `.devorch/cache/project-map.md` and prints structural snapshot (3-level tree, scripts, Makefile, sibling repos).
-2. **Context loader** — run `bun $CLAUDE_HOME/devorch-scripts/load-context.ts`. Always exits 0. Returns JSON `{gotchas, gotchasLegacy, profile: {raw, source}, silencedStandards, warnings}`. The script handles missing files (empty strings), legacy `CONVENTIONS.md` fallback, and profile precedence (per-project → user-home → defaults from `docs/PROFILE.md`). Keep `profile.raw` as `<profile>` for the guardian role; consult `silencedStandards` before emitting heads-ups.
-3. **Explore agents** — launch 1–3 Explore agents (`subagent_type="Explore"`) with focuses derived from `$ARGUMENTS`:
+1. **Project map** — run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts <worktreePath> --persist`. The script writes `<worktreePath>/.devorch/cache/project-map.md` and prints a structural snapshot (3-level tree, scripts, Makefile, sibling repos).
+2. **Context loader** — run `bun $CLAUDE_HOME/devorch-scripts/load-context.ts <worktreePath>`. Always exits 0. Returns JSON `{gotchas, gotchasLegacy, profile: {raw, source}, silencedStandards, warnings}`. The script handles missing files (empty strings), legacy `CONVENTIONS.md` fallback, and profile precedence (per-project → user-home → defaults from `docs/PROFILE.md`). Keep `profile.raw` as `<profile>` for the guardian role; consult `silencedStandards` before emitting heads-ups.
+3. **Explore agents** — launch 1–3 Explore agents (`subagent_type="Explore"`) with focuses derived from `$ARGUMENTS`. **Every Explore prompt must include `Working directory: <worktreePath>` so the agent searches inside the worktree, not mainRoot:**
    - Always: 1 agent on architecture + existing patterns in the touched area.
    - When the request spans 2+ modules or has multi-feature scope: 1 additional agent on risks/edge surfaces.
    - When the request references a specific contract / spec / behavior: 1 additional agent dedicated to locating and reading it deeply.
@@ -131,7 +145,7 @@ Loop until every phase in the plan is marked `status="done"`:
 
 For each task, build the prompt as follows:
 
-1. **Working directory** — `Working directory: <cwd>` (the current repo root). All git operations run on the current branch.
+1. **Working directory** — `Working directory: <worktreePath>` (the devorch worktree). All git operations use `git -C <worktreePath>`; the builder commits directly on branch `devorch/<name>`.
 2. **Plan context** — Plan title + `<objective>` + `<solution-approach>` (if present) + `<decisions>`.
 3. **Full task details** — read `<planPath>` and extract the section for this task (from `#### N. <Title>` until the next `#### ` or `</tasks>` boundary). Include task ID, Files, Spec refs, Exemplars, Non-goals, body bullets.
 4. **Spec contracts** — resolve Spec refs against the phase's `<spec>` block; inline the referenced `<entity>`/`<behavior>`/`<invariant>`/`<endpoint>`/`<error-contract>` elements.
@@ -151,8 +165,8 @@ On the resume path, the original Stage 1 findings are gone. If a phase about to 
 
 After the DAG completes, run all of the following in parallel in a single assistant message:
 
-1. **`check-project`** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <cwd>` (full: lint + typecheck + build + tests). Parse JSON.
-2. **Adversarial reviewers** — 4 Explore agents (`subagent_type="Explore"`, foreground), each receiving: `Working directory: <cwd>`, plan objective, GOTCHAS.md (if present), changed-files list (`git diff --name-only <baseBranch>...HEAD`).
+1. **`check-project`** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath>` (full: lint + typecheck + build + tests). Parse JSON.
+2. **Adversarial reviewers** — 4 Explore agents (`subagent_type="Explore"`, foreground), each receiving: `Working directory: <worktreePath>`, plan objective, GOTCHAS.md (if present), changed-files list (`git -C <worktreePath> diff --name-only <originalBranch>...HEAD`).
    - **security** — OWASP Top 10 anti-patterns, injection risks, auth gaps, data exposure, secrets handling
    - **performance** — estimated cost, anti-patterns (N+1, full scans, polling, synchronous workers, server-side buffering), cache opportunities
    - **completeness** — spec vs delivery: every `<spec>` element satisfied? cross-phase integration intact? handoffs honored? Required method: for each `<behavior>`/`<invariant>`/`<endpoint>` in the plan, grep the changed files for its identifying symbol AND verify with a direct Read on the relevant line range. Do not infer from absence at a stale line number.
@@ -172,7 +186,7 @@ Classify each finding:
 - **Fix-level** (well-defined, 3+ files or non-trivial) → launch `devorch-builder` agents in parallel (respecting non-overlap).
 - **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested fresh `/devorch` prompt.
 
-Skip this stage entirely if every reviewer + residual scan reported zero findings. After fixes, re-run `check-project` (full if any fix-level launched, `--quick` if trivial only). One retry on failure.
+Skip this stage entirely if every reviewer + residual scan reported zero findings. After fixes, re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath>` (full if any fix-level launched, append `--quick` if trivial only). One retry on failure.
 
 ## Stage 5 — Verdict + save flags
 
@@ -202,14 +216,51 @@ Lint / Typecheck / Build / Tests: status
 ### Verdict: PASS / PASS com N pendências / FAIL
 ```
 
-### Archive plan
+### Archive plan (inside the worktree)
 
 If verdict is PASS (or PASS with non-blocking pendencies):
-- `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` — moves plan to `.devorch/plans/archive/<name>.md` AND stages it for commit (`git add -f` on the archive path, `git add -u` on the active path to capture deletion if it was tracked). The script's JSON output includes `staged: true|false`; if `staged` is false, `git` is unavailable and the orchestrator should fall back to manual staging.
-- Also archive the flags file alongside if present: `git mv -f .devorch/flags-<name>.md .devorch/archive/flags-<name>-<YYYY-MM-DD>.md` (or copy + delete + `git add -f` if `git mv` rejects gitignored sources).
-- Commit: `chore(devorch): archive plan — <name>`.
+- `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` — moves plan to `<worktreePath>/.devorch/plans/archive/<date>-<name>.md` AND stages it for commit (`git add -f` on the archive path, `git add -u` on the active path to capture deletion if it was tracked). The script's JSON output includes `staged: true|false`.
+- Also archive the flags file alongside if present: `git -C <worktreePath> mv -f .devorch/flags-<name>.md .devorch/plans/archive/flags-<date>-<name>.md` (or copy + delete + `git add -f` if `git mv` rejects gitignored sources).
+- Commit inside the worktree: `git -C <worktreePath> commit -m "chore(devorch): archive plan — <name>"`.
 
-On FAIL → keep the plan active so `--resume` can pick up where the failure left off. Suggest the user inspect, then `/devorch --resume` after fixing manually, or a fresh `/devorch "<fix description>"`.
+On FAIL → keep the plan active so `--resume` can pick up where the failure left off. Suggest the user inspect, then `/devorch --resume` after fixing manually, or a fresh `/devorch "<fix description>"`. The worktree stays put.
+
+### Merge into the original branch
+
+After the archive commit lands inside the worktree, fold the work back into `<originalBranch>` on `<mainRoot>`:
+
+1. **Rebase the worktree onto the freshest origin tip**:
+   - `git -C <worktreePath> fetch origin <originalBranch>` (skip silently if no `origin` remote — log "no origin remote, skipping fetch").
+   - `git -C <worktreePath> rebase origin/<originalBranch>` (or just `<originalBranch>` if no remote). On conflict, follow the **Conflict resolution rule** below until rebase completes.
+2. **Sanity check after rebase**: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath> --quick` (lint + typecheck only). If it fails, stop and surface — the rebase introduced breakage that needs human attention.
+3. **Merge into mainRoot**:
+   - `git -C <mainRoot> merge --no-ff devorch/<name> -m "merge(devorch): <plan-name>"` (use the plan's `# Plan: <Title>` as `<plan-name>`).
+   - On conflict, follow the **Conflict resolution rule** below until merge completes.
+4. **Cleanup** (only after merge succeeds and `git -C <mainRoot> status --porcelain` is clean):
+   - `git -C <mainRoot> worktree remove <worktreePath>` (or `--force` if working tree is dirty for a known reason).
+   - `git -C <mainRoot> branch -d devorch/<name>` (use `-D` if `-d` rejects because of an unrelated rebase state — surface a warning if so).
+
+#### Conflict resolution rule
+
+Both `git rebase` and `git merge --no-ff` may produce conflicts when the original branch advanced while the worktree was building. **Resolve every conflict by reading and judging — never blindly take one side.**
+
+For each conflicted file:
+
+1. Read the file. The standard conflict markers are present (`<<<<<<<`, `=======`, `>>>>>>>`).
+2. Identify the **intent of each side**:
+   - `<<<<<<< HEAD` (our side during merge — the original branch's recent change; or during rebase, the upstream side).
+   - `>>>>>>> devorch/<name>` (their side — the worktree's change; or during rebase, your in-progress commit).
+3. Apply the **keep-both-when-valid principle**: if both sides represent legitimate, non-contradictory changes (e.g. the original branch fixed a bug in function A while the worktree added function B in the same file), the resolved file MUST contain both changes. The conflict only existed because git couldn't 3-way-merge line-adjacent edits — semantically there's no real conflict.
+4. Cases:
+   - **Both sides valid, additive** → keep both (interleave functions, merge import lists, concatenate test cases). Most common case.
+   - **Both sides valid, refactoring same surface differently** → synthesize a version that preserves the intent of both (e.g., the original renamed `fooBar` → `foo_bar` while the worktree added a new param: rename AND add the param).
+   - **Truly contradictory** (e.g., one side deletes the function, other side modifies it) → `AskUserQuestion` with the two options + a third "keep mine + their delete elsewhere" if it makes sense. Do not guess.
+   - **Worktree changes are now redundant** (the original branch already added what the worktree intended) → take HEAD, drop worktree's lines, log it.
+5. After resolving each file, `git add <file>`. When all conflicted files are resolved, continue the operation: `git rebase --continue` (during rebase) or `git -C <mainRoot> commit` (after merge). Verify there are no further conflicts before moving on.
+
+This conflict reasoning is the orchestrator's judgment, applied per file with `Read` + `Edit`. Don't delegate to a script — semantic resolution is exactly the kind of work where Opus pays off (Principle 3).
+
+After cleanup, the merge commit on `<originalBranch>` of `<mainRoot>` is the durable record. The worktree is gone; the `devorch/<name>` branch is gone. Working directory for any further conversation reverts to `<mainRoot>`.
 
 ### Gotcha capture
 
@@ -219,7 +270,7 @@ Apply the gotcha-capture rule (§ Gotcha capture below).
 
 Roda antes do report final. Captura atritos no próprio fluxo do devorch — não em código do usuário. Conta: script errou ou retornou JSON malformado, retry loop precisou >1 tentativa, gate precisou ser reinvocado, hook não disparou quando devia, você improvisou porque a instrução estava ambígua, bifurcação sem precedente nem resposta da indústria.
 
-**Inbox path** (primeiro que casar): `$DEVORCH_REPO/.devorch/flow-issues-inbox/` → `../devorch/.devorch/flow-issues-inbox/` → `<cwd>/.devorch/flow-issues-inbox/`.
+**Inbox path** (primeiro que casar): `$DEVORCH_REPO/.devorch/flow-issues-inbox/` → `../devorch/.devorch/flow-issues-inbox/` → `<mainRoot>/.devorch/flow-issues-inbox/`. **Important**: write to `<mainRoot>`, never to `<worktreePath>` — the worktree gets removed at the end of the merge step, so anything written there is lost.
 
 **Um arquivo por atrito**, nomeado `<YYYY-MM-DD>-<slug>.md`, contendo: título, timestamp, `Severity` (blocker/gap/nit), prompt pronto (`/devorch "<fix>"`), contexto mínimo (onde/o que aconteceu/esperado/workaround).
 
@@ -290,7 +341,7 @@ When in doubt, drop it. A smaller GOTCHAS.md that is fully load-bearing beats a 
 
 **Dedupe before writing**: read the existing `GOTCHAS.md` (if any) and discard candidates whose title or `file:line` already appears. Never rewrite existing entries.
 
-**Writing**: append surviving candidates to `.devorch/GOTCHAS.md` (create with `# Gotchas\n` header if missing). Shape per entry:
+**Writing**: append surviving candidates to `<worktreePath>/.devorch/GOTCHAS.md` (create with `# Gotchas\n` header if missing). The merge step in Stage 5 brings the file back to mainRoot. Shape per entry:
 
 ```
 - **<short title>** (`file:line`) — <one-line why it surprises>.

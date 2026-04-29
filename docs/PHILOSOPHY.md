@@ -264,9 +264,9 @@ variable by hand and the guardian never sees the session. The tool
 that survives is the one whose cost is shaped to the task.
 
 **How devorch enforces this:**
-- Single five-stage pipeline: discovery → plan → build (DAG) → quality → flags
+- Single six-stage pipeline: worktree → discovery → plan → build (DAG) → quality → merge + flags
 - Plan always written, even for 1-task builds — anchors the completeness reviewer and DAG scheduler
-- Worktrees are NOT a devorch internal — running two parallel sessions on the same repo is the user's choice (open Claude in two separate `git worktree add`'d directories), not something devorch coordinates
+- Every session runs in its own `git worktree`, merged back at the end — the user's WIP on the original branch is never touched, sessions are nukeable by deleting the worktree, and conflicts at merge time get semantic resolution by the orchestrator
 - Trivial work (single-file typo, rename in a known location) does not invoke devorch — vanilla Claude Code is the right tool there
 
 **Validation question:** _"Is this work medium-or-large enough that
@@ -316,16 +316,19 @@ had and discarded. Fast failure inside builders plus parallel quality
 gates after the DAG keep the error surface small and the fix surface
 informed.
 
-### "Worktrees solve everything"
+### "Pick a side at every merge conflict"
 
-Internal worktrees were a v1 attempt to isolate devorch's work from
-the user's branch. They created more pain than they solved: cache
-desync, merge dance, satellite path confusion, archival commits
-fighting `.gitignore`. The honest model is simpler: devorch commits
-directly to the current branch. If the user wants two parallel
-sessions on the same repo, they create two `git worktree add`'d
-directories themselves and run a separate Claude Code in each. Devorch
-does not need to know this happened.
+The naïve merge tooling forces a binary: take HEAD or take the
+incoming side, then move on. That habit is wrong for devorch's
+worktree-based flow, where most conflicts are line-adjacent
+non-overlapping changes that git couldn't 3-way-merge — both sides
+are valid and the resolved file should contain both. Picking one
+side silently throws away real work. The orchestrator reads each
+conflicted file, identifies the intent of both sides, and
+synthesizes a version that preserves both whenever they're
+non-contradictory; only truly contradictory cases (one side deletes
+what the other modifies) escalate to the user. This is judgment
+work — exactly the kind of cost the 1M context window is meant for.
 
 ### "Ceremony signals seriousness"
 
