@@ -112,6 +112,8 @@ Apply this role internally over `$ARGUMENTS` + project-map + GOTCHAS + explore f
 > If `<profile>` is set: `priorities` ordering breaks bifurcation ties; `biases` are additional hints. On performance-vs-simplicity trade-offs, show cost and let the user choose.
 >
 > Also consult `.devorch/standards-silenced.md` if present — skip heads-ups matching silenced patterns.
+>
+> **Tests are default-on when `hasTests=true` from discover.** If the project has any test framework configured (jest, vitest, bun test, mocha, playwright, cypress, etc.) AND the plan touches business logic (not pure docs/config/chore), do NOT bifurcate on whether to write tests — assume yes, and require Stage 2 to add a test file alongside each impl file in the same task. Bifurcate only on rare ambiguous cases (e.g., a small helper that another existing test already covers indirectly). When `hasTests=false`, do not invent a test framework — the project's choice to be testless is respected.
 
 Then enumerate edge cases into 3 buckets:
 
@@ -142,6 +144,8 @@ Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `.devorch/plans/<name>.md`
 - Two independent features mentioned in the same `$ARGUMENTS`
 
 **Bundle trivial mechanical fixes** — when 2+ tasks share the same phase, have small specs (under ~500 tokens combined), target disjoint files, and are mechanical (flag adds, regex tweaks, hint strings, doc rewrites), bundle them into a single task with bullet-points. Reserve separate tasks for genuinely independent units of judgment.
+
+**Tests-as-default when `hasTests=true`** — for each task that touches business logic, the `**Files**` list MUST include both the impl file and a corresponding test file in the project's test convention (e.g., `src/foo.ts` + `src/foo.test.ts`, or `src/foo.ts` + `__tests__/foo.test.ts` matching whatever pattern is already used in the worktree). The builder writes both in the same dispatch — see `agents/devorch-builder.md` for the workflow. Pure config / docs / chore tasks do NOT need tests. When `hasTests=false`, omit test files entirely.
 
 **Mechanical validation (script)**: run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <planPath>`. Returns JSON `{ok, errors, warnings}`. Errors cover:
 - Required blocks (`<description>`, `<objective>`, `<classification>`, `<decisions>`) and `# Plan: <name>` header
@@ -198,32 +202,72 @@ On the resume path, the original Stage 1 findings are gone. If a phase about to 
 
 ## Stage 4 — Quality gates (parallel)
 
-After the DAG completes, run all of the following in parallel in a single assistant message:
+After the DAG completes, run all of the following in parallel in a single assistant message. Per-feature security/performance/architecture review is intentionally OUT OF SCOPE here — those concerns are caught upstream by the guardian (Stage 1.5) and downstream by `/preprod-review` runs the user triggers when shipping. Stage 4 only verifies that what the plan asked for actually got built and the project still compiles + tests pass.
 
 1. **`check-project`** — `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath>` (full: lint + typecheck + build + tests). Parse JSON.
-2. **Adversarial reviewers** — 4 Explore agents (`subagent_type="Explore"`, foreground), each receiving: `Working directory: <worktreePath>`, plan objective, GOTCHAS.md (if present), changed-files list (`git -C <worktreePath> diff --name-only <originalBranch>...HEAD`).
-   - **security** — OWASP Top 10 anti-patterns, injection risks, auth gaps, data exposure, secrets handling
-   - **performance** — estimated cost, anti-patterns (N+1, full scans, polling, synchronous workers, server-side buffering), cache opportunities
-   - **completeness** — spec vs delivery: every `<spec>` element satisfied? cross-phase integration intact? handoffs honored? Required method: for each `<behavior>`/`<invariant>`/`<endpoint>` in the plan, grep the changed files for its identifying symbol AND verify with a direct Read on the relevant line range. Do not infer from absence at a stale line number.
-   - **flags** — adjacent items out of scope. For each flag: type (security | performance | architecture | ops), severity, detection (`file:line`), suggested fix, one-line alternative. Reviewer writes all flags to `.devorch/flags-<name>.md` using the `docs/FLAGS.md` format.
-3. **Residual scan** — grep for `TODO|FIXME|HACK|XXX` across changed files. Inline; cheap.
+2. **`spec-coverage`** — `bun $CLAUDE_HOME/devorch-scripts/spec-coverage.ts --plan <planPath> --worktree <worktreePath>`. Returns JSON `{ok, totalSpecs, covered, missingImpl: [...], missingTest: [...], hasTestFiles, byPhase}`. Replaces the LLM completeness reviewer with a deterministic grep-based check across spec names + their kebab/snake/camel/Pascal variants. `missingImpl` = spec name absent from non-test files; `missingTest` = spec name absent from test files (only flagged when the project has any test files at all).
+3. **Residual scan** — grep for `TODO|FIXME|HACK|XXX` across changed files (`git -C <worktreePath> diff --name-only <originalBranch>...HEAD`). Inline; cheap.
 
-**Anti-staleness directive (in every reviewer prompt)**: read file contents at current HEAD, not the base branch. Cite `file:line` from the current state. Before reporting a contract as unsatisfied, grep for the expected new symbol or phrase in the actual file. A reviewer reporting "not implemented" without such a grep check is treated as stale and re-run.
+`<originalBranch>` is the value persisted by `setup-worktree.ts` in `<worktreePath>/.devorch/cache/origin-branch.txt`.
 
-`<baseBranch>` resolution: `git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null` and strip `origin/`; fall back to `main` then `master`.
+## Stage 4.5 — Apply fixes (orchestrator autonomy)
 
-## Stage 4.5 — Apply review fixes
+**Post-bifurcation autonomy rule applies (see Rules)** — no `AskUserQuestion` in this stage; the orchestrator decides each fix by reading plan intent and routes to a builder.
 
-Before classifying and dispatching, compute file overlap between findings. Two findings touching the same file CANNOT be dispatched in parallel — sequence them. Findings on disjoint files run in parallel.
+Aggregate findings from the three sources:
+- `check-project` failures (lint, typecheck, build, **tests**)
+- `spec-coverage` gaps (`missingImpl`, `missingTest`)
+- Residual scan items (TODO/FIXME/HACK/XXX in changed files)
 
-Classify each finding:
-- **Trivial** (1–2 files, obvious fix) → batch ALL trivial findings into a SINGLE `devorch-builder` agent prompt with bullet-points. Do NOT use inline Edit — that pollutes the orchestrator context with file contents that aren't needed for downstream stages. The builder handles all trivial fixes in isolated context and returns a clean Build Report.
-- **Fix-level** (well-defined, 3+ files or non-trivial) → launch one `devorch-builder` per finding in parallel (respecting non-overlap with other fix-level findings AND the trivial batch's files).
-- **Talk-level** (needs design) → do not fix; leave as a pending item plus a suggested fresh `/devorch` prompt.
+If all three are empty → skip this stage entirely.
 
-Dispatch shape: in a single assistant message, launch the trivial-batch builder (if any) plus all non-overlapping fix-level builders in parallel. Sequence overlapping fix-level findings into subsequent dispatches.
+### Routing
 
-Skip this stage entirely if every reviewer + residual scan reported zero findings. After fixes, re-run `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath>` (full if any fix-level launched, append `--quick` if trivial-only). One retry on failure.
+Compute the diff scope: `changedFiles = git -C <worktreePath> diff --name-only <originalBranch>...HEAD`.
+
+For each finding, classify and dispatch:
+
+**`spec-coverage.missingImpl`** — the plan's spec didn't get implemented. Always fix-level. Dispatch one `devorch-builder` per missing item with the spec excerpt + target files + instruction "implement the spec; this is a gap from the original build."
+
+**`spec-coverage.missingTest`** — implementation exists but no test references the spec name. Fix-level. Dispatch one builder with the spec excerpt + impl file:line + instruction "write a test that exercises this spec; cover the precondition/postcondition explicitly."
+
+**`check-project` lint/typecheck/build failures** — always trivial OR fix-level. Aggregate all lint/type fixes into a single builder prompt (trivial batch). Build failures get one builder per failing module/package.
+
+**`check-project` test failures** — apply the **test regression triage** below.
+
+**Residual scan items** — usually trivial (delete the TODO, finish the marked work, or convert to a flag for `/preprod-review`). Batch into the trivial fix builder.
+
+### Test regression triage (orchestrator judgment, no user gate)
+
+For each failing test, the orchestrator decides update-vs-fix-impl based on plan intent + diff scope. The decision is mechanical enough that no user question is needed; if the call is wrong, the user catches it post-merge in `git log` and runs a follow-up `/devorch`.
+
+For each failing test:
+
+1. **Identify the test's targets**: read the test file, list the modules it imports / asserts on.
+2. **Cross-reference with `changedFiles`**:
+   - **A. Test file itself is in `changedFiles`** (the current run modified the test) → the failure is between current impl and the just-modified test. Read the plan's `<problem-statement>` + `<solution-approach>` + `<decisions>` + the relevant `<spec>` element. Decide:
+     - If plan intent says "change behavior X" and this test asserts old behavior X → **update test** to match new contract. Dispatch builder: "update test Y to match the new contract per the plan's solution approach for X."
+     - Else → **fix impl**. Dispatch builder: "fix impl in Z so test Y passes; the test reflects the intended contract."
+   - **B. Test file is NOT in diff but its imports overlap with `changedFiles`** (current run touched code the test exercises) → likely a real regression. Read the test, the impl in diff, and the plan. Decide:
+     - If the change is intentional contract evolution per `<decisions>` → **update test**. Dispatch builder.
+     - Else → **fix impl**. Dispatch builder.
+   - **C. Test file is NOT in diff and its imports DO NOT overlap with `changedFiles`** (test exercises code untouched by this run) → pre-existing failure or flake. **Do not auto-fix.** Re-run `check-project` once to rule out flake. If the failure persists, add to the verdict report's `### Issues Pendentes` section as `Pre-existing test failure: <test name> — não tocado por este run, requer atenção em sessão dedicada.` Continue the stage.
+
+The judgment in cases A and B is the orchestrator reading 3 things: plan `<decisions>`, the test, the impl in diff. The decision goes in the builder prompt verbatim so the builder doesn't second-guess. **Log the call** (a one-liner per test) so it surfaces in the verdict report:
+
+```
+Test triage: <test-name>
+  Decision: update-test | fix-impl | pre-existing-pendency
+  Reason: <one line citing decision/spec/diff>
+```
+
+### Dispatch shape
+
+In a single assistant message, launch in parallel:
+- 1 trivial-batch builder (if any trivial items)
+- N fix-level builders (one per fix-level finding, respecting non-overlap with the trivial batch's files and with each other)
+
+Sequence overlapping fix-level findings into subsequent dispatches. After all fixes return, re-run `check-project` (full if any fix-level launched, `--quick` if trivial-only). One retry on failure; on second failure, surface the residual breakage in the verdict report and continue to Stage 5 — do not loop indefinitely.
 
 ## Stage 5 — Verdict + save flags
 
@@ -232,23 +276,28 @@ Skip this stage entirely if every reviewer + residual scan reported zero finding
 ```
 ## Verificação Final: <name>
 
-### Residual Scan
+### Quality gates
+Lint / Typecheck / Build / Tests: <status por check>
+
+### Spec coverage
+<X / Y specs cobertos com impl + test (ou "Y / Y todos cobertos")>
+<missingImpl ou "nenhum">
+<missingTest ou "nenhum">
+
+### Test triage
+<lista das decisões update-test | fix-impl | pre-existing-pendency com motivo, ou "nenhum teste falhou">
+
+### Residual scan
 <findings ou "limpo">
 
-### Review Adversarial
-Security: <findings ou "limpo">
-Performance: <findings ou "limpo">
-Completeness: <findings ou "limpo">
-Flags: <count — ver .devorch/flags-<name>.md ou "nenhuma">
+### Correções aplicadas
+<N trivial em batch, M fix-level paralelos, K test-triage builders (ou "nenhuma")>
 
-### Correções de Review
-<N trivial, M fix-level> (ou "Nenhuma")
+### Conflitos resolvidos no merge
+<file: kept-both | refactor-synthesized | took-HEAD | took-worktree — motivo (ou "nenhum")>
 
-### Post-Review Check
-Lint / Typecheck / Build / Tests: status
-
-### Issues Pendentes
-<talk-level items com prompt /devorch sugerido ou "Nenhum">
+### Issues pendentes
+<pre-existing test failures, talk-level items, residuais não resolvidos (ou "nenhum")>
 
 ### Verdict: PASS / PASS com N pendências / FAIL
 ```
@@ -296,12 +345,14 @@ For each conflicted file:
    - `<<<<<<< HEAD` (our side during merge — the original branch's recent change; or during rebase, the upstream side).
    - `>>>>>>> devorch/<name>` (their side — the worktree's change; or during rebase, your in-progress commit).
 3. Apply the **keep-both-when-valid principle**: if both sides represent legitimate, non-contradictory changes (e.g. the original branch fixed a bug in function A while the worktree added function B in the same file), the resolved file MUST contain both changes. The conflict only existed because git couldn't 3-way-merge line-adjacent edits — semantically there's no real conflict.
-4. Cases:
+4. Cases (no `AskUserQuestion` — post-bifurcation autonomy applies):
    - **Both sides valid, additive** → keep both (interleave functions, merge import lists, concatenate test cases). Most common case.
    - **Both sides valid, refactoring same surface differently** → synthesize a version that preserves the intent of both (e.g., the original renamed `fooBar` → `foo_bar` while the worktree added a new param: rename AND add the param).
-   - **Truly contradictory** (e.g., one side deletes the function, other side modifies it) → `AskUserQuestion` with the two options + a third "keep mine + their delete elsewhere" if it makes sense. Do not guess.
+   - **Truly contradictory** (e.g., one side deletes the function, other side modifies it) → pick the side whose intent aligns with the plan's `<decisions>` and `<solution-approach>`. The plan was the user's explicit intent for this run — if the worktree was building toward goal X and the other side deleted a function central to X, keep the worktree side (and surface the discarded change as a flag for follow-up). If the deletion came from the original branch and the worktree's modification is incidental (a rename, an unrelated tweak), respect the deletion. Log the call in the verdict report so the user can spot wrong autonomous decisions in `git log` and run a follow-up `/devorch` if needed.
    - **Worktree changes are now redundant** (the original branch already added what the worktree intended) → take HEAD, drop worktree's lines, log it.
 5. After resolving each file, `git add <file>`. When all conflicted files are resolved, continue the operation: `git rebase --continue` (during rebase) or `git -C <mainRoot> commit` (after merge). Verify there are no further conflicts before moving on.
+
+**Surface every conflict resolution** in the verdict report under `### Conflitos resolvidos`: file path + one-line summary of what was kept (e.g., `src/api/login.ts: kept-both — merge advanced rate-limit; worktree added MFA flow`). Empty section when no conflicts.
 
 This conflict reasoning is the orchestrator's judgment, applied per file with `Read` + `Edit`. Don't delegate to a script — semantic resolution is exactly the kind of work where Opus pays off (Principle 3).
 
@@ -412,6 +463,7 @@ When zero entries were written, omit the section entirely.
 
 ## Rules
 
+- **Post-bifurcation autonomy** (load-bearing): once Stage 1.5's unified gate resolves (or is skipped for `K + J == 0`), the orchestrator runs to verdict WITHOUT any further `AskUserQuestion`. Every downstream decision — slice size, test triage, merge conflict resolution, residual breakage handling — is the orchestrator's judgment based on plan `<decisions>`, `<solution-approach>`, and current diff. If a decision is wrong, the user catches it in the verdict report or the merge commit's `git diff` and runs a follow-up `/devorch`. The cost of wrong autonomous decisions is bounded; the cost of repeatedly interrupting the user is unbounded (training them to ignore gates). Exceptions (allowed): the unified gate itself in Stage 1.5, the resume-picker in Stage 0 when there are multiple in-progress worktrees.
 - **Explore claim re-verification**: when an Explore agent reports a deterministic claim — counts, absences, or presences as fact ("zero importers", "no usages found", "deprecated", "0 references", "only referenced by X") — the orchestrator MUST verify with a deterministic grep before quoting the claim to a builder, surfacing it in `<decisions>`, or using it to justify a Stage 1.5 silence. Run the grep yourself (`git grep -n <symbol>`, `grep -rn`, etc.) and compare. If the grep contradicts the Explore claim, prefer the grep result and surface the discrepancy as a one-line note in the affected slice. Do not propagate uncertain claims as certainties — Explore is a hypothesis generator, grep is the oracle.
 - Do not narrate actions. Execute directly without preamble.
 - The orchestrator reads `.devorch/*` files and Explore/review agent output; it does not read source files directly except for applying trivial fixes in Stage 4.5 and the implicit-touch sweep in Stage 2.
@@ -419,4 +471,3 @@ When zero entries were written, omit the section entirely.
 - Post-edit lint hook is always active (registered on the builder agent).
 - **Language policy**: User-facing output (questions, reports, summaries) in Portuguese pt-BR with correct accentuation. Code, git commits, internal files, and technical comments in English (en-US). Technical terms (worktree, merge, branch, lint, build) stay in English within Portuguese sentences.
 - **Output format**: Plain markdown only. No box-drawing, no ASCII art, no decorative characters.
-- **Branch policy**: devorch commits directly to the current branch. If you want isolation, create a `git worktree add`'d directory yourself and run a separate Claude Code session there — that is the only supported parallelism model for two simultaneous sessions on the same repo.

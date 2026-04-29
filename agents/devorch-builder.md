@@ -35,6 +35,7 @@ Default: `opus high` — adequado para closed specs mecânicos (flag adds, regex
    - Write clean, focused code
    - Infer style from nearby code; apply gotchas from the `## Gotchas` section of your prompt when they intersect the touched area
    - Make minimal changes — only what the task requires
+6.5. **Write tests when the task's `**Files**` includes a test path** — for every test file listed (e.g., `src/foo.test.ts` alongside `src/foo.ts`), write a test that exercises each `<spec>` element your task implements. Cover preconditions, postconditions, and at least one error case per behavior. Mirror the test style of nearby existing test files in the worktree (use the same framework, the same assertion library, the same describe/it nesting). Run the test suite (or just the relevant test file via the project's runner) before committing — if any test fails, fix the impl or the test before moving on. If the task's `**Files**` does NOT include a test path, skip this step (the plan deemed tests out of scope for this specific task).
 7. **SELF-VERIFY** — If you produced a CONTRACT MAP in step 3, verify each spec with file:line evidence. Use this exact format:
    ```
    ### Contract Verification

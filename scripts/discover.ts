@@ -62,6 +62,8 @@ push(`${basename(cwd)}/`);
 listDir(cwd, 1, "  ");
 push("```");
 
+const TEST_SCRIPT_PATTERN = /\b(jest|vitest|bun\s+test|mocha|playwright|cypress|node\s+--test|tap|ava|deno\s+test)\b/i;
+let hasTests = false;
 if (pkg) {
   const scripts = pkg.scripts || {};
   const keys = Object.keys(scripts);
@@ -72,8 +74,14 @@ if (pkg) {
       const val = scripts[k];
       const warn = INTERACTIVE_FLAGS.test(val) ? " (interactive)" : "";
       push(`- \`${k}\`: ${val}${warn}`);
+      if (TEST_SCRIPT_PATTERN.test(val) || k === "test") hasTests = true;
     }
     if (keys.length > 15) push(`- ... +${keys.length - 15} more`);
+  }
+  // Also check devDependencies for test frameworks
+  const allDeps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+  for (const dep of Object.keys(allDeps)) {
+    if (/^(jest|vitest|@vitest|mocha|playwright|cypress|@playwright|tap|ava)$/.test(dep)) hasTests = true;
   }
 }
 
@@ -175,6 +183,7 @@ const silencedStandards = safeRead(join(cwd, ".devorch", "standards-silenced.md"
 console.log(JSON.stringify({
   projectMap,
   siblingRepos,
+  hasTests,
   gotchas,
   gotchasLegacy,
   profile: { raw: profileRaw, source: profileSource },
