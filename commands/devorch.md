@@ -264,18 +264,26 @@ On FAIL → keep the plan active so `--resume` can pick up where the failure lef
 
 ### Merge into the original branch
 
-After the archive commit lands inside the worktree, fold the work back into `<originalBranch>` on `<mainRoot>`:
+After the archive commit lands inside the worktree, fold the work back into `<originalBranch>` on `<mainRoot>` via `merge-and-cleanup.ts`:
 
-1. **Rebase the worktree onto the freshest origin tip**:
-   - `git -C <worktreePath> fetch origin <originalBranch>` (skip silently if no `origin` remote — log "no origin remote, skipping fetch").
-   - `git -C <worktreePath> rebase origin/<originalBranch>` (or just `<originalBranch>` if no remote). On conflict, follow the **Conflict resolution rule** below until rebase completes.
-2. **Sanity check after rebase**: `bun $CLAUDE_HOME/devorch-scripts/check-project.ts <worktreePath> --quick` (lint + typecheck only). If it fails, stop and surface — the rebase introduced breakage that needs human attention.
-3. **Merge into mainRoot**:
-   - `git -C <mainRoot> merge --no-ff devorch/<name> -m "merge(devorch): <plan-name>"` (use the plan's `# Plan: <Title>` as `<plan-name>`).
-   - On conflict, follow the **Conflict resolution rule** below until merge completes.
-4. **Cleanup** (only after merge succeeds and `git -C <mainRoot> status --porcelain` is clean):
-   - `git -C <mainRoot> worktree remove <worktreePath>` (or `--force` if working tree is dirty for a known reason).
-   - `git -C <mainRoot> branch -d devorch/<name>` (use `-D` if `-d` rejects because of an unrelated rebase state — surface a warning if so).
+```
+bun $CLAUDE_HOME/devorch-scripts/merge-and-cleanup.ts \
+  --worktree <worktreePath> \
+  --branch devorch/<name> \
+  --target <originalBranch> \
+  --plan-title "<Plan Title>"
+```
+
+The script runs atomically: fetch origin (best-effort), rebase worktree onto `origin/<target>` (or just `<target>` if no remote), quick check-project sanity, dry-run merge into mainRoot, real merge `--no-ff`, then cleanup (worktree remove + branch delete). Plan title comes from the plan file's `# Plan: <Title>` header — pass it verbatim.
+
+**Output JSON** (`{ok, phase, ...}`) — route by `phase`:
+
+- `ok: true, phase: "cleanup"` → done, log a one-line success summary.
+- `ok: false, phase: "rebase"` → conflicts during rebase. The script returns `conflictFiles: [...]`. Apply the **Conflict resolution rule** below to each file, then re-run with `--phase merge` (script picks up where it left off — skipping rebase but doing dry-run + merge + cleanup).
+- `ok: false, phase: "sanity-check"` → check-project reported lint/type/build failures after rebase. Surface the `check` payload to the user; do NOT continue automatically. After manual fix, re-run with `--phase merge`.
+- `ok: false, phase: "merge"` → conflicts during the merge into mainRoot. The script aborted the partial merge for you (clean state in mainRoot). Apply the **Conflict resolution rule**, manually `git -C <mainRoot> commit -m "merge(devorch): <Plan Title>"`, then re-run with `--phase cleanup` to remove the worktree + delete the branch.
+
+The script never loops on conflicts — semantic resolution is the orchestrator's job. The script's role is mechanical: atomic rebase/merge/cleanup with structured error reporting.
 
 #### Conflict resolution rule
 
