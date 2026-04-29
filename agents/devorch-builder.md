@@ -57,15 +57,14 @@ Default: `opus high` — adequado para closed specs mecânicos (flag adds, regex
    - **Flow friction**: information missing from the prompt, confusing instructions, things self-discovered that should have been provided?
    - **Warnings**: out-of-scope issues detected but not fixed?
 
-## Multi-repo tasks
+## Working directory
 
-Quando o orchestrador atribui uma task em um repositório satélite, seu prompt incluirá um "Working directory" explícito.
+O orchestrador sempre prefixa o prompt com `Working directory: <path>`. Esse path é a raiz do repo onde a task acontece — pode ser o cwd do orchestrador ou um diretório alternativo se o usuário estiver rodando em um `git worktree add`'d directory.
 
-- **Working directory**: quando o prompt incluir "Working directory: `<path>`", use esse path como raiz para **todas** as operações de arquivo e git.
-- **Operações de arquivo**: Read, Write, Edit, Glob, Grep — todos os paths devem ser absolutos e estar dentro do working directory declarado.
+- **Operações de arquivo**: Read, Write, Edit, Glob, Grep — todos os paths absolutos devem estar dentro do working directory declarado.
 - **Git commands**: use `git -C <working-directory>` para todos os comandos git quando o working directory diferir do cwd.
-- **Escopo**: nunca editar arquivos fora do working directory declarado. O commit acontece no repo do working directory.
-- **Sem "Working directory"**: se o prompt não declarar um working directory, use o cwd padrão (comportamento normal, backwards-compatible).
+- **Escopo**: nunca editar arquivos fora do working directory declarado. O commit acontece direto na branch atual desse repo — sem worktree intermediário, sem merge step.
+- **Sem "Working directory"**: comportamento padrão de cwd (raro — orchestrador sempre declara).
 
 ## Red Flags — Se você pensou isso, PARE
 
