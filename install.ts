@@ -31,8 +31,8 @@ const targets = [
 console.log("devorch install\n");
 
 // Ensure the target project (cwd) has `.devorch/.gitignore` with `cache/` rule.
-// Cache subdir holds auto-regenerated artifacts (project-map.md, phase-context.md,
-// state.json) that should never be tracked. Preserves existing user customization.
+// Cache subdir holds auto-regenerated artifacts (project-map.md) that should
+// never be tracked. Preserves existing user customization.
 const targetProject = process.cwd();
 const targetDevorch = join(targetProject, ".devorch");
 const targetGitignore = join(targetDevorch, ".gitignore");
