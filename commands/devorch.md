@@ -39,17 +39,52 @@ If Stage 0 did NOT short-circuit, every fresh `/devorch` invocation creates a wo
 
 ## Stage 1 — Discovery (parallel)
 
-All of the following run in parallel — single assistant message with multiple tool calls. Both Bash calls are robust (always exit 0 on missing optional inputs) so a failure in one does NOT cancel the parallel Explore agents. **Both scripts receive `<worktreePath>` as positional arg** so they read/write inside the worktree, not mainRoot.
+Stage 1 runs in two phases: **1a discover (sequential, ~1-2s)** then **1b Explore agents (parallel, with discover output in their prompts)**. The serial cost is tiny vs. the relevance gain — Explore agents that know the project layout, gotchas, and profile produce dramatically more focused findings.
 
-1. **Project map** — run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts <worktreePath> --persist`. The script writes `<worktreePath>/.devorch/cache/project-map.md` and prints a structural snapshot (3-level tree, scripts, Makefile, sibling repos).
-2. **Context loader** — run `bun $CLAUDE_HOME/devorch-scripts/load-context.ts <worktreePath>`. Always exits 0. Returns JSON `{gotchas, gotchasLegacy, profile: {raw, source}, silencedStandards, warnings}`. The script handles missing files (empty strings), legacy `CONVENTIONS.md` fallback, and profile precedence (per-project → user-home → defaults from `docs/PROFILE.md`). Keep `profile.raw` as `<profile>` for the guardian role; consult `silencedStandards` before emitting heads-ups.
-3. **Explore agents** — launch 1–3 Explore agents (`subagent_type="Explore"`) with focuses derived from `$ARGUMENTS`. **Every Explore prompt must include `Working directory: <worktreePath>` so the agent searches inside the worktree, not mainRoot:**
-   - Always: 1 agent on architecture + existing patterns in the touched area.
-   - When the request spans 2+ modules or has multi-feature scope: 1 additional agent on risks/edge surfaces.
-   - When the request references a specific contract / spec / behavior: 1 additional agent dedicated to locating and reading it deeply.
-   Hard cap: 3 explore agents per session. If you reach the cap and still feel under-informed, the request is malformed — surface that to the user.
+### 1a — Discover (sequential)
 
-Wait for all parallel work to return before proceeding. Read `project-map.md` after the script completes.
+Run `bun $CLAUDE_HOME/devorch-scripts/discover.ts <worktreePath>`. Always exits 0. Parse JSON `{projectMap, siblingRepos, gotchas, gotchasLegacy, profile: {raw, source}, silencedStandards, warnings}`. The script:
+- Writes `<worktreePath>/.devorch/cache/project-map.md` (3-level tree, scripts, Makefile)
+- Returns the same map as a string, plus structured `siblingRepos: [{name, relativePath, branch}]`
+- Resolves profile precedence (per-project → user-home → defaults from `docs/PROFILE.md`)
+- Loads gotchas (with legacy `CONVENTIONS.md` fallback) and silenced-standards
+- Handles missing files as empty strings; never SIGPIPE-cancels parallel work
+
+Keep `profile.raw` as `<profile>` for the guardian role; consult `silencedStandards` before emitting heads-ups.
+
+### 1b — Explore agents (parallel, informed by discover)
+
+Launch 1–3 Explore agents (`subagent_type="Explore"`) in a single message. **Each prompt MUST include**:
+
+- `Working directory: <worktreePath>` so the agent searches inside the worktree, not mainRoot.
+- A scoped slice of `projectMap` showing the directories likely relevant to `$ARGUMENTS` (don't paste the whole map; pick the top-level directories that match the request).
+- Filtered gotchas: entries from `gotchas` whose `file:line` falls under the relevant directories. This lets the agent skip re-discovering known traps.
+- Profile priorities as a one-liner: e.g. `Priorities (rank findings accordingly): security > performance > dx > cost`.
+- Sibling repos hint when relevant: if the request implies cross-repo work and `siblingRepos` is non-empty, include the sibling list and ask the agent to surface cross-repo concerns.
+
+Focus selection (orchestrator judgment):
+- Always: 1 agent on architecture + existing patterns in the touched area, thoroughness `medium` if gotchas already cover known traps, `very thorough` otherwise.
+- When the request spans 2+ modules or has multi-feature scope: 1 additional agent on risks/edge surfaces, `very thorough`.
+- When the request references a specific contract/spec/behavior: 1 additional agent dedicated to locating and reading it deeply, `very thorough`.
+
+Hard cap: 3 Explore agents per session. If you reach the cap and still feel under-informed, the request is malformed — surface that to the user.
+
+### 1c — Persist findings for `--resume`
+
+After all Explore agents return, **write** consolidated findings to `<worktreePath>/.devorch/cache/explore.json` via the Write tool:
+
+```json
+{
+  "createdAt": "<ISO timestamp>",
+  "arguments": "<$ARGUMENTS>",
+  "findings": [
+    { "agent": "architecture", "thoroughness": "medium", "summary": "..." },
+    { "agent": "risks", "thoroughness": "very thorough", "summary": "..." }
+  ]
+}
+```
+
+Each `summary` is the orchestrator-curated 1-3 paragraph version (NOT the full agent output — that's already in your context). On `--resume`, Stage 0 reads this file so future builders inherit the discovery context without relaunching Explore.
 
 ### Stage 1.5 — Guardian role + edge-case enumeration (inline)
 
