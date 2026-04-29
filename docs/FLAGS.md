@@ -65,9 +65,8 @@ Field semantics:
    - `fix-now` → queues the fix into the current request's task list
    - `new-plan` → shells out to `/devorch "fix flag: <title>"` after confirmation
    - `ciente-deixar` → increments silence counter for the pattern
-5. **Archival** — when the plan is merged via `merge-worktree.ts`
-   (invoked from `/devorch` F7), its flags file is moved to
-   `.devorch/archive/flags-<plan>-<date>.md` along with the plan itself.
+5. **Archival** — when `/devorch` archives the plan in Stage 5,
+   its flags file is moved alongside to `.devorch/archive/flags-<plan>-<date>.md`.
 
 ## `standards-silenced.md` format
 

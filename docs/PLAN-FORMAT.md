@@ -1,9 +1,7 @@
 # Plan Format
 
 Canonical plan format for `/devorch`. Plans live at
-`<worktreePath>/.devorch/plans/<name>.md` and are validated by
-`scripts/validate-plan.ts`. The builder dispatcher (`scripts/init-phase.ts`)
-parses the structure below to produce per-task context slices.
+`.devorch/plans/<name>.md` and drive the build scheduler.
 
 ## Template
 
@@ -47,115 +45,104 @@ Risk: <risk>
 - `path/to/new/file` — what it is
 </new-files>
 
-<!-- optional — only when plan involves multiple repos: -->
-<secondary-repos>
-- `<name>` — /absolute/or/relative/path/to/repo
-</secondary-repos>
-<!-- When present, the orchestrator passes `[{name, path, status?}]` to
-     phase-summary.ts and merge-worktree.ts, where `path` is the satellite's
-     repoPath (the repo root). merge-worktree.ts resolves `.worktrees/<name>`
-     internally; phase-summary.ts reads only name + status. -->
-
 <!-- optional — cross-cutting invariants: -->
 <global-invariants>
 Cross-cutting invariants that apply to all phases (e.g., API envelope format, auth patterns, error code registry).
 - invariant description
 </global-invariants>
 
-<phase1 name="Name">
+<phase id="schema" name="Database schema">
+<depends-on></depends-on>
+
 <goal>one sentence</goal>
 
 <spec>
-<interface name="unique-name">
-  <input>parameter descriptions with types</input>
-  <output>return value description with types</output>
-  <error case="error-name">expected behavior</error>
-</interface>
-<error-contract name="unique-name">
-  <case trigger="condition" handling="expected behavior" />
-</error-contract>
-<behavior name="unique-name">
-  <precondition>what must be true before</precondition>
-  <postcondition>what must be true after</postcondition>
-</behavior>
-<invariant name="optional-name">condition that must always hold</invariant>
-<endpoint path="/path" method="METHOD">
-  <request>schema or description</request>
-  <response status="NNN">schema or description</response>
-</endpoint>
-<entity name="EntityName">
-  <field name="fieldName" type="string" />
-  <relationship target="OtherEntity" type="belongs-to" />
-  <constraint>business rule or validation that must hold</constraint>
+<entity name="Session">
+  <field name="id" type="uuid" />
+  <field name="userId" type="uuid" />
+  <constraint>userId references users(id)</constraint>
 </entity>
+<behavior name="session-expiry">
+  <precondition>session createdAt + ttl < now</precondition>
+  <postcondition>session marked invalid</postcondition>
+</behavior>
 </spec>
 
 <tasks>
 #### 1. <Task Name>
 - **ID**: <kebab-case>
-- **Assigned To**: devorch-builder
-- **Repo**: <name>                       <!-- optional, default: primary. Use secondary repo name when the task targets a satellite -->
-- **Spec refs**: <comma-separated spec names>   <!-- optional — references <spec> children by name -->
-- **Exemplars**: src/a.ts, src/b.ts              <!-- optional — file paths the builder should mirror -->
-- **Non-goals**: one-line description            <!-- optional — explicit exclusions -->
+- **Files**: `db/migrations/0042_sessions.sql`, `src/db/types/session.ts`
+- **Spec refs**: Session, session-expiry
+- **Exemplars**: `db/migrations/0040_users.sql`
+- **Non-goals**: session refresh logic (next phase)
 - <specific action>
 - <specific action>
-
 </tasks>
 
-<execution>
-**Wave 1** (parallel): <task-id-a>, <task-id-b>
-**Wave 2** (after wave 1): <task-id-c>
-</execution>
-
 <criteria>
-- [ ] <measurable criterion>
+- [ ] migration applies cleanly to a fresh DB
+- [ ] type matches schema columns 1:1
 </criteria>
 
 <handoff>
-<what the next phase needs to know — required for all phases except the last>
+<what the next phase needs to know — required for all phases except leaves of the DAG>
 </handoff>
-</phase1>
+</phase>
 
-<phase2 name="Name">
-<!-- same structure as phase1 -->
-</phase2>
+<phase id="api" name="Session API">
+<depends-on>schema</depends-on>
+
+<goal>...</goal>
+<!-- same structure -->
+</phase>
+
+<phase id="telemetry" name="Login telemetry">
+<depends-on></depends-on>
+
+<goal>...</goal>
+<!-- runs in parallel with `schema` and `api`; touches different files -->
+</phase>
 ```
 
 ## Rules
 
-- Phases are numbered `<phase1>`, `<phase2>`, etc. `validate-plan.ts` enforces
-  consecutive numbering starting at 1.
-- Each phase MUST have `<goal>`, `<tasks>`, `<execution>`, `<criteria>`. Last
-  phase may omit `<handoff>`.
-- Tasks in the same wave MUST NOT modify the same file. `init-phase.ts` does
-  not enforce this by itself — waves are trusted from the plan author.
-- `<spec>` children are **named** (`name="..."`) and referenced by **Spec refs**
-  in tasks. A task with no spec reference receives the full phase spec block.
-  `<invariant>` accepts either an explicit `name="..."` or the implicit ordinal
-  (`invariant-1`, `invariant-2`, ...); both forms resolve to the same element.
-- Task **Repo** is optional; omit it for primary-repo tasks. Required when the
-  task targets a satellite (must match a name from `<secondary-repos>`).
-- `<secondary-repos>` is the single source of truth for satellites. If present,
-  `/devorch` creates satellite worktrees in Step 8 before the phase loop starts.
-- `<global-invariants>` applies to every phase but is not delivered per-task to
-  builders — surface it via Spec refs where needed.
+- **Phase IDs are explicit** (`<phase id="schema">`), not numeric. The orchestrator uses IDs to resolve `depends-on` references.
+- **`<depends-on>`** lists comma-separated phase IDs that must complete before this phase can start. Empty (`<depends-on></depends-on>`) means no deps — runs as soon as the build starts.
+- **DAG must be acyclic.** The orchestrator self-checks before dispatch.
+- **Files are declared per task** in a `**Files**: ...` line. The full set of files a task touches must be listed; do not rely on the orchestrator to infer.
+- **Disjoint files within a phase** — two tasks in the same phase MUST NOT list the same file. The planner enforces this when drafting; the orchestrator self-checks before dispatch.
+- **Disjoint files across parallel phases** — two phases that can run concurrently (no dep chain between them) MUST NOT touch the same file. The orchestrator self-checks; if violated, the planner is asked to redraft.
+- **`<spec>` children are named** (`name="..."`) and referenced by **Spec refs** in tasks. A task with no spec reference receives the full phase spec block.
+- **Last phases** (DAG leaves) may omit `<handoff>`.
+- **Trivial mechanical fixes can be bundled** — multiple small disjoint changes belong in a single task with bullet-points, not separate tasks. Threshold: combined spec under ~500 tokens, all disjoint files, mechanical (flag adds, regex tweaks, hint strings, doc rewrites). Reserve separate tasks for genuinely independent units of judgment.
 
-## Consumer scripts
+## Scheduling semantics
 
-- `validate-plan.ts` — structural validation, invoked after plan draft.
-- `init-phase.ts` — per-phase context assembly: filters conventions/cache/specs
-  per task, emits `sliceWarnings` when slices fall under 3K or over 30K tokens.
-- `phase-summary.ts` — writes `state.md` + emits commit message at phase end.
-- `merge-worktree.ts` — coordinated merge across primary + satellites.
+The build scheduler maintains a set of phases and dispatches as follows:
 
-## Validation checklist
+1. Compute **ready set** = phases whose `depends-on` are all `[DONE]` AND that are not yet started AND whose declared files don't overlap with any currently-running phase.
+2. Dispatch every phase in the ready set in parallel. Within each dispatched phase, all tasks fire in parallel (one Task tool call per task in the same assistant message).
+3. When all tasks of a phase commit successfully, mark phase `[DONE]` in the plan file and recompute the ready set.
+4. Loop until all phases are `[DONE]` or a builder fails irrecoverably.
+
+A phase with no `depends-on` and no file overlap with another no-dep phase will start on iteration 1 alongside other independent phases — that is the source of cross-phase parallelism.
+
+## Marking progress
+
+The orchestrator updates the plan file in place as phases complete. The scheme:
+
+- Pending phase: `<phase id="schema" name="Database schema">`
+- Completed phase: `<phase id="schema" name="Database schema" status="done">`
+
+This is the only state mutation made to the plan file during build. On `/devorch --resume`, the orchestrator re-reads the plan, treats `status="done"` phases as already complete, and computes the ready set from there.
+
+## Validation checklist (orchestrator self-checks before dispatch)
 
 - [ ] `# Plan: <name>` header present
 - [ ] `<description>`, `<objective>`, `<classification>`, `<decisions>` blocks present
-- [ ] Phases numbered consecutively from 1
-- [ ] Every task has `ID` and `Assigned To: devorch-builder`
-- [ ] Every non-trivial task has at least one Spec ref OR is explicitly exempt
-  (pure config/docs/trivial one-file chore)
-- [ ] `<execution>` wave mapping matches declared task IDs
-- [ ] Satellite-repo tasks carry a `Repo:` line matching a `<secondary-repos>` entry
+- [ ] Every phase has unique `id`, `name`, `<goal>`, `<tasks>`, `<criteria>`
+- [ ] Every task has `**ID**` and `**Files**: <list>`
+- [ ] DAG (declared via `<depends-on>`) has no cycles and no references to undefined phase IDs
+- [ ] Within each phase, declared files are disjoint
+- [ ] Across any pair of phases that could run concurrently (no dep chain in either direction), declared files are disjoint
+- [ ] Every non-trivial task has at least one Spec ref OR is explicitly exempt (pure config/docs/trivial one-file chore)

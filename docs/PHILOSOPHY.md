@@ -29,11 +29,11 @@ noise. The 1M window removes the excuse for ceremonial delegation, not
 the cost of contextual dilution.
 
 **How devorch enforces this:**
-- Guardian pass and edge-case enumeration happen inline in the orchestrator (Opus, short thinking)
+- Guardian role and edge-case enumeration happen inline in the orchestrator (Opus, short thinking)
 - Scripts return structured JSON; raw file content does not enter the orchestrator
 - Builder agents run in isolated contexts destroyed after each task
-- Explorations return cached summaries, not inlined source
-- Per-task filtering keeps the orchestrator out of per-file detail
+- Explorer agents return summaries, not inlined source
+- Orchestrator-curated slices keep builders out of unrelated detail
 
 **Validation question:** _"Is this content helping the orchestrator decide
 and dispatch, or is it implementation detail that belongs in a builder?"_
@@ -41,42 +41,39 @@ If the latter, it does not belong in the orchestrator.
 
 ---
 
-## Principle 2: Fresh context per subagent, with filter gates
+## Principle 2: Fresh context per subagent, with curated slices
 
-A builder working on task #15 should have the same quality of context as
-the builder working on task #1. Every subagent -- builder, explorer,
-reviewer -- starts from a curated, isolated slice. But curation is not
-blind: if the filter returns unusually little or unusually much, devorch
-pauses and surfaces the slice to the human before spending tokens on it.
+A builder working on task 15 should have the same quality of context as
+the builder working on task 1. Every subagent -- builder, explorer,
+reviewer -- starts from a curated, isolated slice. Curation is the
+orchestrator's job: it selects from explore findings, gotchas, and the
+plan only what each task needs.
 
 **Why this matters:** Context compaction is lossy by definition, and
 accumulated context is the primary vector for quality decay across long
 sessions. Critical conventions discussed at token 5K are statistically
 less reliable at token 300K. A fresh slice avoids the decay entirely.
-But the slice can also fail in the other direction: a filter that
-returns 500 tokens is under-informed, one that returns 80K has already
-lost focus. Gates on slice size catch both failure modes before execution.
 
 **How devorch enforces this:**
-- Each builder receives plan excerpt + conventions slice + cache slice + handoff
-- Typical builder context: 6-10K tokens
-- `init-phase.ts` filters conventions and cache per task
-- Size gate: if any task returns under 3K or over 30K tokens, pause and surface
+- Each builder receives plan task + relevant gotchas + filtered explore findings + exemplars
+- Typical builder context: 5-10K tokens
+- Orchestrator curates per-task subsets inline (no init-phase script ceremony)
 - Builders never see other builders' work, errors, or intermediate states
+- Reviewers receive only changed files + plan objective + gotchas — no build chatter
 
 **Validation question:** _"Does every subagent start from a slice I would
-be willing to paste into a fresh conversation?"_ If not, the filter is wrong.
+be willing to paste into a fresh conversation?"_ If not, the curation is wrong.
 
 ---
 
 ## Principle 3: Mechanical outside the LLM, judgment inside
 
-Scripts beat LLMs at filesystem walks, git operations, parsing, hashing,
-and deterministic execution. LLMs beat scripts at intent classification,
-edge case enumeration, semantic detection, and architectural judgment.
-The line is not "less LLM is better" -- it is "put each job where it
-wins." Edge case bucketization is judgment; it belongs in Opus inline.
-Directory traversal is mechanical; it belongs in a script.
+Scripts beat LLMs at filesystem walks, parsing, hashing, and deterministic
+execution. LLMs beat scripts at intent classification, edge case
+enumeration, semantic detection, and architectural judgment. The line is
+not "less LLM is better" -- it is "put each job where it wins." Edge
+case bucketization is judgment; it belongs in Opus inline. Directory
+traversal is mechanical; it belongs in a script.
 
 **Why this matters:** Every token spent on mechanical work is a token
 not spent on reasoning, and mechanical work executed by an LLM is
@@ -86,12 +83,9 @@ rule engine produces brittle systems that fail on the first novel case.
 Misplacing work in either direction costs quality.
 
 **How devorch enforces this:**
-- `map-project.ts`, `init-phase.ts`, `check-project.ts`,
-  `validate-plan.ts`, `phase-summary.ts`, `setup-worktree.ts`,
-  `merge-worktree.ts`, `list-worktrees.ts` -- mechanical
-- Wave 2 explore sizing (whether to launch, what to focus on) -- judgment, inline Opus
-- Guardian review (industry standards vs code reality) -- judgment, inline
-- Edge case enumeration and bucketing -- judgment, inline
+- `map-project.ts` (structural snapshot), `check-project.ts` (lint/type/build/test runner), `tldr-analyze.ts` (TS structural extraction), `phase-summary.ts` (commit message + state), `archive-plan.ts` (move plan to archive) -- mechanical
+- Explore depth, plan structure, edge case enumeration, guardian review, builder dispatch -- judgment, inline Opus
+- Plan validation and DAG correctness -- judgment by the planner; orchestrator self-checks before dispatch
 - Post-edit lint hook -- mechanical
 
 **Validation question:** _"Is an LLM doing mechanical work, or a script
@@ -99,34 +93,33 @@ pretending to exercise judgment?"_ Either misplacement is a defect.
 
 ---
 
-## Principle 4: Parallelism is earned by scope
+## Principle 4: Parallelism follows the dependency DAG
 
-Parallel waves, parallel explorations, and parallel satellite agents are
-powerful and expensive. They pay off when scope is broad enough that
-serial execution would waste real time. They do not pay off when wave 1
-already covered the territory, or when a plan declares a single task.
-Devorch earns parallelism adaptively: wave 2 only fires when wave 1
-surfaces a real information gap; build waves run in parallel only when
-the plan declares non-overlapping file boundaries; satellites spin up
-only when the plan includes secondary repos. Nothing is parallel by
-ritual.
+Phases declare explicit dependencies on other phases. Tasks within a
+phase declare disjoint file scopes. Anything not connected by a dep
+runs in parallel; anything connected runs sequentially. There are no
+"waves" inside a phase and no fixed ordering between phases beyond what
+deps require. The DAG is the only ordering constraint.
 
-**Why this matters:** Parallelism has a tax -- coordination overhead,
-more context slices to curate, more checkpoints to reconcile. On large
-work with clean task boundaries, the tax is trivially worth paying. On
-small work, the tax dominates the benefit and adds noise. Applying
-parallelism uniformly is ceremony, not rigor.
+**Why this matters:** Sequential pipelines waste real time when work is
+genuinely independent — and most non-trivial features have independent
+sub-pieces (telemetry separate from business logic, docs separate from
+code, two unrelated modules touched by the same request). Forcing them
+serial just to have a "clean ordering" is ceremony. At the same time,
+parallel-by-default is wrong: when phase B depends on phase A's output,
+running them in parallel produces broken builds. The DAG models the
+real dependency, nothing more, nothing less.
 
 **How devorch enforces this:**
-- Wave 1 explore: 1–2 medium-thoroughness agents with fixed broad focus, always runs
-- Wave 2 explore: 0–2 very-thorough agents focused on specific gaps surfaced by wave 1; skipped silently when no gap applies
-- Hard cap of 4 explore agents per session — beyond that signals a malformed request
-- Build waves are defined by explicit file-boundary non-overlap in the plan
-- `validate-plan.ts` rejects waves that share write targets
-- Satellite worktrees only when the plan declares `<secondary-repos>`
+- Plan format declares `depends-on` per phase (defaults to no deps)
+- Tasks within a phase use disjoint file lists, enforced by the planner
+- Build scheduler dispatches every phase whose deps are satisfied and whose files don't overlap with currently-running phases
+- Quality gates and reviewers run in parallel after the full DAG completes — they all read the same final HEAD
+- Discovery (explore + guardian) runs in parallel against the same inputs
 
-**Validation question:** _"Does the scope of this work justify the
-coordination cost of parallel execution?"_ If not, run linear.
+**Validation question:** _"Is there a dependency between A and B that
+forces serial execution, or is the ordering just convention?"_ If
+convention, it should be parallel.
 
 ---
 
@@ -184,8 +177,7 @@ decide when they diverge.
   deliberate workarounds, non-obvious invariants, anti-patterns retained by
   trade-off. Never bulk-generated by script — grows organically as real
   sessions surface real surprises, curated by the orchestrator per the
-  strict quality bar in `commands/devorch.md` § Gotcha capture (no user
-  gate, so the bar does the filtering)
+  strict quality bar in the command spec
 - Gotchas are passed as context, not as rules, in builder slices
 - Guardian evaluates code against industry standards (OWASP, performance, architecture)
 - Divergences become heads-up items or bifurcations, not silent rewrites
@@ -208,16 +200,15 @@ and the fix surface informed.
 
 **Why this matters:** A type error in phase 1 becomes a runtime crash
 in phase 3 that looks like a logic bug, consuming hours of context
-reconstruction. Catching it before phase 2 starts costs minutes. The
-asymmetry is not marginal; it compounds with every phase that sits on
-top of undetected breakage.
+reconstruction. Catching it before downstream phases run costs minutes.
+The asymmetry is not marginal; it compounds with every phase that sits
+on top of undetected breakage.
 
 **How devorch enforces this:**
 - Post-edit lint hook catches syntax and style on every Write/Edit
-- `check-project.ts --quick` runs between phases
 - Builders get up to 3 local retry attempts with error context before escalating
-- Final adversarial review splits into security, performance, completeness, flags
-- Each reviewer is scoped so findings come with context, not with ambiguity
+- Quality gates (lint + typecheck + build + test) run in parallel after the DAG completes, catching cross-phase integration breaks
+- Reviewers split into security, performance, completeness, flags — each scoped so findings come with context, not with ambiguity
 
 **Validation question:** _"If this error surfaces three phases from now,
 will the agent fixing it still have the context of why the code was
@@ -241,7 +232,7 @@ these. A guardian posture catches them before they become production
 incidents without turning every session into a lecture.
 
 **How devorch enforces this:**
-- Guardian instruction block runs every invocation, before and after explore
+- Guardian role applied inline during discovery, before and after explore findings consolidate
 - Domain checklist: auth, rate-limiting, input validation, error boundaries,
   caching, indexing, N+1, pagination, realtime, upload path, async/queue,
   observability, idempotency, secrets, cross-tenant isolation
@@ -257,14 +248,14 @@ Silence is correct only when the code already meets the bar.
 
 ## Principle 9: Ceremony proportional to scope
 
-A typo fix does not need a plan, a worktree, and a phase boundary.
-A three-module refactor does. Devorch resolves this not by mode-grading
-internally, but by drawing a sharp line at its own invocation: trivial
-work runs in vanilla Claude Code; devorch is the path for medium-to-large
-work that earns the full pipeline. Inside devorch, the pipeline is
-single and linear -- worktree, plan, phases, adversarial review --
-because by the time you invoked it, that ceremony is in scope.
-Right-sizing happens at the front door, not via internal toggles.
+A typo fix does not need a plan and a phase boundary. A three-module
+refactor does. Devorch resolves this not by mode-grading internally,
+but by drawing a sharp line at its own invocation: trivial work runs
+in vanilla Claude Code; devorch is the path for medium-to-large work
+that earns the full pipeline. Inside devorch, the pipeline is single
+and stable -- discovery, plan, build, quality, flags -- because by the
+time you invoked it, that ceremony is in scope. Right-sizing happens
+at the front door, not via internal toggles.
 
 **Why this matters:** Ceremony for small tasks is not rigor -- it is
 theater that trains the user to route around the tool. If `/devorch`
@@ -273,10 +264,9 @@ variable by hand and the guardian never sees the session. The tool
 that survives is the one whose cost is shaped to the task.
 
 **How devorch enforces this:**
-- Single linear pipeline: load → worktree → guardian → wave 1 → wave 2 (cond) → enumerate → plan → validate → phases → review → fixes → verdict → merge → gotchas → friction
-- Worktree always created — every devorch run is isolated from `<mainRoot>` before any explore
-- Plan always written, even for 1-task builds — anchors the completeness reviewer and explicit wave coordination
-- Wave 2 is the only adaptive cost inside the pipeline; everything else is constant
+- Single five-stage pipeline: discovery → plan → build (DAG) → quality → flags
+- Plan always written, even for 1-task builds — anchors the completeness reviewer and DAG scheduler
+- Worktrees are NOT a devorch internal — running two parallel sessions on the same repo is the user's choice (open Claude in two separate `git worktree add`'d directories), not something devorch coordinates
 - Trivial work (single-file typo, rename in a known location) does not invoke devorch — vanilla Claude Code is the right tool there
 
 **Validation question:** _"Is this work medium-or-large enough that
@@ -293,7 +283,7 @@ manage.
 
 Larger context is a dispatch enabler, not a quality substitute. A 1M
 window lets the orchestrator hold coordination inline -- scripts,
-guardian pass, validation. It does not let the orchestrator hold source code,
+guardian role, validation. It does not let the orchestrator hold source code,
 debug traces, and builder retries without paying the lost-in-the-middle
 tax. The distinction: coordination context benefits from centralization;
 implementation context must stay focused and isolated in builders.
@@ -322,16 +312,28 @@ overhead is real and worth paying.
 Deferred validation creates compound errors. A type error in phase 1
 becomes a runtime crash in phase 3 that looks like a logic bug. The
 fix then requires reconstructing context the original builder already
-had and discarded. Per-phase validation keeps the error surface small
-and the fix surface informed.
+had and discarded. Fast failure inside builders plus parallel quality
+gates after the DAG keep the error surface small and the fix surface
+informed.
+
+### "Worktrees solve everything"
+
+Internal worktrees were a v1 attempt to isolate devorch's work from
+the user's branch. They created more pain than they solved: cache
+desync, merge dance, satellite path confusion, archival commits
+fighting `.gitignore`. The honest model is simpler: devorch commits
+directly to the current branch. If the user wants two parallel
+sessions on the same repo, they create two `git worktree add`'d
+directories themselves and run a separate Claude Code in each. Devorch
+does not need to know this happened.
 
 ### "Ceremony signals seriousness"
 
-A plan, a worktree, a review cycle, and a phase boundary are not
-inherently rigorous -- they are inherently expensive. Applying them
-to a three-line typo fix is theater, not diligence. The shaping
-happens at the invocation boundary: vanilla Claude Code for trivial
-edits, devorch for medium-to-large work. Internal mode toggles --
+A plan, a review cycle, and a phase boundary are not inherently
+rigorous -- they are inherently expensive. Applying them to a
+three-line typo fix is theater, not diligence. The shaping happens at
+the invocation boundary: vanilla Claude Code for trivial edits,
+devorch for medium-to-large work. Internal mode toggles --
 "lite devorch", "quick devorch" -- create a different failure: a tool
 with no clear identity, where users can't predict the cost and end up
 routing around it. The clean interface is one ceremony level per
