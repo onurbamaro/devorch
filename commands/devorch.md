@@ -143,19 +143,23 @@ Draft the plan per `docs/PLAN-FORMAT.md`. Write it to `.devorch/plans/<name>.md`
 
 **Bundle trivial mechanical fixes** — when 2+ tasks share the same phase, have small specs (under ~500 tokens combined), target disjoint files, and are mechanical (flag adds, regex tweaks, hint strings, doc rewrites), bundle them into a single task with bullet-points. Reserve separate tasks for genuinely independent units of judgment.
 
-Then **self-check** the plan inline (no script):
+**Mechanical validation (script)**: run `bun $CLAUDE_HOME/devorch-scripts/validate-plan.ts --plan <planPath>`. Returns JSON `{ok, errors, warnings}`. Errors cover:
+- Required blocks (`<description>`, `<objective>`, `<classification>`, `<decisions>`) and `# Plan: <name>` header
+- Phase IDs unique; `<depends-on>` references only existing IDs; DAG is acyclic
+- Every task has `**ID**` and `**Files**`
+- File disjunction within a phase
+- File disjunction across pairs of phases that can run concurrently (no dep chain in either direction)
 
-1. **Structural** — Required blocks present (`<description>`, `<objective>`, `<classification>`, `<decisions>`). Every phase has unique `id`, `<goal>`, `<tasks>`, `<criteria>`. Every task has `**ID**` and `**Files**`.
-2. **DAG correctness** — `<depends-on>` references only existing phase IDs; no cycles (topologically sortable).
-3. **File disjunction within a phase** — no two tasks in the same phase share a file.
-4. **File disjunction across parallel phases** — for every pair of phases (A, B) where neither depends on the other (directly or transitively), their declared file sets are disjoint.
-5. **Implicit-touch sweep** — read each task description and infer files the task will touch even though they're not listed (barrel `index.ts`, hook registries, route registries, generated migration filenames). Grep the repo to confirm. If a candidate is verified, add it to the task's `**Files**` line. Re-run check 3 and 4 with the augmented file lists. If overlap appears, redraft the plan (move a task to a later phase, or merge phases, or split files differently). Common shapes:
-   - Barrel files / index aggregators (`src/index.ts`, `mod.ts`) when adding/renaming exports
-   - Hook registries when adding a new hook
-   - Plugin / command / route registries when adding new entries
-   - Type re-exports (`types.ts`, `index.d.ts`) when adding a new exported type
+If `ok: false`, redraft the plan addressing each error and re-run the validator until clean.
 
-If any check fails and cannot be auto-fixed, redraft the plan and re-check before continuing. Once all checks pass, commit the plan: `git add .devorch/plans/<name>.md` (and `.devorch/GOTCHAS.md` if updated) → `git commit -m "chore(devorch): plan — <name>"`.
+**Implicit-touch sweep (judgment, inline)**: validator covers declared files; orchestrator must still infer non-declared touches. Read each task and consider files likely modified that aren't in `**Files**`:
+- Barrel files / index aggregators (`src/index.ts`, `mod.ts`) when adding/renaming exports
+- Hook registries when adding a new hook
+- Plugin / command / route registries when adding new entries
+- Type re-exports (`types.ts`, `index.d.ts`) when adding a new exported type
+- Generated migration filenames (DB schemas)
+
+Grep the worktree to confirm each candidate exists. If verified, add it to the task's `**Files**` line and re-run `validate-plan.ts` (the augmented disjunction check might now flag a real overlap that needs redraft). Once all checks pass, commit the plan: `git add .devorch/plans/<name>.md` (and `.devorch/GOTCHAS.md` if updated) → `git commit -m "chore(devorch): plan — <name>"`.
 
 **Active plan commit is best-effort**: if `git add` fails because `.devorch/plans/` is gitignored (some projects keep active plans untracked and only commit `archive/` via convention), skip the commit silently — do NOT use `-f`. The active plan is a transient artifact; the durable record is the Stage 5 archive (which uses `git add -f` defensively, since archived plans are convention-tracked even when `.devorch/` is otherwise ignored). The working tree retains the active plan regardless, so builders can still read it. If `.devorch/GOTCHAS.md` was updated and is tracked, commit it standalone with `git commit -m "chore(devorch): gotchas update"`.
 
@@ -165,26 +169,24 @@ Set `planPath = .devorch/plans/<name>.md`.
 
 Loop until every phase in the plan is marked `status="done"`:
 
-1. **Compute ready set**: phases whose `<depends-on>` are all `done` AND whose declared files don't overlap with any currently-running phase. (On the first iteration of a fresh build, no phases are running, so the ready set is every phase with empty `<depends-on>`.)
-2. If ready set is empty AND no phases are currently running → all done, exit loop.
+1. **Compute ready set via script**: run `bun $CLAUDE_HOME/devorch-scripts/dag-scheduler.ts --plan <planPath> [--running id1,id2]`. Pass the IDs of phases currently in flight (none on first iteration). Returns JSON `{ready, blocked, done, running, totalPhases}`. Cycle detection and file-overlap checks happen mechanically — no inline reasoning needed.
+2. If `ready` is empty AND `running` is empty → all `done`, exit loop. If `ready` is empty AND `running` is non-empty → wait for currently-running phases to finish, then recompute.
 3. **Dispatch every ready phase in parallel** in a single assistant message:
-   - For each ready phase, launch all its tasks via the Task tool with `subagent_type="devorch-builder"`. One Task tool call per task. All Task calls go in the same assistant message so they run in parallel.
+   - For each phase ID in `ready`, launch all its tasks via the Task tool with `subagent_type="devorch-builder"`. One Task tool call per task. All Task calls go in the same assistant message so they run in parallel.
 4. **Wait for the wave to complete.** When all dispatched tasks return:
-   - For each task, verify completion via `git log --oneline` (a commit matching the task ID/title appears).
+   - For each task, verify completion via `git -C <worktreePath> log --oneline` (a commit matching the task ID/title appears).
    - For each phase whose tasks all committed successfully, mark it `status="done"` in the plan file (in-place edit: `<phase id="X" name="Y">` → `<phase id="X" name="Y" status="done">`).
-5. Recompute and loop.
+5. Recompute the ready set via the script and loop.
 
 ### Builder prompt assembly (per task)
 
-For each task, build the prompt as follows:
+For each task in the ready phase, run `bun $CLAUDE_HOME/devorch-scripts/assemble-task-prompt.ts --plan <planPath> --task-id <taskId> --worktree <worktreePath>` and parse JSON `{ok, prompt, files, specRefs, phaseId, warnings}`. The script extracts the task block from the plan, resolves Spec refs against the phase's `<spec>` block, and filters `.devorch/GOTCHAS.md` to entries that touch files in `**Files**`. The orchestrator only adds the dynamic outer wrapping:
 
-1. **Working directory** — `Working directory: <worktreePath>` (the devorch worktree). All git operations use `git -C <worktreePath>`; the builder commits directly on branch `devorch/<name>`.
-2. **Plan context** — Plan title + `<objective>` + `<solution-approach>` (if present) + `<decisions>`.
-3. **Full task details** — read `<planPath>` and extract the section for this task (from `#### N. <Title>` until the next `#### ` or `</tasks>` boundary). Include task ID, Files, Spec refs, Exemplars, Non-goals, body bullets.
-4. **Spec contracts** — resolve Spec refs against the phase's `<spec>` block; inline the referenced `<entity>`/`<behavior>`/`<invariant>`/`<endpoint>`/`<error-contract>` elements.
-5. **Relevant gotchas** — filter `.devorch/GOTCHAS.md` to entries whose `file:line` reference touches files in the task's `**Files**` list, OR whose title relates semantically to the task. Inline matching entries; omit the section entirely if none match.
-6. **Explore findings** — orchestrator-curated subset of Stage 1 explore output relevant to this task (files mentioned, patterns touched). Omit the section entirely if no findings are relevant.
-7. **Exemplars** — if the task lists Exemplars, suggest the builder Read those files for stylistic mirroring.
+1. **Working directory** — prepend `Working directory: <worktreePath>` (the devorch worktree). All builder git operations use `git -C <worktreePath>`; commits land on branch `devorch/<name>`.
+2. **Plan context** — prepend Plan title + `<objective>` + `<solution-approach>` (if present) + `<decisions>` (one-time read of plan; cache for subsequent tasks in same dispatch).
+3. **Script output** — inline the `prompt` field from the script (Task + Spec Contracts + Gotchas already filtered and formatted).
+4. **Explore findings** — orchestrator-curated subset of Stage 1 (or `explore.json` on resume) relevant to this task. Omit the section entirely if no findings apply.
+5. **Exemplars** — if the task block lists Exemplars, suggest the builder Read those files for stylistic mirroring.
 
 Send all task prompts in a single assistant message (one Task call per task). Builder retries on failure: up to 3 attempts per task. Each retry appends a `## Previous Failure Context` section: retry count, last 50 lines of prior output, `git diff` from the failed attempt (or "no commits"), instruction to diagnose root cause. On retry exhaustion: stop the build, emit a structured failure report, suggest a fresh `/devorch` invocation for re-planning.
 
