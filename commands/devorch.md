@@ -27,10 +27,10 @@ Note: on resume, the original explore findings are gone. The scheduler proceeds 
 
 ## Stage 1 — Discovery (parallel)
 
-All of the following run in parallel — single assistant message with multiple tool calls:
+All of the following run in parallel — single assistant message with multiple tool calls. Both Bash calls are robust (always exit 0 on missing optional inputs) so a failure in one does NOT cancel the parallel Explore agents:
 
 1. **Project map** — run `bun $CLAUDE_HOME/devorch-scripts/map-project.ts --persist`. The script writes `.devorch/cache/project-map.md` and prints structural snapshot (3-level tree, scripts, Makefile, sibling repos).
-2. **Gotchas + profile** — Read `.devorch/GOTCHAS.md` if it exists. Read `.devorch/profile.yml` (per-project first, then `~/.devorch/profile.yml`); if neither exists, use the implicit defaults from `docs/PROFILE.md` (`priorities: [security, performance, dx, cost]`, no biases). Keep the resolved profile as `<profile>`.
+2. **Context loader** — run `bun $CLAUDE_HOME/devorch-scripts/load-context.ts`. Always exits 0. Returns JSON `{gotchas, gotchasLegacy, profile: {raw, source}, silencedStandards, warnings}`. The script handles missing files (empty strings), legacy `CONVENTIONS.md` fallback, and profile precedence (per-project → user-home → defaults from `docs/PROFILE.md`). Keep `profile.raw` as `<profile>` for the guardian role; consult `silencedStandards` before emitting heads-ups.
 3. **Explore agents** — launch 1–3 Explore agents (`subagent_type="Explore"`) with focuses derived from `$ARGUMENTS`:
    - Always: 1 agent on architecture + existing patterns in the touched area.
    - When the request spans 2+ modules or has multi-feature scope: 1 additional agent on risks/edge surfaces.
@@ -109,6 +109,8 @@ Then **self-check** the plan inline (no script):
    - Type re-exports (`types.ts`, `index.d.ts`) when adding a new exported type
 
 If any check fails and cannot be auto-fixed, redraft the plan and re-check before continuing. Once all checks pass, commit the plan: `git add .devorch/plans/<name>.md` (and `.devorch/GOTCHAS.md` if updated) → `git commit -m "chore(devorch): plan — <name>"`.
+
+**Active plan commit is best-effort**: if `git add` fails because `.devorch/plans/` is gitignored (some projects keep active plans untracked and only commit `archive/` via convention), skip the commit silently — do NOT use `-f`. The active plan is a transient artifact; the durable record is the Stage 5 archive (which uses `git add -f` defensively, since archived plans are convention-tracked even when `.devorch/` is otherwise ignored). The working tree retains the active plan regardless, so builders can still read it. If `.devorch/GOTCHAS.md` was updated and is tracked, commit it standalone with `git commit -m "chore(devorch): gotchas update"`.
 
 Set `planPath = .devorch/plans/<name>.md`.
 
@@ -203,7 +205,8 @@ Lint / Typecheck / Build / Tests: status
 ### Archive plan
 
 If verdict is PASS (or PASS with non-blocking pendencies):
-- `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` — moves plan to `.devorch/plans/archive/<name>.md`.
+- `bun $CLAUDE_HOME/devorch-scripts/archive-plan.ts --plan <planPath>` — moves plan to `.devorch/plans/archive/<name>.md` AND stages it for commit (`git add -f` on the archive path, `git add -u` on the active path to capture deletion if it was tracked). The script's JSON output includes `staged: true|false`; if `staged` is false, `git` is unavailable and the orchestrator should fall back to manual staging.
+- Also archive the flags file alongside if present: `git mv -f .devorch/flags-<name>.md .devorch/archive/flags-<name>-<YYYY-MM-DD>.md` (or copy + delete + `git add -f` if `git mv` rejects gitignored sources).
 - Commit: `chore(devorch): archive plan — <name>`.
 
 On FAIL → keep the plan active so `--resume` can pick up where the failure left off. Suggest the user inspect, then `/devorch --resume` after fixing manually, or a fresh `/devorch "<fix description>"`.
