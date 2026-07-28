@@ -63,17 +63,18 @@ for (const { src, dest, label } of targets) {
   const claudeHomeFwd = CLAUDE_HOME.replaceAll("\\", "/");
   let count = 0;
 
-  // For the commands target, `devorch.md` at the root of `commands/` is the
-  // v3 unified entry and must be installed as a top-level slash command at
-  // `~/.claude/commands/devorch.md` — not namespaced under `devorch/`.
+  // For the commands target, every `.md` file at the root of `commands/`
+  // installs as a top-level slash command at `~/.claude/commands/<name>.md`.
+  // Subdirectories of `commands/` install under the namespaced folder
+  // `~/.claude/commands/devorch/` and are invoked as `/devorch:<sub>:<name>`.
   const isCommands = label === "commands";
 
   function copyDir(srcDir: string, destDir: string, atRoot = false) {
     mkdirSync(destDir, { recursive: true });
     const entries = readdirSync(srcDir);
     for (const entry of entries) {
-      // Skip the top-level devorch.md inside commands/ — copied separately below.
-      if (atRoot && isCommands && entry === "devorch.md") continue;
+      // Skip every top-level .md in commands/ — installed as top-level slash commands below.
+      if (atRoot && isCommands && entry.endsWith(".md")) continue;
 
       const srcEntry = join(srcDir, entry);
       const destEntry = join(destDir, entry);
@@ -93,20 +94,24 @@ for (const { src, dest, label } of targets) {
 
   copyDir(src, dest, true);
 
-  // Install the v3 top-level /devorch command outside the namespaced folder.
+  // Install every top-level commands/*.md as a top-level slash command.
   if (isCommands) {
-    const topSrc = join(src, "devorch.md");
-    if (existsSync(topSrc)) {
-      const topDest = join(CLAUDE_HOME, "commands", "devorch.md");
+    const topEntries = readdirSync(src).filter(
+      (e) => e.endsWith(".md") && statSync(join(src, e)).isFile()
+    );
+    for (const entry of topEntries) {
+      const topSrc = join(src, entry);
+      const topDest = join(CLAUDE_HOME, "commands", entry);
       const content = readFileSync(topSrc, "utf-8");
       const processed = content.replaceAll("$CLAUDE_HOME", claudeHomeFwd);
       writeFileSync(topDest, processed);
       count++;
-      console.log(`  commands/devorch.md -> ${topDest} (top-level /devorch)`);
+      const slashName = entry.replace(/\.md$/, "");
+      console.log(`  commands/${entry} -> ${topDest} (top-level /${slashName})`);
     }
 
     // Remove the namespaced commands/devorch/ folder if nothing was copied
-    // there (happens when the only file in commands/ is devorch.md itself).
+    // there (happens when commands/ has only top-level .md files).
     try {
       const leftovers = readdirSync(dest);
       if (leftovers.length === 0) {

@@ -163,9 +163,9 @@ If `ok: false`, redraft the plan addressing each error and re-run the validator 
 - Type re-exports (`types.ts`, `index.d.ts`) when adding a new exported type
 - Generated migration filenames (DB schemas)
 
-Grep the worktree to confirm each candidate exists. If verified, add it to the task's `**Files**` line and re-run `validate-plan.ts` (the augmented disjunction check might now flag a real overlap that needs redraft). Once all checks pass, commit the plan: `git add .devorch/plans/<name>.md` (and `.devorch/GOTCHAS.md` if updated) → `git commit -m "chore(devorch): plan — <name>"`.
+Grep the worktree to confirm each candidate exists. If verified, add it to the task's `**Files**` line and re-run `validate-plan.ts` (the augmented disjunction check might now flag a real overlap that needs redraft).
 
-**Active plan commit is best-effort**: if `git add` fails because `.devorch/plans/` is gitignored (some projects keep active plans untracked and only commit `archive/` via convention), skip the commit silently — do NOT use `-f`. The active plan is a transient artifact; the durable record is the Stage 5 archive (which uses `git add -f` defensively, since archived plans are convention-tracked even when `.devorch/` is otherwise ignored). The working tree retains the active plan regardless, so builders can still read it. If `.devorch/GOTCHAS.md` was updated and is tracked, commit it standalone with `git commit -m "chore(devorch): gotchas update"`.
+**No commit for the active plan**: the plan file is a transient artifact — builders read it from disk in the worktree, not from git. The durable record is the Stage 5 archive (which uses `git add -f` defensively). If `.devorch/GOTCHAS.md` was updated and is tracked, commit it standalone with `git commit -m "chore(devorch): gotchas update"`; otherwise let the merge step handle it.
 
 Set `planPath = .devorch/plans/<name>.md`.
 
