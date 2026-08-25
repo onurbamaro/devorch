@@ -1,3 +1,4 @@
+// Contract: servidor-local — HTTP/SSE server. Serves dashboard/public/index.html.
 import { existsSync } from "fs";
 import { extname, join, resolve } from "path";
 import { appendAmendment, clearConflict } from "./lib/amend";

@@ -1,3 +1,4 @@
+// Contracts under test: servidor-local, iniciar-build, responder-conflito, merge-pela-pagina, nova-sessao-idea.
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";

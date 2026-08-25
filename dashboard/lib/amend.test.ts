@@ -1,3 +1,4 @@
+// Contract under test: responder-conflito.
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";

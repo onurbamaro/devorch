@@ -1,3 +1,4 @@
+// Contract under test: terminal-embutido.
 import { afterEach, expect, test } from "bun:test";
 import {
   __setSpawnForTests,

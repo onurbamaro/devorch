@@ -1,3 +1,4 @@
+// Contracts under test: iniciar-build, merge-pela-pagina, nova-sessao-idea.
 import { afterEach, expect, test } from "bun:test";
 import {
   __setSpawnForTests,

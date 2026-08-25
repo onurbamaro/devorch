@@ -1,3 +1,4 @@
+// Contract: servidor-local — sessions listing, grouping, debounced watcher.
 import { existsSync, readdirSync, readFileSync, watch } from "fs";
 import { homedir } from "os";
 import { join } from "path";

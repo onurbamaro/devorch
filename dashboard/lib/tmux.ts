@@ -1,3 +1,4 @@
+// Contracts: iniciar-build, merge-pela-pagina, nova-sessao-idea — tmux spawn/idempotency.
 export type SpawnResult = { exitCode: number; stdout?: string; stderr?: string };
 export type SpawnFn = (argv: readonly string[]) => Promise<SpawnResult>;
 

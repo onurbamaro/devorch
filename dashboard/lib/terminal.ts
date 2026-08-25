@@ -1,3 +1,4 @@
+// Contract: terminal-embutido — Bun.Terminal PTY over WebSocket.
 import { tmuxName } from "./tmux";
 
 export type TerminalMode = "ro" | "rw";

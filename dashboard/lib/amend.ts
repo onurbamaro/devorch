@@ -1,3 +1,4 @@
+// Contract: responder-conflito — amendment append + specConflicts clearing.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
