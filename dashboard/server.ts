@@ -2,6 +2,7 @@ import { existsSync } from "fs";
 import { extname, join, resolve } from "path";
 import { appendAmendment, clearConflict } from "./lib/amend";
 import { listSessions, readSession, resolveSessionsDir, watchSessions } from "./lib/sessions";
+import { attachTerminal, type TerminalBridge } from "./lib/terminal";
 import {
   startBuild,
   startIdea,
@@ -26,15 +27,10 @@ export type Hub = {
 
 type SseController = ReadableStreamDefaultController<Uint8Array>;
 
-type TerminalAttach = (
-  ws: unknown,
-  opts: { session: string; mode: string },
-) => void;
-
 type SocketData = {
   name: string;
   mode: string;
-  attach: TerminalAttach;
+  bridge: TerminalBridge | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -110,17 +106,6 @@ function serveSessionFile(name: string, relpath: string): Response {
   return new Response(Bun.file(target));
 }
 
-async function loadAttachTerminal(): Promise<TerminalAttach | null> {
-  try {
-    const specifier: string = "./lib/terminal.ts";
-    const loaded: unknown = await import(specifier);
-    if (!isRecord(loaded) || typeof loaded.attachTerminal !== "function") return null;
-    return loaded.attachTerminal as TerminalAttach;
-  } catch {
-    return null;
-  }
-}
-
 export function startHub(opts?: { port?: number }): Hub {
   const port = opts?.port ?? Number(process.env.DEVORCH_HUB_PORT ?? 7777);
   const sessionsDir = resolveSessionsDir();
@@ -151,10 +136,8 @@ export function startHub(opts?: { port?: number }): Hub {
         if (!isSafeSessionName(name) || name.includes("/")) {
           return json({ ok: false, error: "not found" }, 404);
         }
-        const attach = await loadAttachTerminal();
-        if (!attach) return new Response("terminal unavailable", { status: 503 });
         const mode = url.searchParams.get("mode") === "rw" ? "rw" : "ro";
-        const upgraded = srv.upgrade(req, { data: { name, mode, attach } });
+        const upgraded = srv.upgrade(req, { data: { name, mode, bridge: null } });
         if (!upgraded) return new Response("upgrade failed", { status: 426 });
         return;
       }
@@ -273,10 +256,15 @@ export function startHub(opts?: { port?: number }): Hub {
     },
     websocket: {
       open(ws) {
-        ws.data.attach(ws, { session: ws.data.name, mode: ws.data.mode });
+        ws.data.bridge = attachTerminal(ws, { session: ws.data.name, mode: ws.data.mode });
       },
-      message() {},
-      close() {},
+      message(ws, message) {
+        void ws.data.bridge?.handleMessage(message);
+      },
+      close(ws) {
+        ws.data.bridge?.close();
+        ws.data.bridge = null;
+      },
     },
   });
 

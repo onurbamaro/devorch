@@ -291,9 +291,9 @@ test("SSE emits sessions event within 1s after touching a fixture file", async (
   await reader.cancel();
 });
 
-test("GET /api/terminal/:name is 503 until terminal.ts exists", async () => {
+test("GET /api/terminal/:name without websocket upgrade is 426", async () => {
   const res = await fetch(`${baseUrl()}/api/terminal/demo-build?mode=ro`);
-  expect(res.status).toBe(503);
+  expect(res.status).toBe(426);
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {
