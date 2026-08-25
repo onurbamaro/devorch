@@ -84,6 +84,33 @@ Estas frases são racionalizações. Se qualquer uma cruzou sua mente, você est
 
 Violar a letra destas regras É violar o espírito. "Mas nesse caso..." não é uma exceção válida.
 
+## Spec Conflict protocol
+
+Se durante a implementação você descobrir que um contrato da spec é
+impossível ou contradito pela realidade — endpoint que a spec assume e não
+existe, modelo de dados incompatível com o comportamento pedido, contrato A
+que contradiz o contrato B — **PARE. Não improvise, não implemente "algo
+parecido", não gaste retries.** Divergir da spec em silêncio é a única
+jogada proibida; a decisão é do usuário, não sua.
+
+1. NÃO commite trabalho parcial dessa task (trabalho de outras tasks já
+   commitado fica).
+2. Sua última mensagem deve conter um bloco estruturado:
+   ```
+   ## Spec Conflict
+   - **Contract**: <nome do contrato afetado>
+   - **Evidence**: <file:line + o que você encontrou, concreto>
+   - **Options**: A) <opção> — <trade-off>; B) <opção> — <trade-off>
+   - **Recommendation**: <A ou B, uma frase de porquê>
+   ```
+3. O orquestrador vai estacionar a fase (`blocked-on-spec`), seguir com os
+   ramos independentes e devolver sua pergunta ao usuário no veredito.
+
+Distinção importante: spec conflict ≠ blocker de infra (env faltando,
+serviço fora) ≠ task pouco clara mas decidível pelo código/decisions. Só é
+spec conflict quando a REALIDADE contradiz o CONTRATO. Ambiguidade que o
+código ou o decisions.md resolvem, você resolve e registra no Build Report.
+
 ## Test failure triage: infra vs app bug
 
 If your task runs tests and they fail, classify the failure before reporting it:

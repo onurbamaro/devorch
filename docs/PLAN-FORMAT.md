@@ -107,6 +107,7 @@ Cross-cutting invariants that apply to all phases (e.g., API envelope format, au
 ## Rules
 
 - **Phase IDs are explicit** (`<phase id="schema">`), not numeric. The orchestrator uses IDs to resolve `depends-on` references.
+- **Multi-repo plans** (devorch v3 sessions spanning repos): every phase carries a `repo="<repoName>"` attribute after `name` (e.g. `<phase id="api" name="Session API" repo="salsago-go">`), and every `**Files**` path is prefixed with `<repoName>/`. The prefix keeps the file-disjunction checks sound across repos — `validate-plan.ts` and `dag-scheduler.ts` treat paths as opaque strings and need no changes. The orchestrator resolves the phase's worktree from the `repo` attribute; cross-repo dependencies are ordinary `<depends-on>` edges. Single-repo plans omit both.
 - **`<depends-on>`** lists comma-separated phase IDs that must complete before this phase can start. Empty (`<depends-on></depends-on>`) means no deps — runs as soon as the build starts.
 - **DAG must be acyclic.** The orchestrator self-checks before dispatch.
 - **Files are declared per task** in a `**Files**: ...` line. The full set of files a task touches must be listed; do not rely on the orchestrator to infer.

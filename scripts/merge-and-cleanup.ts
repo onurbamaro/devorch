@@ -17,7 +17,12 @@
  * Usage: bun ~/.claude/devorch-scripts/merge-and-cleanup.ts \
  *          --worktree <path> --branch <devorch/name> --target <originalBranch> \
  *          --plan-title "<title>" [--main-root <path>] [--no-fetch]
- *          [--phase rebase|merge|cleanup]
+ *          [--phase rebase|merge|cleanup] [--dry-run-only]
+ *
+ * --dry-run-only: run rebase + sanity + dry-run merge, then ABORT the dry-run
+ *   and stop before any real commit. Used by multi-repo merges: dry-run every
+ *   repo first, real-merge only after all repos cleared. On success emits
+ *   {ok: true, phase: "dry-run"}; resume the real merge later with --phase merge.
  *
  * --phase lets the orchestrator resume after manual conflict resolution:
  *   --phase rebase   → start at step 1 (default)
@@ -39,6 +44,7 @@ const args = parseArgs<{
   "main-root": string;
   "no-fetch": boolean;
   phase: string;
+  "dry-run-only": boolean;
 }>([
   { name: "worktree", type: "string", required: true },
   { name: "branch", type: "string", required: true },
@@ -47,6 +53,7 @@ const args = parseArgs<{
   { name: "main-root", type: "string", required: false },
   { name: "no-fetch", type: "boolean", required: false },
   { name: "phase", type: "string", required: false },
+  { name: "dry-run-only", type: "boolean", required: false },
 ]);
 
 const worktreePath = resolve(args.worktree);
@@ -56,6 +63,7 @@ const planTitle = args["plan-title"];
 const mainRoot = args["main-root"] ? resolve(args["main-root"]) : resolve(worktreePath, "../..");
 const startPhase = (args.phase || "rebase") as "rebase" | "merge" | "cleanup";
 const noFetch = args["no-fetch"];
+const dryRunOnly = args["dry-run-only"];
 
 interface CmdResult { ok: boolean; stdout: string; stderr: string; exit: number; }
 
@@ -148,6 +156,12 @@ if (startPhase === "rebase" || startPhase === "merge") {
       hint: "Resolve conflicts in mainRoot, stage them, then `git -C <mainRoot> commit -m 'merge(devorch): <title>'` and re-run with --phase cleanup.",
       stderr: dryRun.stderr.slice(0, 500),
     });
+  }
+
+  // Dry-run-only mode: abort the staged merge and stop here, leaving mainRoot clean.
+  if (dryRunOnly) {
+    run(mainRoot, "git", "merge", "--abort");
+    emit({ ok: true, phase: "dry-run", hint: "Dry-run cleared. Run again with --phase merge for the real merge + cleanup." });
   }
 
   // Dry-run cleared — finalize the merge with a real commit (already staged via --no-commit)
