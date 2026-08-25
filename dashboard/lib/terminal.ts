@@ -185,6 +185,12 @@ export function attachTerminal(ws: TerminalSocket, opts: AttachOpts): TerminalBr
         cols = parsed.cols;
         rows = parsed.rows;
         terminal?.resize(cols, rows);
+        try {
+          // Bun.Terminal.resize sets the PTY size but tmux only re-reads it on SIGWINCH.
+          proc?.kill("SIGWINCH");
+        } catch {
+          /* attach already gone */
+        }
         return;
       }
       if (parsed.type === "unlock") {
