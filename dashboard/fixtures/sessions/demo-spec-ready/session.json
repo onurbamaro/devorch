@@ -1,0 +1,29 @@
+{
+  "name": "demo-spec-ready",
+  "createdAt": "2026-08-20T10:00:00.000Z",
+  "updatedAt": "2026-08-20T12:00:00.000Z",
+  "stage": "spec-ready",
+  "args": "checkout pix no app",
+  "repos": {
+    "loja": {
+      "path": "/home/bruno/dev/loja",
+      "worktree": "/home/bruno/dev/loja/.worktrees/checkout-pix",
+      "branch": "devorch/checkout-pix",
+      "originalBranch": "main"
+    }
+  },
+  "phases": [],
+  "gates": {
+    "mechanical": "pending",
+    "visual": "pending"
+  },
+  "specConflicts": [],
+  "notes": [],
+  "models": {
+    "builder": "inherit",
+    "fixer": "sonnet",
+    "prototype": "opus",
+    "explore": "inherit",
+    "visual": "inherit"
+  }
+}

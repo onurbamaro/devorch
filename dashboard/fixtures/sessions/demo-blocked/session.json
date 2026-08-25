@@ -1,0 +1,43 @@
+{
+  "name": "demo-blocked",
+  "createdAt": "2026-08-20T10:00:00.000Z",
+  "updatedAt": "2026-08-20T12:00:00.000Z",
+  "stage": "blocked-on-spec",
+  "args": "checkout pix no app",
+  "repos": {
+    "loja": {
+      "path": "/home/bruno/dev/loja",
+      "worktree": "/home/bruno/dev/loja/.worktrees/checkout-pix",
+      "branch": "devorch/checkout-pix",
+      "originalBranch": "main"
+    }
+  },
+  "phases": [
+    { "id": "discover", "repo": "loja", "status": "done" },
+    { "id": "plan", "repo": "loja", "status": "done" },
+    { "id": "api", "repo": "loja", "status": "blocked-on-spec" },
+    { "id": "ui", "repo": "loja", "status": "pending" },
+    { "id": "gates", "repo": "loja", "status": "pending" }
+  ],
+  "gates": {
+    "mechanical": "pending",
+    "visual": "pending"
+  },
+  "specConflicts": [
+    {
+      "phase": "api",
+      "contract": "checkout-pix",
+      "evidence": "O endpoint devolve 402 quando o spec pede 200 com QR.",
+      "options": ["A: aceitar 402 e tratar no cliente", "B: o backend deve devolver 200 com o QR"],
+      "recommendation": "B: o backend deve devolver 200 com o QR"
+    }
+  ],
+  "notes": [],
+  "models": {
+    "builder": "inherit",
+    "fixer": "sonnet",
+    "prototype": "opus",
+    "explore": "inherit",
+    "visual": "inherit"
+  }
+}
