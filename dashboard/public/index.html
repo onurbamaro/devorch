@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>devorch hub</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%234c7dff'/></svg>">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="/assets/xterm.css">
   <script src="/assets/xterm.js"></script>
@@ -381,12 +382,16 @@
     .role label { width: 82px; font-size: 12px; color: var(--fg-dim); }
     .role select {
       flex: 1;
-      padding: 8px 12px;
-      border-radius: 6px;
+      padding: 8px 30px 8px 12px;
+      border-radius: 7px;
       border: 1px solid var(--line-strong);
-      background: var(--bg-input);
+      background: var(--bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%238b939b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
       font-family: "JetBrains Mono", ui-monospace, monospace;
       font-size: 12.5px;
+      color: inherit;
+      appearance: none;
+      -webkit-appearance: none;
+      cursor: pointer;
     }
     .plan { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .plan-chip {
@@ -640,10 +645,20 @@
     .toast.on { display: block; }
     .phase-m { display: none; }
     @media (max-width: 600px) {
-      .rail, .top, .d-only { display: none !important; }
+      .rail, .d-only { display: none !important; }
       .m-only, .m-head, .m-chips { display: flex; }
       .m-bar { display: flex; }
       .app { flex-direction: column; }
+      .top {
+        display: flex !important;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 18px;
+        min-height: 0;
+        border-bottom: 1px solid var(--line-soft);
+        background: var(--bg-rail);
+      }
+      .top-name, .top-actions { display: none; }
       .m-head {
         align-items: center;
         gap: 10px;
@@ -743,6 +758,7 @@
       }
       body.term-open .m-head,
       body.term-open .m-chips,
+      body.term-open .top,
       body.term-open .detail,
       body.term-open .m-bar { display: none !important; }
       body.term-open .term-sheet {
@@ -1017,6 +1033,24 @@
     }
     function evidenceHtml(text) {
       return esc(text).replace(/`([^`]+)`/g, '<span class="code-chip">$1</span>');
+    }
+    function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+    function contractMeta(specMd, name) {
+      if (!specMd || !name) return "";
+      const re = new RegExp("^##\\s*Contract:\\s*" + escRe(name) + "\\s*$", "m");
+      const m = re.exec(specMd);
+      if (!m) return "";
+      const rest = specMd.slice(m.index + m[0].length);
+      const nextIdx = rest.search(/\n##\s/);
+      const body = nextIdx === -1 ? rest : rest.slice(0, nextIdx);
+      const items = (body.match(/^-\s*\[[ xX]\]/gm) || []).length;
+      let text = items + (items === 1 ? " critério de aceite" : " critérios de aceite");
+      const screensMatch = body.match(/\*\*Screens\*\*:\s*(.+)/);
+      if (screensMatch) {
+        const names = (screensMatch[1].match(/`[^`]+`/g) || []).map((s) => s.slice(1, -1));
+        if (names.length) text += " · telas: " + names.join(", ");
+      }
+      return text;
     }
     function basename(p) { return String(p).split("/").pop(); }
     function isMobName(n) { return /mobile|\.mob\b|mob\./i.test(n); }
@@ -1344,6 +1378,7 @@
 
     function specReadyHtml(detail) {
       const contracts = (detail.spec && detail.spec.contracts) || [];
+      const specMd = (detail.spec && detail.spec.specMd) || "";
       const name = detail.name || state.selected;
       const thumbs = (detail.baselines || []).map((p) => {
         const mob = isMobName(basename(p));
@@ -1355,7 +1390,11 @@
       }).join("");
       return '<div class="ready-grid"><div class="ready-col">' +
         '<div class="lane"><div class="section-h">Contratos · ' + contracts.length + '</div>' +
-        contracts.map((c) => '<div class="contract"><div class="contract-id">' + esc(c) + '</div></div>').join("") +
+        contracts.map((c) => {
+          const meta = contractMeta(specMd, c);
+          return '<div class="contract"><div class="contract-id">' + esc(c) + '</div>' +
+            (meta ? '<div class="muted">' + esc(meta) + '</div>' : "") + '</div>';
+        }).join("") +
         '</div>' +
         '<div class="lane"><div class="section-h">Protótipo aprovado</div><div class="shots">' + (thumbs || '<div class="muted">Sem baselines</div>') + '</div></div>' +
         '<div class="lane"><div class="section-h">Plano projetado</div><div class="plan">' + (plan || '<div class="muted">Contratos viram as fases do DAG</div>') + '</div></div>' +
