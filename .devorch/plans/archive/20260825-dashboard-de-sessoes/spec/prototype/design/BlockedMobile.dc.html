@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; background: #101214; color: #e8eaec; }
+    a { color: #5b8cff; } a:hover { color: #82a4ff; }
+  </style>
+</helmet>
+<div style="display: flex; flex-direction: column; width: 390px; height: 844px; background: #101214; overflow: hidden;">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px 18px; border-bottom: 1px solid #22272c; background: #0c0e10;">
+    <div style="width: 9px; height: 9px; border-radius: 3px; background: #5b8cff;"></div>
+    <div style="font-size: 15px; font-weight: 700;">devorch</div>
+    <div style="display: flex; align-items: center; gap: 7px; padding: 6px 11px; border-radius: 999px; border: 1px solid #574417; background: #17140d; margin-left: auto;">
+      <div style="width: 6px; height: 6px; border-radius: 50%; background: #ffb02e;"></div>
+      <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;">importador-notas</div>
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="#8b939b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 16px; padding: 18px; overflow-y: auto;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 1.5L15 14H1L8 1.5z" stroke="#ffb02e" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 6v3.4M8 11.6v.4" stroke="#ffb02e" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <div style="font-size: 14px; font-weight: 700;">Conflito de spec</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 14px; padding: 16px; border-radius: 12px; border: 1px solid #574417; background: #17140d;">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: 11px; color: #8b939b;">Contrato</div>
+        <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px;">importa-xml-v4</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-size: 11px; color: #8b939b;">Evidência</div>
+        <div style="font-size: 12.5px; color: #d6dade; line-height: 1.55;">A spec assume o campo <span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; background: #22272c; padding: 1px 5px; border-radius: 4px;">valorLiquido</span> no XML v4; o schema real só traz bruto e descontos (<span style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; background: #22272c; padding: 1px 5px; border-radius: 4px;">nfe-v4.xsd:214</span>).</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 13px; border-radius: 9px; border: 1px solid #5b8cff; background: #10151f;">
+          <div style="width: 14px; height: 14px; border-radius: 50%; border: 4px solid #5b8cff; margin-top: 1px;"></div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <div style="font-size: 12.5px; font-weight: 700;">A · Calcular na importação</div>
+            <div style="font-size: 11.5px; color: #82a4ff; font-weight: 600;">recomendada</div>
+            <div style="font-size: 11.5px; color: #8b939b; line-height: 1.5;">bruto − descontos no parser; contrato intacto.</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 13px; border-radius: 9px; border: 1px solid #2c3238; background: #14171a;">
+          <div style="width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #565e66; margin-top: 1px;"></div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <div style="font-size: 12.5px; font-weight: 700; color: #d6dade;">B · Guardar separado</div>
+            <div style="font-size: 11.5px; color: #8b939b; line-height: 1.5;">Muda contrato e modelo; toca 2 telas.</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 13px; border-radius: 9px; border: 1px dashed #2c3238; background: #14171a;">
+          <div style="width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid #565e66; margin-top: 1px;"></div>
+          <div style="display: flex; flex-direction: column; gap: 5px; flex-grow: 1;">
+            <div style="font-size: 12.5px; font-weight: 700; color: #d6dade;">Outra resposta</div>
+            <div style="padding: 9px 11px; border-radius: 7px; border: 1px solid #2c3238; background: #101214; font-size: 11.5px; color: #565e66;">Escreva sua decisão…</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding: 11px 13px; border-radius: 8px; border: 1px solid #2c3238; background: #101214; font-size: 12px; color: #565e66;">Nota opcional…</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px; opacity: 0.45;">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8b939b;">Fases</div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 9px; border: 1px solid #1f3a2c; background: #121915;">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 5" stroke="#3ddc84" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">schema-notas</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 9px; border: 1px solid #574417; background: #17140d;">
+        <div style="width: 7px; height: 7px; border-radius: 50%; background: #ffb02e;"></div>
+        <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">importa-xml</div>
+      </div>
+    </div>
+  </div>
+  <div style="padding: 14px 18px 22px 18px; border-top: 1px solid #22272c; background: #0c0e10;">
+    <div style="display: flex; align-items: center; justify-content: center; padding: 14px; border-radius: 9px; background: #ffb02e; color: #17140d; font-size: 13.5px; font-weight: 700;">Responder e retomar build</div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
