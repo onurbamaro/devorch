@@ -13,6 +13,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "fs";
 import { join, basename, dirname, resolve, relative } from "path";
 import { homedir } from "os";
+import { spawnSync } from "child_process";
 
 const cwd = process.argv[2] ? resolve(process.argv[2]) : process.cwd();
 
@@ -142,11 +143,27 @@ if (siblingRepos.length > 0) {
 
 const projectMap = lines.join("\n");
 
-// Persist to cache
+const warnings: string[] = [];
+
+// Persist to cache — UNLESS the cache file is git-tracked. Writing a tracked
+// file dirties the worktree mid-build (real incident: fleet-launch refuses a
+// dirty tree and the dispatch aborts). `cache/` is meant to be gitignored via
+// `.devorch/.gitignore`, but a file tracked before that rule stays tracked.
 try {
   const mapPath = join(cwd, ".devorch", "cache", "project-map.md");
-  mkdirSync(dirname(mapPath), { recursive: true });
-  writeFileSync(mapPath, projectMap, "utf-8");
+  const rel = relative(cwd, mapPath);
+  const tracked = spawnSync("git", ["-C", cwd, "ls-files", "--error-unmatch", rel], {
+    stdio: "ignore",
+  }).status === 0;
+  if (tracked) {
+    warnings.push(
+      `cache write skipped: ${rel} is git-tracked and writing it would dirty the worktree. ` +
+      `Untrack it (git rm --cached ${rel}) — .devorch/.gitignore already ignores cache/.`,
+    );
+  } else {
+    mkdirSync(dirname(mapPath), { recursive: true });
+    writeFileSync(mapPath, projectMap, "utf-8");
+  }
 } catch {
   // Best-effort persistence — don't fail the run
 }
@@ -188,5 +205,5 @@ console.log(JSON.stringify({
   gotchasLegacy,
   profile: { raw: profileRaw, source: profileSource },
   silencedStandards,
-  warnings: [],
+  warnings,
 }));
