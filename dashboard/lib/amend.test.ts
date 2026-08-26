@@ -37,15 +37,15 @@ function fixture(opts?: { contract?: string; decisions?: string }): string {
   return dir;
 }
 
-test("appendAmendment writes the amendment block for 2026-08-25", () => {
-  expect(new Date().toISOString().slice(0, 10)).toBe("2026-08-25");
+test("appendAmendment writes the dated amendment block", () => {
+  const today = new Date().toISOString().slice(0, 10);
   const dir = fixture();
   expect(appendAmendment(dir, { contract: "checkout-pix", decisionText: "Usar QR estático." })).toEqual({
     already: false,
   });
   expect(readFileSync(join(dir, "spec", "decisions.md"), "utf-8")).toBe(
     "# Decisions: Test\n" +
-      "## Amendment (2026-08-25): checkout-pix\n" +
+      `## Amendment (${today}): checkout-pix\n` +
       "- **Conflict**: QR ausente\n" +
       "- **Decision**: Usar QR estático.\n",
   );

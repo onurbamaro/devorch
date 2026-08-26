@@ -206,7 +206,7 @@ test("POST conflicts writes amendment, clears, spawns resume; resend is already"
   expect(await first.json()).toEqual({ ok: true, already: false });
 
   const decisions = readFileSync(join(sessionsDir, "demo-blocked", "spec", "decisions.md"), "utf-8");
-  expect(decisions.includes("## Amendment (2026-08-25): checkout-pix")).toBe(true);
+  expect(decisions.includes(`## Amendment (${new Date().toISOString().slice(0, 10)}): checkout-pix`)).toBe(true);
   expect(decisions.includes("- **Conflict**: O endpoint devolve 402 quando o spec pede 200 com QR.")).toBe(
     true,
   );
