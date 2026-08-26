@@ -74,9 +74,11 @@ function defaultSpawn(
 }
 
 let spawnImpl: SpawnAttachFn = defaultSpawn;
+let seamActive = false;
 
 export function __setSpawnForTests(fn: SpawnAttachFn | null): void {
   spawnImpl = fn ?? defaultSpawn;
+  seamActive = fn != null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -190,6 +192,15 @@ export function attachTerminal(ws: TerminalSocket, opts: AttachOpts): TerminalBr
           proc?.kill("SIGWINCH");
         } catch {
           /* attach already gone */
+        }
+        if (!seamActive) {
+          // A read-only client never drives tmux window sizing, so a detached
+          // session stays 80x24 and tmux pads the rest with dots. Nudge the
+          // window to the panel size; a writable client elsewhere wins it back.
+          void Bun.spawn(
+            ["tmux", "resize-window", "-t", tmuxName(opts.session), "-x", String(cols), "-y", String(rows)],
+            { stdout: "ignore", stderr: "ignore" },
+          ).exited.catch(() => {});
         }
         return;
       }
