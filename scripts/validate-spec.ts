@@ -33,7 +33,10 @@ const errors: string[] = [];
 const warnings: string[] = [];
 
 function emit(extra: Record<string, unknown> = {}): never {
-  console.log(JSON.stringify({ ok: errors.length === 0, errors, warnings, ...extra }));
+  // Dedupe: the same screen/baseline warning fires once per contract that references the screen.
+  console.log(
+    JSON.stringify({ ok: errors.length === 0, errors: [...new Set(errors)], warnings: [...new Set(warnings)], ...extra }),
+  );
   process.exit(0);
 }
 

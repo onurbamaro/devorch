@@ -10,7 +10,6 @@
     "test": "bun test dashboard"
   },
   "dependencies": {
-    "ts-morph": "^27.0.2",
     "@xterm/xterm": "^6.0.0",
     "@xterm/addon-fit": "^0.11.0"
   },

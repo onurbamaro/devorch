@@ -282,7 +282,12 @@ extensions:
 - Cross-repo dependencies are normal `<depends-on>` edges (API phase before
   the frontend phase that consumes it), guided by `manifest.repos[].dependsOn`.
 - Each contract from spec.md maps to >=1 phase; put the contract name in
-  the phase's `<spec>` names so `spec-coverage.ts` can grep it.
+  the phase's `<spec>` names so `spec-coverage.ts` can grep it. Spec
+  elements the grep cannot see get a coverage opt-out (PLAN-FORMAT.md):
+  `coverage="visual-gate"` for UI behaviors validated by Gate 2,
+  `coverage="orchestrator"` for contracts with no testable code by design
+  (doc-only flags). Builders must name the contract in the implementing
+  file (header comment) for the default grep to pass.
 - Tests per the manifest's `testStrategy` — impl file + test file in the
   same task, same dispatch. Never invent test infra the manifest doesn't name.
 - Bundle trivial mechanical fixes (same phase, disjoint files, <~500 tokens

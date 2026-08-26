@@ -15,9 +15,11 @@
  *   bun session.ts dir --name <n>
  *
  * Stages: idea | spec-ready | build | blocked-on-spec | awaiting-merge | merged | failed
- * Output: JSON on stdout, always exit 0 on handled paths ({ok:false,...} on errors).
+ * Output: JSON on stdout. Exit 0 on success, exit 1 with {ok:false,...} on errors.
+ * Writes are atomic (temp file + rename) so concurrent readers (dashboard SSE,
+ * statusline) never observe a torn session.json.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -33,7 +35,7 @@ function flag(name: string): string | undefined {
 
 function emit(obj: Record<string, unknown>): never {
   console.log(JSON.stringify(obj));
-  process.exit(0);
+  process.exit(obj.ok === false ? 1 : 0);
 }
 
 function sessionPath(name: string): string {
@@ -52,7 +54,10 @@ function readSession(name: string): Record<string, any> | null {
 
 function writeSession(name: string, data: Record<string, any>): void {
   data.updatedAt = new Date().toISOString();
-  writeFileSync(sessionPath(name), JSON.stringify(data, null, 2) + "\n");
+  const target = sessionPath(name);
+  const tmp = `${target}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2) + "\n");
+  renameSync(tmp, target);
 }
 
 /** RFC7386-style merge: objects merge recursively, null deletes, everything else replaces. */

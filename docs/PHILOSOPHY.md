@@ -83,7 +83,7 @@ rule engine produces brittle systems that fail on the first novel case.
 Misplacing work in either direction costs quality.
 
 **How devorch enforces this:**
-- `map-project.ts` (structural snapshot), `check-project.ts` (lint/type/build/test runner), `tldr-analyze.ts` (TS structural extraction), `phase-summary.ts` (commit message + state), `archive-plan.ts` (move plan to archive) -- mechanical
+- `discover.ts` (repo memory: gotchas, profile, siblings), `check-project.ts` (lint/type/build/test runner), `validate-spec.ts` / `validate-plan.ts` (deterministic format checks), `spec-coverage.ts` (contract-name grep), `dag-scheduler.ts` (ready-set computation), `session.ts` (session registry), `setup-worktree.ts` / `merge-and-cleanup.ts` (git mechanics) -- mechanical
 - Explore depth, plan structure, edge case enumeration, guardian review, builder dispatch -- judgment, inline Opus
 - Plan validation and DAG correctness -- judgment by the planner; orchestrator self-checks before dispatch
 - Post-edit lint hook -- mechanical

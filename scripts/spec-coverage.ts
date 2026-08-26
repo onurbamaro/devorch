@@ -11,9 +11,17 @@
  *   <behavior>, <invariant>, <endpoint path="...">, <entity>, <interface>, <error-contract>
  *
  * "Has implementation" = the name (or a kebab/snake/camel variant) appears
- * in any non-test file under the worktree.
+ * in any non-test file under the worktree (code, .md and .html included —
+ * a CLI flag documented in a command .md or a single-file page count).
  * "Has test" = the name appears in any *.test.ts | *.spec.ts | *_test.go |
  * test_*.py | similar test-pattern file.
+ *
+ * Coverage opt-outs (attribute on the spec element):
+ *   coverage="visual-gate"  — validated by Gate 2 (screenshots vs baselines);
+ *                             skips both greps, listed under `visualGate`.
+ *   coverage="orchestrator" — implementation grep still required, but no
+ *                             automated test exists by design (e.g. a contract
+ *                             implemented in a command .md); skips the test grep.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from "fs";
 import { join, resolve, extname } from "path";
@@ -36,7 +44,7 @@ const planContent = readFileSync(planPath, "utf-8");
 
 // ===== Extract specs per phase =====
 
-interface SpecEntry { name: string; kind: string; phase: string; }
+interface SpecEntry { name: string; kind: string; phase: string; coverage: "grep" | "visual-gate" | "orchestrator"; }
 const specs: SpecEntry[] = [];
 
 const phaseRe = /<phase\s+id="([^"]+)"\s+name="[^"]+"[^>]*>([\s\S]*?)<\/phase>/g;
@@ -49,10 +57,15 @@ while ((phaseMatch = phaseRe.exec(planContent)) !== null) {
 
   const KINDS = ["behavior", "invariant", "endpoint", "entity", "interface", "error-contract"];
   for (const kind of KINDS) {
-    const elRe = new RegExp(`<${kind}[^>]*\\sname="([^"]+)"`, "g");
+    const elRe = new RegExp(`<${kind}[^>]*\\sname="([^"]+)"[^>]*`, "g");
     let em: RegExpExecArray | null;
     while ((em = elRe.exec(specBlock)) !== null) {
-      specs.push({ name: em[1], kind, phase: phaseId });
+      const coverage = /coverage="visual-gate"/.test(em[0])
+        ? "visual-gate"
+        : /coverage="orchestrator"/.test(em[0])
+          ? "orchestrator"
+          : "grep";
+      specs.push({ name: em[1], kind, phase: phaseId, coverage });
     }
   }
 }
@@ -76,6 +89,7 @@ const READ_EXT = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
   ".py", ".go", ".rs", ".rb", ".java", ".kt", ".swift",
   ".sql", ".graphql", ".vue", ".svelte",
+  ".md", ".html",
 ]);
 
 const implContents: string[] = [];
@@ -129,12 +143,19 @@ function inCorpus(corpus: string[], names: string[]): boolean {
 const covered: SpecEntry[] = [];
 const missingImpl: SpecEntry[] = [];
 const missingTest: SpecEntry[] = [];
+const visualGate: SpecEntry[] = [];
 
 for (const s of specs) {
+  if (s.coverage === "visual-gate") {
+    visualGate.push(s);
+    covered.push(s);
+    continue;
+  }
   const names = variants(s.name);
   const hasImpl = inCorpus(implContents, names);
   const hasTest = inCorpus(testContents, names);
   if (!hasImpl) missingImpl.push(s);
+  else if (s.coverage === "orchestrator") covered.push(s);
   else if (!hasTest && testContents.length > 0) missingTest.push(s);
   else covered.push(s);
 }
@@ -156,6 +177,7 @@ console.log(JSON.stringify({
   covered: covered.length,
   missingImpl: missingImpl.map((s) => ({ name: s.name, kind: s.kind, phase: s.phase })),
   missingTest: missingTest.map((s) => ({ name: s.name, kind: s.kind, phase: s.phase })),
+  visualGate: visualGate.map((s) => ({ name: s.name, kind: s.kind, phase: s.phase })),
   hasTestFiles: testContents.length > 0,
   byPhase,
 }));
