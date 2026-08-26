@@ -1,0 +1,6 @@
+{
+  "name": "checkout-pix",
+  "platform": "web",
+  "viewports": ["desktop", "mobile"],
+  "repos": [{ "name": "loja" }]
+}

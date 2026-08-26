@@ -123,6 +123,21 @@ Silenced entries are not surfaced in the audit by default (they are, by
 definition, things the user told devorch to stop mentioning). To review
 them, open `standards-silenced.md` directly.
 
+## `/devorch` CLI flags
+
+Command-line flags accepted by `/devorch`. Distinct from guardian
+`flags-<plan>.md` entries above.
+
+### `--headless`
+
+**Modo**: build only (invalid in idea/merge).
+**Tipo**: boolean.
+**Efeito**: recorded in `session.json` as `"headless":true` on the B0
+models patch. On PASS (B7), stage is set to `awaiting-merge`, the final
+AskUserQuestion ("Mergear agora?") is skipped, and the verdict reports
+`/devorch merge <name>`.
+**Contrato**: flag-headless.
+
 ## Examples
 
 ### `.devorch/flags-upload-flow.md`

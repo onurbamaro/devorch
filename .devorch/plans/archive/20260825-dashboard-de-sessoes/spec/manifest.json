@@ -1,0 +1,32 @@
+{
+  "name": "dashboard-de-sessoes",
+  "platform": "web",
+  "viewports": ["desktop", "mobile"],
+  "repos": [
+    {
+      "name": "devorch",
+      "path": "~/dev/devorch",
+      "run": "bun dashboard/server.ts",
+      "url": "http://127.0.0.1:7777",
+      "env": {
+        "DEVORCH_SESSIONS_DIR": "dashboard/fixtures/sessions",
+        "DEVORCH_HUB_PORT": "7777"
+      },
+      "testStrategy": "bun:test (novo no repo, runner nativo) para o servidor: listagem de sessões, spawn idempotente do tmux, modo leitura do terminal, gravação de emendas. A página é coberta pelo gate visual. Fixtures de sessão (uma por stage: spec-ready, build, blocked-on-spec, awaiting-merge) em dashboard/fixtures/sessions/ alimentam testes e gate visual.",
+      "dependsOn": []
+    }
+  ],
+  "flows": [
+    { "name": "monitor", "screens": ["spec-ready", "build", "terminal", "blocked", "merge"] }
+  ],
+  "models": {
+    "builder": "opus",
+    "fixer": "sonnet",
+    "prototype": "opus",
+    "explore": "inherit",
+    "visual": "inherit"
+  },
+  "prototype": {
+    "canvasUrl": "https://claude.ai/code/artifact/7562a97a-2df8-449b-bed0-c86de2c4765c"
+  }
+}

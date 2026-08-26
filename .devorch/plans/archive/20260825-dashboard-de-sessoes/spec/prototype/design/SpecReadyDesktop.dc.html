@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; background: #101214; color: #e8eaec; }
+    a { color: #5b8cff; } a:hover { color: #82a4ff; }
+  </style>
+</helmet>
+<div style="display: flex; width: 1440px; height: 900px; background: #101214; overflow: hidden;">
+  <div style="width: 264px; min-width: 264px; display: flex; flex-direction: column; background: #0c0e10; border-right: 1px solid #22272c;">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 20px 20px 16px 20px; border-bottom: 1px solid #1a1e22;">
+      <div style="width: 10px; height: 10px; border-radius: 3px; background: #5b8cff;"></div>
+      <div style="font-size: 16px; font-weight: 700; letter-spacing: 0.02em;">devorch</div>
+      <div style="font-size: 11px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace; margin-left: auto;">hub</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 20px; padding: 18px 12px; overflow-y: auto;">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #ffb02e; padding: 0 10px;">Bloqueadas · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #ffb02e;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #d6dade;">importador-notas</div>
+          <div style="font-size: 11px; color: #ffb02e; margin-left: auto;">1 conflito</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #4cc2ff; padding: 0 10px;">Em execução · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #4cc2ff;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #d6dade;">checkout-pix</div>
+          <div style="font-size: 11px; color: #8b939b; margin-left: auto;">fase 3/7</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #a58bff; padding: 0 10px;">Prontas para build · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px; background: #1c2126; outline: 1px solid #2b3138;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #a58bff;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #eef1f3;">radar-alertas</div>
+          <div style="font-size: 11px; color: #565e66; margin-left: auto;">4 contratos</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #3ddc84; padding: 0 10px;">Aguardando merge · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #3ddc84;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #d6dade;">menu-fotos</div>
+          <div style="font-size: 11px; color: #565e66; margin-left: auto;">PASS</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-top: 1px solid #1a1e22; margin-top: 4px;">
+        <div style="font-size: 11.5px; color: #565e66;">Concluídas · 12</div>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-left: auto;"><path d="M6 4l4 4-4 4" stroke="#565e66" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+    <div style="display: flex; align-items: center; gap: 14px; padding: 16px 28px; border-bottom: 1px solid #22272c; background: #121517;">
+      <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 17px; font-weight: 600;">radar-alertas</div>
+      <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #1d1a2c; border: 1px solid #35305a; font-size: 11.5px; color: #a58bff;">
+        <div style="width: 6px; height: 6px; border-radius: 50%; background: #a58bff;"></div>
+        spec-ready
+      </div>
+      <div style="font-size: 12px; color: #565e66;">spec fechada há 2 h · protótipo aprovado</div>
+      <div style="margin-left: auto; padding: 8px 14px; border-radius: 6px; border: 1px solid #2c3238; font-size: 12.5px; color: #d6dade; font-weight: 500;">Abrir spec</div>
+    </div>
+    <div style="flex-grow: 1; display: flex; gap: 26px; padding: 26px 28px; overflow-y: auto;">
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 24px; min-width: 0;">
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8b939b;">Contratos · 4</div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;">
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 13px 15px; border-radius: 9px; border: 1px solid #22272c; background: #14171a;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #eef1f3;">lista-alertas</div>
+              <div style="font-size: 11.5px; color: #8b939b;">3 critérios de aceite · telas: lista</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 13px 15px; border-radius: 9px; border: 1px solid #22272c; background: #14171a;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #eef1f3;">filtro-por-loja</div>
+              <div style="font-size: 11.5px; color: #8b939b;">2 critérios de aceite · telas: lista</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 13px 15px; border-radius: 9px; border: 1px solid #22272c; background: #14171a;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #eef1f3;">detalhe-alerta</div>
+              <div style="font-size: 11.5px; color: #8b939b;">4 critérios de aceite · telas: detalhe</div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 13px 15px; border-radius: 9px; border: 1px solid #22272c; background: #14171a;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #eef1f3;">silenciar-alerta</div>
+              <div style="font-size: 11.5px; color: #8b939b;">3 critérios de aceite · telas: detalhe</div>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8b939b;">Protótipo aprovado</div>
+          <div style="display: flex; gap: 12px;">
+            <div style="width: 150px; height: 94px; border-radius: 8px; border: 1px solid #22272c; background: #191d21; display: flex; align-items: flex-end; padding: 8px;">
+              <div style="font-size: 10.5px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace;">lista.desktop</div>
+            </div>
+            <div style="width: 150px; height: 94px; border-radius: 8px; border: 1px solid #22272c; background: #191d21; display: flex; align-items: flex-end; padding: 8px;">
+              <div style="font-size: 10.5px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace;">detalhe.desktop</div>
+            </div>
+            <div style="width: 56px; height: 94px; border-radius: 8px; border: 1px solid #22272c; background: #191d21; display: flex; align-items: flex-end; padding: 8px;">
+              <div style="font-size: 10.5px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace;">mob</div>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8b939b;">Plano projetado</div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <div style="padding: 8px 13px; border-radius: 7px; border: 1px solid #2c3238; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6dade;">api-alertas</div>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M9 4.5L12.5 8 9 11.5" stroke="#565e66" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div style="padding: 8px 13px; border-radius: 7px; border: 1px solid #2c3238; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6dade;">ui-lista</div>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8h9M9 4.5L12.5 8 9 11.5" stroke="#565e66" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div style="padding: 8px 13px; border-radius: 7px; border: 1px solid #2c3238; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: #d6dade;">e2e</div>
+            <div style="font-size: 11.5px; color: #565e66; margin-left: 6px;">· ui-detalhe corre em paralelo com ui-lista</div>
+          </div>
+        </div>
+      </div>
+      <div style="width: 340px; min-width: 340px; display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: 12px; border: 1px solid #22272c; background: #14171a; align-self: flex-start;">
+        <div style="font-size: 14px; font-weight: 700;">Iniciar build</div>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 82px; font-size: 12px; color: #8b939b;">builder</div>
+            <div style="flex-grow: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; border: 1px solid #2c3238; background: #101214;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">opus</div>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="#8b939b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 82px; font-size: 12px; color: #8b939b;">fixer</div>
+            <div style="flex-grow: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; border: 1px solid #2c3238; background: #101214;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">sonnet</div>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="#8b939b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 82px; font-size: 12px; color: #8b939b;">explore</div>
+            <div style="flex-grow: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; border: 1px solid #2c3238; background: #101214;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">herdar</div>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="#8b939b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 82px; font-size: 12px; color: #8b939b;">visual</div>
+            <div style="flex-grow: 1; display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; border: 1px solid #2c3238; background: #101214;">
+              <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;">herdar</div>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="#8b939b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: center; padding: 11px; border-radius: 7px; background: #5b8cff; color: #0c0e10; font-size: 13.5px; font-weight: 700;">Iniciar build</div>
+        <div style="font-size: 11px; color: #565e66; line-height: 1.5;">Roda headless na janela tmux devorch-radar-alertas. Acompanhe aqui ou abra o terminal.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "artboards": [
+    { "file": "SpecReadyDesktop.dc.html", "title": "Spec pronta — desktop", "x": 0, "y": 0, "w": 1440, "h": 900 },
+    { "file": "Main.dc.html", "title": "Build rodando — desktop", "x": 1540, "y": 0, "w": 1440, "h": 900 },
+    { "file": "BlockedDesktop.dc.html", "title": "Conflito de spec — desktop", "x": 3080, "y": 0, "w": 1440, "h": 900 },
+    { "file": "MergeDesktop.dc.html", "title": "Aguardando merge — desktop", "x": 4620, "y": 0, "w": 1440, "h": 900 },
+    { "file": "TerminalDesktop.dc.html", "title": "Terminal aberto — desktop", "x": 6160, "y": 0, "w": 1440, "h": 900 },
+    { "file": "BuildMobile.dc.html", "title": "Build — mobile", "x": 0, "y": 1080, "w": 390, "h": 844 },
+    { "file": "BlockedMobile.dc.html", "title": "Conflito — mobile", "x": 510, "y": 1080, "w": 390, "h": 844 },
+    { "file": "TerminalMobile.dc.html", "title": "Terminal — mobile", "x": 1020, "y": 1080, "w": 390, "h": 844 }
+  ],
+  "annotations": [
+    { "id": "fluxo", "x": 0, "y": -150, "w": 520, "text": "Fluxo da sessão, da esquerda para a direita: spec pronta → build rodando → conflito de spec → aguardando merge → terminal embutido.\nLinha de baixo: as mesmas telas no mobile (390px)." }
+  ],
+  "launch": { "view": "canvas" }
+}

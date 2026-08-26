@@ -1,6 +1,6 @@
 ---
 description: "devorch v3 — idea (grill + prototype → spec), build (autonomous DAG build from spec), merge (multi-repo merge back)"
-argument-hint: "idea \"<o que fazer>\" [--prototype] | build <session> [--resume] [--models role=model,...] | merge [session]"
+argument-hint: "idea \"<o que fazer>\" [--prototype] | build <session> [--resume] [--models role=model,...] [--headless] | merge [session]"
 effort: xhigh
 disallowed-tools: EnterPlanMode
 ---
@@ -242,6 +242,8 @@ between start and verdict.** The only question in this mode is the final
 - Re-run `validate-spec.ts`; errors → stop and report (the spec regressed).
 - Resolve model policy: `--models` flag > `manifest.models` > defaults.
   Record in session.json. `session.ts update --patch '{"stage":"build","models":{...}}'`.
+- Accept `--headless` (boolean, valid only in MODE build). Record in
+  session.json on the models patch line: `"headless":true`.
 
 ## B1 — Worktrees (per repo)
 
@@ -416,6 +418,8 @@ Lint / Typecheck / Build / Tests: <status por repo>
 - PASS (com ou sem pendências) → `session.ts update --patch '{"stage":"awaiting-merge"}'`,
   then ONE AskUserQuestion: "Mergear agora? (Recomendado)" → run MODE merge
   inline for this session / "Depois" → report `/devorch merge <name>`.
+  With `--headless`: on PASS set stage `awaiting-merge`, skip the
+  AskUserQuestion, and report `/devorch merge <name>`.
 - BLOCKED-ON-SPEC → stage `blocked-on-spec`. The user answers the conflict
   questions (in conversation or `/devorch idea --amend <name>` for large
   gaps); answers are APPENDED to `decisions.md` as amendments (the spec
@@ -520,7 +524,8 @@ worktree cleanup. Zero items → write nothing, say nothing.
   start and verdict (exceptions: the resume/session pickers, the final
   merge-now question); merge asks only the session picker and contradictory
   conflicts. Every other downstream decision is orchestrator judgment
-  grounded in spec.md + decisions.md + the diff, logged in the verdict.
+  grounded in spec.md + decisions.md + the diff, logged in the verdict
+  (com --headless, nem a pergunta final).
 - **Spec is the source of truth**: the build never knowingly diverges from
   a contract. Reality contradicts the spec → blocked-on-spec, question in
   the verdict, amendment in decisions.md, resume. Silence-divergence is the

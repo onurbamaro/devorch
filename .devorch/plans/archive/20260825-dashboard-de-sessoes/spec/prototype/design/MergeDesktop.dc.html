@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', system-ui, sans-serif; background: #101214; color: #e8eaec; }
+    a { color: #5b8cff; } a:hover { color: #82a4ff; }
+  </style>
+</helmet>
+<div style="display: flex; width: 1440px; height: 900px; background: #101214; overflow: hidden;">
+  <div style="width: 264px; min-width: 264px; display: flex; flex-direction: column; background: #0c0e10; border-right: 1px solid #22272c;">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 20px 20px 16px 20px; border-bottom: 1px solid #1a1e22;">
+      <div style="width: 10px; height: 10px; border-radius: 3px; background: #5b8cff;"></div>
+      <div style="font-size: 16px; font-weight: 700; letter-spacing: 0.02em;">devorch</div>
+      <div style="font-size: 11px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace; margin-left: auto;">hub</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 20px; padding: 18px 12px; overflow-y: auto;">
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #ffb02e; padding: 0 10px;">Bloqueadas · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #ffb02e;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #d6dade;">importador-notas</div>
+          <div style="font-size: 11px; color: #ffb02e; margin-left: auto;">1 conflito</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #4cc2ff; padding: 0 10px;">Em execução · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #4cc2ff;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #d6dade;">checkout-pix</div>
+          <div style="font-size: 11px; color: #8b939b; margin-left: auto;">fase 3/7</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #a58bff; padding: 0 10px;">Prontas para build · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #a58bff;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #d6dade;">radar-alertas</div>
+          <div style="font-size: 11px; color: #565e66; margin-left: auto;">4 contratos</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #3ddc84; padding: 0 10px;">Aguardando merge · 1</div>
+        <div style="display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 7px; background: #1c2126; outline: 1px solid #2b3138;">
+          <div style="width: 7px; height: 7px; border-radius: 50%; background: #3ddc84;"></div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; color: #eef1f3;">menu-fotos</div>
+          <div style="font-size: 11px; color: #565e66; margin-left: auto;">PASS</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-top: 1px solid #1a1e22; margin-top: 4px;">
+        <div style="font-size: 11.5px; color: #565e66;">Concluídas · 12</div>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style="margin-left: auto;"><path d="M6 4l4 4-4 4" stroke="#565e66" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+    <div style="display: flex; align-items: center; gap: 14px; padding: 16px 28px; border-bottom: 1px solid #22272c; background: #121517;">
+      <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 17px; font-weight: 600;">menu-fotos</div>
+      <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #12251b; border: 1px solid #1f4a33; font-size: 11.5px; color: #3ddc84;">
+        <div style="width: 6px; height: 6px; border-radius: 50%; background: #3ddc84;"></div>
+        awaiting-merge
+      </div>
+      <div style="font-size: 12px; color: #565e66;">veredito há 25 min · 1 repo</div>
+      <div style="display: flex; gap: 10px; margin-left: auto;">
+        <div style="padding: 8px 14px; border-radius: 6px; border: 1px solid #2c3238; font-size: 12.5px; color: #d6dade; font-weight: 500;">Ver relatório</div>
+        <div style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 6px; background: #3ddc84; color: #0c0e10; font-size: 12.5px; font-weight: 700;">Merge</div>
+      </div>
+    </div>
+    <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 24px; padding: 26px 28px; overflow-y: auto;">
+      <div style="display: flex; gap: 14px;">
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 15px 18px; border-radius: 10px; border: 1px solid #1f4a33; background: #101a14; flex-grow: 1;">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #3ddc84;">Verdict</div>
+          <div style="font-size: 17px; font-weight: 700;">PASS com 1 pendência</div>
+          <div style="font-size: 11.5px; color: #8b939b;">pendência: contraste do preço no tema claro (não bloqueia)</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 15px 18px; border-radius: 10px; border: 1px solid #22272c; background: #14171a; flex-grow: 1;">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8b939b;">Gate mecânico</div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #3ddc84;">lint ✓ · types ✓ · build ✓ · 41 testes ✓</div>
+          <div style="font-size: 11.5px; color: #8b939b;">spec coverage 5/5 contratos</div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 15px 18px; border-radius: 10px; border: 1px solid #22272c; background: #14171a; flex-grow: 1;">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8b939b;">Gate visual</div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; color: #3ddc84;">6 telas × 2 viewports ✓</div>
+          <div style="font-size: 11.5px; color: #8b939b;">2 correções aplicadas no ciclo 1</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8b939b;">Protótipo × build</div>
+          <div style="font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; color: #565e66;">galeria.desktop</div>
+          <div style="display: flex; gap: 6px; margin-left: auto;">
+            <div style="padding: 5px 11px; border-radius: 6px; background: #22272c; font-size: 11.5px; color: #d6dade; font-weight: 600;">desktop</div>
+            <div style="padding: 5px 11px; border-radius: 6px; border: 1px solid #22272c; font-size: 11.5px; color: #565e66;">mobile</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 14px;">
+          <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 11px; color: #565e66; letter-spacing: 0.06em; text-transform: uppercase;">baseline do protótipo</div>
+            <div style="height: 320px; border-radius: 10px; border: 1px solid #22272c; background: #191d21; display: flex; align-items: center; justify-content: center;">
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="2" stroke="#565e66" stroke-width="1.4"/><circle cx="9" cy="9.5" r="1.8" stroke="#565e66" stroke-width="1.3"/><path d="M3.5 15.5l4.5-4 4 3.5 3.5-3 5 4" stroke="#565e66" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                <div style="font-size: 11.5px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace;">galeria.desktop.png · baseline</div>
+              </div>
+            </div>
+          </div>
+          <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 8px;">
+            <div style="font-size: 11px; color: #565e66; letter-spacing: 0.06em; text-transform: uppercase;">build · round final</div>
+            <div style="height: 320px; border-radius: 10px; border: 1px solid #1f4a33; background: #191d21; display: flex; align-items: center; justify-content: center;">
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="14" rx="2" stroke="#3ddc84" stroke-width="1.4"/><circle cx="9" cy="9.5" r="1.8" stroke="#3ddc84" stroke-width="1.3"/><path d="M3.5 15.5l4.5-4 4 3.5 3.5-3 5 4" stroke="#3ddc84" stroke-width="1.3" stroke-linejoin="round"/></svg>
+                <div style="font-size: 11.5px; color: #565e66; font-family: 'JetBrains Mono', ui-monospace, monospace;">galeria.desktop.png · aprovado</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <div style="width: 92px; height: 58px; border-radius: 7px; border: 1px solid #2b3138; background: #191d21;"></div>
+          <div style="width: 92px; height: 58px; border-radius: 7px; border: 1px solid #22272c; background: #16191c;"></div>
+          <div style="width: 92px; height: 58px; border-radius: 7px; border: 1px solid #22272c; background: #16191c;"></div>
+          <div style="width: 92px; height: 58px; border-radius: 7px; border: 1px solid #22272c; background: #16191c;"></div>
+          <div style="width: 92px; height: 58px; border-radius: 7px; border: 1px solid #22272c; background: #16191c;"></div>
+          <div style="width: 92px; height: 58px; border-radius: 7px; border: 1px solid #22272c; background: #16191c;"></div>
+          <div style="display: flex; align-items: center; font-size: 11.5px; color: #565e66; padding-left: 4px;">6 telas verificadas</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 9px; border: 1px solid #22272c; background: #14171a;">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M5 3.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM5 9.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM11 3.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" stroke="#8b939b" stroke-width="1.2"/><path d="M5 6.5v3M11 6.5c0 2.5-4 2-5.6 3.4" stroke="#8b939b" stroke-width="1.2"/></svg>
+        <div style="font-size: 12.5px; color: #d6dade;">Merge: dry-run em todos os repos antes do merge real · salsago-menu → master · conflito contraditório abre o terminal para você decidir</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

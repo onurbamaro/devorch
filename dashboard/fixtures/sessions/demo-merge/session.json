@@ -1,0 +1,35 @@
+{
+  "name": "demo-merge",
+  "createdAt": "2026-08-20T10:00:00.000Z",
+  "updatedAt": "2026-08-20T12:00:00.000Z",
+  "stage": "awaiting-merge",
+  "args": "checkout pix no app",
+  "repos": {
+    "loja": {
+      "path": "/home/bruno/dev/loja",
+      "worktree": "/home/bruno/dev/loja/.worktrees/checkout-pix",
+      "branch": "devorch/checkout-pix",
+      "originalBranch": "main"
+    }
+  },
+  "phases": [
+    { "id": "discover", "repo": "loja", "status": "done" },
+    { "id": "plan", "repo": "loja", "status": "done" },
+    { "id": "api", "repo": "loja", "status": "done" },
+    { "id": "ui", "repo": "loja", "status": "done" },
+    { "id": "gates", "repo": "loja", "status": "done" }
+  ],
+  "gates": {
+    "mechanical": "pass",
+    "visual": "pass"
+  },
+  "specConflicts": [],
+  "notes": [],
+  "models": {
+    "builder": "inherit",
+    "fixer": "sonnet",
+    "prototype": "opus",
+    "explore": "inherit",
+    "visual": "inherit"
+  }
+}
