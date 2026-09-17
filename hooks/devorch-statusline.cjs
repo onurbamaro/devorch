@@ -30,7 +30,7 @@ process.stdin.on('end', () => {
     // Effort level (yellow for high, dim for others)
     const effort = getEffort(data);
     if (effort) {
-      const effortColor = effort === 'high' ? '33' : '2;37';
+      const effortColor = ['high', 'xhigh', 'max'].includes(effort) ? '33' : '2;37';
       parts.push(`\x1b[${effortColor}m${effort}\x1b[0m`);
     }
 
@@ -58,17 +58,11 @@ function shortModel(name) {
 }
 
 function getEffort(data) {
-  // Try from stdin JSON first
-  if (data.effortLevel) return data.effortLevel;
-  if (data.effort_level) return data.effort_level;
-  // Fallback: read from settings.json
-  try {
-    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    return settings.effortLevel || null;
-  } catch {
-    return null;
-  }
+  // Claude Code sends the session's effective effort as `effort.level`
+  // (after /effort, per-model settings and flags). It omits the key when
+  // the model has no effort control — then show nothing, never the global
+  // settings.json value, which ignores all of the above.
+  return data.effort?.level || null;
 }
 
 function contextBar(remaining) {
