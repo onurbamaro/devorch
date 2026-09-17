@@ -13,7 +13,7 @@ conflicts.**
 - `/devorch idea "<descrição>" [--prototype]` — validate the idea (grill),
   optionally prototype the screens, and produce a self-contained spec.
 - `/devorch build <session|spec-path> [--resume] [--models ...]` — implement
-  the spec autonomously: multi-repo worktrees, grok recon reviewed by Opus,
+  the spec autonomously: multi-repo worktrees, Opus exploration + plan,
   DAG-parallel grok builders, quality review of the diff, mechanical gate,
   visual gate + acceptance criteria, verdict.
 - `/devorch merge [session]` — fold every repo's worktree back, dry-run-all
@@ -43,8 +43,7 @@ Per-role model map. Precedence: `--models` flag on the invocation >
 |---|---|---|---|
 | `idea-explore` | idea | Explore agents in I1 | `opus` |
 | `prototype` | idea | prototype screens in I3 | `opus` |
-| `build-explore` | build | read-only recon in B2 | `grok` |
-| `explore-review` | build | judges the recon: enough or needs more (B2) | `opus` |
+| `planner` | build | exploration (B2) + plan (B3), one context | `opus` |
 | `builder` | build | build tasks in B4 | `grok` |
 | `review` | build | quality review of the diff (B5) | `inherit` |
 | `mechanical` | build | Gate 1: runs checks, triages, fixes (B6) | `opus` |
@@ -52,7 +51,7 @@ Per-role model map. Precedence: `--models` flag on the invocation >
 | `visual` | build | Gate 2 + acceptance criteria (B7) | `inherit` |
 | `merge` | merge | the whole merge mode | `opus` |
 
-Everything not in the table — grill, spec writing, spec-lint, plan (B3),
+Everything not in the table — grill, spec writing, spec-lint,
 scheduling, verdict — is the orchestrator itself, on the session model.
 Worktree creation (B1) is a script call with no model.
 
@@ -64,10 +63,10 @@ Worktree creation (B1) is a script call with no model.
   general-purpose agents. When a role's model equals the session model,
   the orchestrator may run that step inline instead of dispatching.
 - `grok` → NOT a Task dispatch; see § Grok dispatch below. Valid only for
-  `builder`, `prototype` (path B) and `build-explore`. Explore review,
+  `builder` and `prototype` (path B). Exploration, plan,
   quality review, test triage, conflict resolution, gates and merge are
   never delegated to grok.
-- `--models` flag syntax: `--models builder=opus,build-explore=opus`.
+- `--models` flag syntax: `--models builder=opus,review=opus`.
   Unknown roles/models → surface and stop before doing any work.
   Legacy key `explore` in an old manifest → read as `idea-explore`
   (ignored by build).
@@ -139,15 +138,6 @@ verification and commits stay with the orchestrator.
   before declaring the build failed — grok being the wrong tool for one
   task should not sink the session.
 
-### Grok recon (`build-explore=grok`)
-
-Read-only, per the `grok-fleet` skill's recon pattern: numbered factual
-questions, `file:line` as evidence for every answer, `--effort low`, run
-with `--cwd <worktreePath>` and `--disallowed-tools
-"write,search_replace,run_terminal_command"`. Launch all recon groks of a
-round in parallel (`run_in_background`). Their answers are hypotheses:
-the `explore-review` agent re-verifies deterministic claims by grep before
-anything is built on them.
 
 ---
 
@@ -315,32 +305,29 @@ All subsequent operations on a repo use its worktree path (`git -C`).
 
 ## B2 — Discovery
 
+**Model**: B2 and B3 run on the `planner` role in ONE context, so the code
+read while exploring is still in hand while planning — no hand-off of
+findings between models. When `planner` equals the session model, run
+both inline. Otherwise dispatch ONE general-purpose Task agent with that
+model, this B2+B3 text as instructions, plus the session dir, spec dir and
+worktree paths; it returns the plan path, validation result, guardian list
+and spec conflicts. Grok is never used here.
+
 Per repo: `discover.ts <worktreePath>` (project map, gotchas, profile).
+Then read the code informed by the SPEC (not by raw user text): for each
+contract, the files it will touch, exemplars to follow, helpers/types/
+queries to reuse, registries to wire, data model facts. Inline, this can
+fan out to Explore agents (`planner` model; 1 per repo on the touched
+area, +1 on risks when a repo's slice spans 2+ modules; hard cap 4). Every
+deterministic claim ("zero importers", "no usages") is re-verified by grep
+before it shapes the plan.
 
-1. **Recon** (`build-explore` role; grok → § Grok recon). Questions come
-   from the SPEC, not from raw user text: 1 recon on architecture/patterns
-   of the touched area per repo (existing helpers to reuse, exemplar files,
-   registries), +1 on risks when a repo's slice spans 2+ modules. Hard cap:
-   4 per round. Append answers to `sessionDir/explore.json`
-   (`{createdAt, arguments, rounds[], findings[]}`).
-2. **Review** (`explore-review` role, general-purpose Task agent). Input:
-   spec.md, decisions.md, manifest.json, explore.json, worktree paths. It
-   (a) re-verifies every deterministic claim by grep and drops false ones,
-   (b) checks each contract has what the plan will need — files to touch,
-   patterns/exemplars, existing helpers, data model facts — and
-   (c) returns JSON `{verdict: "sufficient" | "needs-more", verified[],
-   rejected[], gaps: [{repo, question, why}], guardian: [...]}`.
-3. `needs-more` → a new recon round with exactly the `gaps` questions, then
-   review again. **Max 2 extra rounds**; gaps still open → carried into the
-   plan as explicit risks and listed in the verdict.
+Guardian: a finding with a known right answer that does NOT contradict a
+contract → implement it and log in the verdict ("Guardian aplicado: N").
+A finding that DOES contradict a contract → spec conflict (§ B4).
 
-Guardian: a `guardian` finding with a known right answer that does NOT
-contradict a contract → implement it and log in the verdict ("Guardian
-aplicado: N"). A finding that DOES contradict a contract → treat as spec
-conflict (§ B4).
-
-Persist the reviewed findings (only `verified`) to `explore.json` for
-resume; builders and the plan use only verified findings.
+Persist findings to `sessionDir/explore.json` (`{createdAt, arguments,
+findings[]}`) for resume.
 
 ## B3 — Plan
 
@@ -530,9 +517,6 @@ Lint / Typecheck / Build / Tests: <status por repo>
 ### Critérios de aceite
 <X/Y critérios com evidência; itens sem evidência com o motivo>
 
-### Exploração
-<rodadas de recon: N; lacunas que ficaram abertas, ou "nenhuma">
-
 ### Gate visual
 <N telas × M viewports verificadas; correções aplicadas; screenshots em sessionDir/screenshots/final/ (ou "pulado — cli/api")>
 
@@ -673,10 +657,9 @@ worktree cleanup. Zero items → write nothing, say nothing.
   a contract. Reality contradicts the spec → blocked-on-spec, question in
   the verdict, amendment in decisions.md, resume. Silence-divergence is the
   one forbidden move.
-- **Explore claim re-verification**: deterministic claims from Explore or
-  grok recon ("zero importers", "no usages") MUST be re-verified by grep
-  before they justify a decision (in build, the `explore-review` agent does
-  it). Recon is a hypothesis generator; grep is the oracle.
+- **Explore claim re-verification**: deterministic claims from Explore
+  ("zero importers", "no usages") MUST be re-verified by grep before they
+  justify a decision. Explore is a hypothesis generator; grep is the oracle.
 - The orchestrator reads `.devorch/*`, session files, and agent output; it
   does not read source files directly except trivial fixes, the
   implicit-touch sweep, grok diff checks, the quality review (B5), and

@@ -109,8 +109,7 @@ a path the user already declined. Builders receive decisions verbatim.
   "models": {
     "idea-explore": "opus",
     "prototype": "opus",
-    "build-explore": "grok",
-    "explore-review": "opus",
+    "planner": "opus",
     "builder": "grok",
     "review": "inherit",
     "mechanical": "opus",
