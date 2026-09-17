@@ -13,8 +13,9 @@ conflicts.**
 - `/devorch idea "<descrição>" [--prototype]` — validate the idea (grill),
   optionally prototype the screens, and produce a self-contained spec.
 - `/devorch build <session|spec-path> [--resume] [--models ...]` — implement
-  the spec autonomously: multi-repo worktrees, DAG-parallel builders, tests,
-  mechanical gate, visual gate with screenshots, verdict.
+  the spec autonomously: multi-repo worktrees, grok recon reviewed by Opus,
+  DAG-parallel grok builders, quality review of the diff, mechanical gate,
+  visual gate + acceptance criteria, verdict.
 - `/devorch merge [session]` — fold every repo's worktree back, dry-run-all
   before real merges, archive, cleanup.
 
@@ -38,23 +39,38 @@ user vanilla Claude Code is the right tool and stop.
 Per-role model map. Precedence: `--models` flag on the invocation >
 `models` block in `manifest.json` (chosen during idea) > defaults below.
 
-| Role | Used for | Default |
-|---|---|---|
-| `builder` | build tasks (heavy lifting) | `opus` (effort high) |
-| `fixer` | trivial-batch fixes in Gate 1/2 | `sonnet` (effort low) |
-| `prototype` | prototype screens in idea | `opus` |
-| `explore` | Explore agents | `inherit` |
-| `visual` | Gate 2 comparison judgment | `inherit` |
+| Role | Mode | Used for | Default |
+|---|---|---|---|
+| `idea-explore` | idea | Explore agents in I1 | `opus` |
+| `prototype` | idea | prototype screens in I3 | `opus` |
+| `build-explore` | build | read-only recon in B2 | `grok` |
+| `explore-review` | build | judges the recon: enough or needs more (B2) | `opus` |
+| `builder` | build | build tasks in B4 | `grok` |
+| `review` | build | quality review of the diff (B5) | `inherit` |
+| `mechanical` | build | Gate 1: runs checks, triages, fixes (B6) | `opus` |
+| `fixer` | build | fixes from the review gate and Gate 2 | `opus` |
+| `visual` | build | Gate 2 + acceptance criteria (B7) | `inherit` |
+| `merge` | merge | the whole merge mode | `opus` |
+
+Everything not in the table — grill, spec writing, spec-lint, plan (B3),
+scheduling, verdict — is the orchestrator itself, on the session model.
+Worktree creation (B1) is a script call with no model.
 
 - `inherit` = the session model running the orchestrator (do not pass a
-  `model` param on the Task call).
+  `model` param on the Task call; run inline when the step is judgment
+  only).
 - Claude values (`haiku|sonnet|opus|fable`) → pass as the Task tool's
-  `model` parameter when dispatching `devorch-builder` / Explore agents.
+  `model` parameter when dispatching `devorch-builder` / Explore /
+  general-purpose agents. When a role's model equals the session model,
+  the orchestrator may run that step inline instead of dispatching.
 - `grok` → NOT a Task dispatch; see § Grok dispatch below. Valid only for
-  `builder` and `prototype`. Test triage, conflict resolution, and gates
-  are never delegated to grok.
-- `--models` flag syntax: `--models builder=grok,fixer=haiku`. Unknown
-  roles/models → surface and stop before doing any work.
+  `builder`, `prototype` (path B) and `build-explore`. Explore review,
+  quality review, test triage, conflict resolution, gates and merge are
+  never delegated to grok.
+- `--models` flag syntax: `--models builder=opus,build-explore=opus`.
+  Unknown roles/models → surface and stop before doing any work.
+  Legacy key `explore` in an old manifest → read as `idea-explore`
+  (ignored by build).
 - The orchestrator itself always runs on the session model — never
   re-dispatch orchestration.
 
@@ -63,15 +79,35 @@ Resolve the effective map once at mode start and record it in `session.json`
 
 ### Grok dispatch (`builder=grok` or `prototype=grok`)
 
-Load the `grok-fleet` skill once and follow its ritual for every dispatch:
-write the task's assembled prompt to a spec file, run the grok CLI via Bash
-with cwd = the task's worktree, read back its report + autodiff. Claude
-NEVER trusts the report: verification and commits stay with the
-orchestrator.
+Load the `grok-fleet` skill once and follow it in **write-only fleet mode**
+(the skill's "frota de escrita" pattern + its
+`references/write-only-template.md`), NOT the full solo ritual: write the
+task's assembled prompt to a spec file, launch via `fleet-launch`, monitor,
+read back its report + autodiff. Claude NEVER trusts the report:
+verification and commits stay with the orchestrator.
 
+- **`builder=grok` (the default) is the user's explicit choice** — it overrides the
+  skill's "Quando NÃO usar" heuristics (task < 30 min → do it yourself,
+  etc.). Never silently do a task inline or swap in a Claude builder;
+  the only fallback path is the retry ladder below.
+- **The executor runs no gates.** Strip lint/build/e2e/`fleet-gates` from
+  the spec: the grok only writes (at most typecheck/unit scoped to its own
+  files, per the write-only template — never e2e, build, or dev servers).
+  Task test files, `check-project.ts`, and phase gates are run by the
+  orchestrator, same as the Claude path.
 - **Granularity: per task, same slot as a Claude builder.** The scheduler,
   file disjunction, and retry loop are identical; only the dispatch
   mechanism differs. Tasks of a ready phase launch their groks in parallel.
+- **Tree exclusivity: one grok per working tree.** A single grok task in a
+  repo this phase → run it in that repo's session worktree (clean at
+  dispatch; the orchestrator commits between tasks). 2+ parallel grok
+  tasks in the same repo → one disposable worktree per grok:
+  `git -C <sessionWorktree> worktree add <abs scratch path> -b grok/<task-id>`
+  off the session branch HEAD (no env copy — write-only). After
+  verification, fold back in task order: checkout each task's `**Files**`
+  from its `grok/<task-id>` branch into the session worktree, then commit
+  per the rule below; `git worktree remove` + delete the branch. Never
+  launch a grok into a tree another grok is writing to.
 - **Batching valve**: when 3+ tasks of the SAME phase touch the same
   module/directory, batch those tasks into ONE grok (one spec file listing
   the tasks in order) — that is where grok's cold re-read and helper
@@ -92,12 +128,26 @@ orchestrator.
   a spec conflict per B4 step 5 (park the phase, record in
   `specConflicts`). When in doubt whether grok diverged from a contract,
   the tie-breaker is a targeted read of the diff — never the report alone.
-- **Retry**: per task, up to 3, appending failure context to the spec file
-  like the Claude path. A failed batch re-runs only its failing tasks,
+- **Retry**: per task, up to 3. First retry = `fleet-resume <slug>` with a
+  2–3 line feedback note + the raw failure log attached — the session
+  keeps the code in context, far cheaper than relaunching. Relaunch from
+  scratch (appending failure context to the spec file, like the Claude
+  path) only when there is no `sessionId` (API error, killed run) or the
+  resume itself failed. A failed batch re-runs only its failing tasks,
   individually (no re-batch). After 3 failures on the same task, fall back
-  to ONE Claude builder dispatch (builder default model) for that task
+  to ONE Claude builder dispatch (`opus`) for that task
   before declaring the build failed — grok being the wrong tool for one
   task should not sink the session.
+
+### Grok recon (`build-explore=grok`)
+
+Read-only, per the `grok-fleet` skill's recon pattern: numbered factual
+questions, `file:line` as evidence for every answer, `--effort low`, run
+with `--cwd <worktreePath>` and `--disallowed-tools
+"write,search_replace,run_terminal_command"`. Launch all recon groks of a
+round in parallel (`run_in_background`). Their answers are hypotheses:
+the `explore-review` agent re-verifies deterministic claims by grep before
+anything is built on them.
 
 ---
 
@@ -132,7 +182,7 @@ grill. For each involved repo, note (or ask) the run command, local URL,
 and existing test setup — these land in `manifest.json`.
 
 Launch at most 2 Explore agents (`subagent_type="Explore"`, model per
-`explore` role) only if the idea touches existing behavior you need to
+`idea-explore` role) only if the idea touches existing behavior you need to
 understand to grill well. Skip for greenfield ideas.
 
 ## I2 — Grill
@@ -154,8 +204,7 @@ Every outcome is recorded, not just discussed:
 - If web: which screens (if any) are tablet-critical.
 
 Use AskUserQuestion for choices (recommended option first, marked
-"(recomendada)"). Zero questions is a valid outcome for a well-specified
-idea — do not fabricate bifurcations.
+"(recomendada)").
 
 ## I3 — Prototype (only with --prototype)
 
@@ -163,6 +212,12 @@ idea — do not fabricate bifurcations.
 refines the screens visually and each Save comes back to the orchestrator.
 Fall back to plain HTML files (path B) when the skill is unavailable or its
 publish fails.
+
+**Model**: authoring the screens (first draft and every revision) runs on
+the `prototype` role. When it differs from the session model, dispatch the
+authoring to a general-purpose Task agent with that model (it loads the
+`design` skill itself); the orchestrator keeps the user loop — publish,
+Save notifications, approval, extract.
 
 **Path A — design canvas:**
 1. Load the `design` skill and follow it. Author one artboard per screen ×
@@ -261,16 +316,31 @@ All subsequent operations on a repo use its worktree path (`git -C`).
 ## B2 — Discovery
 
 Per repo: `discover.ts <worktreePath>` (project map, gotchas, profile).
-Then Explore agents informed by the SPEC (not by raw user text): 1 agent on
-architecture/patterns of the touched area per repo (thoroughness per gotcha
-coverage), +1 on risks when a repo's slice spans 2+ modules. Hard cap: 4
-total. Guardian runs silently here: a finding with a known right answer that
-does NOT contradict a contract → implement it and log in the verdict
-("Guardian aplicado: N"). A finding that DOES contradict a contract → treat
-as spec conflict (§ B4).
 
-Persist consolidated findings to `sessionDir/explore.json` (same shape as
-before: `{createdAt, arguments, findings[]}`) for resume.
+1. **Recon** (`build-explore` role; grok → § Grok recon). Questions come
+   from the SPEC, not from raw user text: 1 recon on architecture/patterns
+   of the touched area per repo (existing helpers to reuse, exemplar files,
+   registries), +1 on risks when a repo's slice spans 2+ modules. Hard cap:
+   4 per round. Append answers to `sessionDir/explore.json`
+   (`{createdAt, arguments, rounds[], findings[]}`).
+2. **Review** (`explore-review` role, general-purpose Task agent). Input:
+   spec.md, decisions.md, manifest.json, explore.json, worktree paths. It
+   (a) re-verifies every deterministic claim by grep and drops false ones,
+   (b) checks each contract has what the plan will need — files to touch,
+   patterns/exemplars, existing helpers, data model facts — and
+   (c) returns JSON `{verdict: "sufficient" | "needs-more", verified[],
+   rejected[], gaps: [{repo, question, why}], guardian: [...]}`.
+3. `needs-more` → a new recon round with exactly the `gaps` questions, then
+   review again. **Max 2 extra rounds**; gaps still open → carried into the
+   plan as explicit risks and listed in the verdict.
+
+Guardian: a `guardian` finding with a known right answer that does NOT
+contradict a contract → implement it and log in the verdict ("Guardian
+aplicado: N"). A finding that DOES contradict a contract → treat as spec
+conflict (§ B4).
+
+Persist the reviewed findings (only `verified`) to `explore.json` for
+resume; builders and the plan use only verified findings.
 
 ## B3 — Plan
 
@@ -339,27 +409,76 @@ Loop until every phase is `done` or `blocked-on-spec`:
    Never improvise around a contract: the build either satisfies the spec
    or blocks on it. No silent divergence.
 
-## B5 — Gate 1 (mechanical)
+## B5 — Quality review (diff)
+
+Nothing earlier judges code quality: Gate 1 checks that it compiles and
+passes tests, spec-coverage only greps contract names, Gate 2 looks at
+screens. This gate reads the code. Model: `review` role (inline when
+`inherit`).
+
+1. Unit of review = one task commit (`git -C <wt> show <sha>`), in plan
+   order, per repo. Context per task: its plan task block (`**Files**`,
+   goal, postconditions), the contracts it implements, verified explore
+   findings (exemplars, helpers to reuse), decisions.md.
+2. Diff over ~1500 changed lines in a repo → split by phase into parallel
+   general-purpose Task agents with the `review` model (no `model` param
+   when `inherit`), each returning findings in the shape below.
+3. Checklist per task:
+   - reuse: re-implemented a helper, type or query that already exists
+     (grep the name/shape in the worktree before claiming);
+   - pattern: diverges from the exemplars the plan named;
+   - scope: edits outside `**Files**`, or work the task did not ask for;
+   - stubs: placeholder bodies, commented-out code, TODO/FIXME left in
+     the diff, hard-coded values that should come from config or session;
+   - errors: swallowed exceptions, missing error states the contract lists;
+   - guardian: auth, input validation, cross-tenant isolation, N+1,
+     pagination, idempotency, secrets;
+   - tests: assertions that cannot fail, mocks that replace the unit under
+     test, contract acceptance items with no assertion.
+4. Findings `{repo, sha, file:line, category, severity: must-fix|nit,
+   evidence, fix}`. A finding needs `file:line` and evidence, or it is
+   dropped. A finding that contradicts a contract → spec conflict (§ B4).
+5. `must-fix` → fix agents (`fixer` role, `devorch-builder`), one per task
+   with findings, parallel when `**Files**` are disjoint. Re-review ONLY
+   the fix commits, once; survivors and all `nit`s → verdict.
+`session.ts update --patch '{"gates":{"review":"pass|fail"}}'`.
+
+## B6 — Gate 1 (mechanical)
+
+Dispatch ONE general-purpose Task agent with the `mechanical` model (inline
+when it equals the session model). It runs the gate end to end and returns
+a report in the verdict's shape (quality gates per repo, spec coverage,
+test triage log, fixes applied, pendencies):
 
 Per repo, in parallel: `check-project.ts <worktreePath>` (full) ·
-`spec-coverage.ts --plan <sessionDir>/plan.md --worktree <worktreePath>` ·
-residual grep `TODO|FIXME|HACK|XXX` on `git diff --name-only <originalBranch>...HEAD`.
+`spec-coverage.ts --plan <sessionDir>/plan.md --worktree <worktreePath>`.
 
-Apply fixes autonomously (no questions):
-- `missingImpl` / `missingTest` → one builder each (builder model) with the
-  spec excerpt.
-- lint/type fixes + residual items → single trivial-batch builder (fixer
-  model). Build failures → one builder per failing module.
+Apply fixes autonomously (no questions), committing in the worktree:
+- `missingImpl` / `missingTest` → implement with the spec excerpt.
+- lint/type fixes → one batch. Build failures → per failing module.
 - Failing tests → triage per test: (A) test file in diff → plan intent
   decides update-test vs fix-impl; (B) test imports overlap diff → real
   regression unless decisions.md names the contract change; (C) no overlap
   → re-run once for flake, else pre-existing pendency (do not auto-fix).
   Log every call: `Test triage: <name> — <decision> — <reason>`.
-Overlapping fixes sequence; after fixes, re-run check-project (one retry;
-second failure → verdict pendency, do not loop).
+- A fix that would contradict a contract → do not apply; return it as a
+  spec conflict.
+After fixes, re-run check-project (one retry; second failure → verdict
+pendency, do not loop).
 `session.ts update --patch '{"gates":{"mechanical":"pass|fail"}}'`.
 
-## B6 — Gate 2 (visual)
+## B7 — Gate 2 (visual) + acceptance criteria
+
+### Acceptance criteria (always, `visual` role, after the visual pass)
+
+For every contract in spec.md, walk its acceptance checklist and mark each
+item with evidence: a test that asserts it (test name + `file:line`, and
+it passed in Gate 1), or a screenshot from the visual pass below. An item
+with no evidence → write the missing test via a `fixer` agent when
+testable, else verdict pendency. Result: `X/Y critérios com evidência`.
+For `cli`/`api` platforms this is the whole gate.
+
+### Visual
 
 Skip entirely when `platform` is `cli` or `api`, or no repo has a `run`
 command (validation is then tests + acceptance criteria; say so in the
@@ -386,7 +505,7 @@ verdict). Otherwise:
    - Against the contract's acceptance checklist otherwise.
    - Always: rendering breakage, console errors (read console logs),
      dead buttons in the flow, layout overflow at each viewport.
-4. Findings → fix builders (builder model; trivial CSS batches → fixer),
+4. Findings → fix agents (`fixer` role, `devorch-builder`),
    then re-run the affected screens. **Max 2 fix cycles**; survivors →
    verdict pendencies with the screenshot path attached.
 5. Copy the passing set to `sessionDir/screenshots/final/` — evidence for
@@ -394,7 +513,7 @@ verdict). Otherwise:
    screens. Stop the background apps.
 `session.ts update --patch '{"gates":{"visual":"pass|fail|skipped"}}'`.
 
-## B7 — Verdict
+## B8 — Verdict
 
 ```
 ## Verificação Final: <name>
@@ -404,6 +523,15 @@ Lint / Typecheck / Build / Tests: <status por repo>
 
 ### Spec coverage
 <X/Y contratos com impl + teste; missingImpl/missingTest ou "nenhum">
+
+### Revisão de qualidade
+<N commits revisados; must-fix corrigidos: N; nits: lista curta com file:line, ou "nenhum">
+
+### Critérios de aceite
+<X/Y critérios com evidência; itens sem evidência com o motivo>
+
+### Exploração
+<rodadas de recon: N; lacunas que ficaram abertas, ou "nenhuma">
 
 ### Gate visual
 <N telas × M viewports verificadas; correções aplicadas; screenshots em sessionDir/screenshots/final/ (ou "pulado — cli/api")>
@@ -422,7 +550,7 @@ Lint / Typecheck / Build / Tests: <status por repo>
 
 - PASS (com ou sem pendências) → `session.ts update --patch '{"stage":"awaiting-merge"}'`,
   then ONE AskUserQuestion: "Mergear agora? (Recomendado)" → run MODE merge
-  inline for this session / "Depois" → report `/devorch merge <name>`.
+  for this session (per its `merge` role rule) / "Depois" → report `/devorch merge <name>`.
   With `--headless`: on PASS set stage `awaiting-merge`, skip the
   AskUserQuestion, and report `/devorch merge <name>`.
 - BLOCKED-ON-SPEC → stage `blocked-on-spec`. The user answers the conflict
@@ -438,6 +566,16 @@ Then gotcha capture (§ shared) and flow-friction capture (§ shared).
 ---
 
 # MODE: merge
+
+**Model**: M0 and every AskUserQuestion stay with the orchestrator. M1–M5
+run on the `merge` role: when it differs from the session model, dispatch
+ONE general-purpose Task agent with that model and this section as its
+instructions, plus the session name and dir. The agent cannot ask the
+user: on a truly contradictory conflict it stops with the conflict (both
+sides' intent + recommendation) and the exact state (which repos merged,
+resume command). The orchestrator asks, then continues the same agent via
+SendMessage with the answer. When `merge` equals the session model, run
+inline.
 
 ## M0 — Pick session
 
@@ -467,7 +605,7 @@ For each repo in order:
 - `ok:true, phase:"dry-run"` → next repo.
 - `phase:"rebase"` conflicts → resolve per § Conflict resolution, then
   re-run the dry-run for that repo.
-- `phase:"sanity-check"` → surface, fix via a fixer builder in the
+- `phase:"sanity-check"` → surface, fix via a `fixer` agent in the
   worktree, re-run.
 - `phase:"merge"` conflicts on dry-run → resolve in a scratch sense: note
   the files, resolve them during the real pass (the script aborted cleanly).
@@ -535,13 +673,14 @@ worktree cleanup. Zero items → write nothing, say nothing.
   a contract. Reality contradicts the spec → blocked-on-spec, question in
   the verdict, amendment in decisions.md, resume. Silence-divergence is the
   one forbidden move.
-- **Explore claim re-verification**: deterministic claims from Explore
-  ("zero importers", "no usages") MUST be re-verified by your own grep
-  before they justify a decision. Explore is a hypothesis generator; grep
-  is the oracle.
+- **Explore claim re-verification**: deterministic claims from Explore or
+  grok recon ("zero importers", "no usages") MUST be re-verified by grep
+  before they justify a decision (in build, the `explore-review` agent does
+  it). Recon is a hypothesis generator; grep is the oracle.
 - The orchestrator reads `.devorch/*`, session files, and agent output; it
   does not read source files directly except trivial fixes, the
-  implicit-touch sweep, and conflict resolution.
+  implicit-touch sweep, grok diff checks, the quality review (B5), and
+  conflict resolution.
 - Update session.json at every stage transition and every scheduler
   iteration (phases/gates) — it is the status feed for `/devorch merge`,
   `--resume`, and the future dashboard.

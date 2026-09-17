@@ -107,11 +107,16 @@ a path the user already declined. Builders receive decisions verbatim.
     { "name": "checkout", "screens": ["cart", "payment", "confirmation"] }
   ],
   "models": {
-    "builder": "opus",
-    "fixer": "sonnet",
+    "idea-explore": "opus",
     "prototype": "opus",
-    "explore": "inherit",
-    "visual": "inherit"
+    "build-explore": "grok",
+    "explore-review": "opus",
+    "builder": "grok",
+    "review": "inherit",
+    "mechanical": "opus",
+    "fixer": "opus",
+    "visual": "inherit",
+    "merge": "opus"
   }
 }
 ```
